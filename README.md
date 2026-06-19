@@ -107,3 +107,7 @@ It is designed for cases where:
 - nonlinear input protocol
 - cognitive event stream
 - whiteboard-native AI collaboration
+
+## License
+
+Apache-2.0
