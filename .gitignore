@@ -1,0 +1,9 @@
+# Keep the public seed intentionally small.
+
+.DS_Store
+Thumbs.db
+
+# Local experiments
+*.log
+*.tmp
+*.bak
