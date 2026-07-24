@@ -1,15 +1,15 @@
 {
   "name": "canvas-prompt",
-  "version": "0.1.0+codex.20260724054644",
-  "description": "A local Excalidraw thinking canvas for Codex that captures voice, spatial context, and process evidence as Prompt Packages.",
+  "version": "0.1.0+codex.20260724064443",
+  "description": "A local thinking canvas for Codex: draw, circle, move, and export the context behind your prompt.",
   "author": {
     "name": "Canvas Prompt"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Canvas Prompt",
-    "shortDescription": "Capture a thinking process as an auditable Prompt Package.",
-    "longDescription": "Canvas Prompt opens a local Excalidraw canvas in Codex. It records the human input layer\u2014canvas actions, voice, and time\u2014then exports a Prompt Package that downstream AI can inspect with its evidence intact. It deliberately does not claim in-canvas AI generation or automated teaching as a current capability.",
+    "shortDescription": "Draw, circle, move, and export the context behind your prompt.",
+    "longDescription": "Canvas Prompt is a local canvas for the work that happens before a clean chat prompt exists. Draw, circle, move, and explain; export the round as project-local context that Codex can read.",
     "developerName": "Canvas Prompt",
     "category": "Productivity",
     "capabilities": [
@@ -19,9 +19,13 @@
       "Project-local package persistence",
       "MCP package inspection"
     ],
+    "brandColor": "#C8462B",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "logoDark": "./assets/logo-dark.png",
     "defaultPrompt": [
       "Open the Canvas Prompt thinking canvas for this project.",
-      "Export this Canvas Prompt session as an auditable Prompt Package.",
+      "Export this Canvas Prompt session as a Prompt Package.",
       "Read the latest Canvas Prompt Package for this project."
     ]
   },
