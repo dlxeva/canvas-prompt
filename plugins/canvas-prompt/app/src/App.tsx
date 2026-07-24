@@ -597,11 +597,7 @@ export default function App() {
       <header className="spike-header">
         <div className="brand-lockup">
           <img className="brand-mark" src="/favicon.svg" alt="" aria-hidden="true" />
-          <div>
-            <p className="eyebrow">canvas_prompt<span>_</span></p>
-            <h1>让 AI 看懂你的推演过程</h1>
-            <p className="subtitle">画、圈、移动、说；结束后把这一轮保存为 Codex 可读取的上下文。</p>
-          </div>
+          <p className="eyebrow">canvas_prompt<span>_</span></p>
         </div>
         <div className="header-actions">
           <button className="button image-import" type="button" disabled={imageImporting} onClick={() => imageInputRef.current?.click()}>

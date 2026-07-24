@@ -95,10 +95,10 @@ h1 { margin: 0; font-size: 19px; letter-spacing: -.025em; }
 /* Shared visual language with canvasprompt.dev: paper, ink, and a restrained red cursor. */
 :root { color: #171512; background: #f6f1e7; }
 .spike-shell { background: #f6f1e7; }
-.spike-header { gap: 24px; padding: 14px 24px; background: rgba(246,241,231,.96); border-bottom-color: #d9d0be; }
+.spike-header { gap: 24px; min-height: 58px; padding: 10px 24px; background: rgba(246,241,231,.96); border-bottom-color: #d9d0be; }
 .brand-lockup { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.brand-mark { width: 30px; height: 30px; flex: 0 0 auto; }
-.eyebrow { margin-bottom: 2px; color: #171512; font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; font-weight: 500; letter-spacing: -.045em; text-transform: lowercase; }
+.brand-mark { width: 27px; height: 27px; flex: 0 0 auto; }
+.eyebrow { margin: 0; color: #171512; font-family: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 500; letter-spacing: -.045em; text-transform: lowercase; }
 .eyebrow span { color: #c8462b; }
 h1 { font-size: 18px; font-weight: 720; letter-spacing: -.035em; }
 .subtitle { margin-top: 3px; color: #736d62; font-size: 12px; }
@@ -150,4 +150,4 @@ h1 { font-size: 18px; font-weight: 720; letter-spacing: -.035em; }
 .round-local { color: #736d62 !important; background: #f1eadc; }
 .storage-item-actions button { color: #9d3020; background: #fff0ec; border-radius: 3px; }
 .storage-item-actions button:hover { background: #f9d9ce; }
-@media (max-width: 900px) { .spike-header { padding: 13px 16px; } .brand-lockup { align-items: flex-start; } .header-actions { width: 100%; } }
+@media (max-width: 900px) { .spike-header { padding: 10px 16px; } .header-actions { width: 100%; } }
