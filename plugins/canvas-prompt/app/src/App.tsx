@@ -70,10 +70,10 @@ function ToolIcon({ tool }: { tool: CanvasTool }) {
   return <svg className="tool-icon" viewBox="0 0 24 24" aria-hidden="true">{content}</svg>
 }
 
-function HeaderIcon({ kind }: { kind: 'image' | 'record' | 'stop' | 'send' | 'next' }) {
+function HeaderIcon({ kind }: { kind: 'upload' | 'record' | 'stop' | 'send' | 'next' }) {
   const shared = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
   const content = {
-    image: <><rect {...shared} x="3.5" y="4.5" width="17" height="15" rx="1.8" /><circle {...shared} cx="8" cy="9" r="1.5" /><path {...shared} d="m5.5 17 4.2-4.2 3.1 3.1 2.1-2.1 3.5 3.4" /></>,
+    upload: <><path {...shared} d="M5 15.5v3h14v-3" /><path {...shared} d="m12 4 4 4" /><path {...shared} d="m12 4-4 4" /><path {...shared} d="M12 4v10" /></>,
     record: <circle cx="12" cy="12" r="4.3" fill="currentColor" />,
     stop: <rect x="7.2" y="7.2" width="9.6" height="9.6" rx="1.2" fill="currentColor" />,
     send: <><path {...shared} d="M4 12h14" /><path {...shared} d="m13 5 7 7-7 7" /></>,
@@ -689,13 +689,6 @@ export default function App() {
           <p className="eyebrow">canvas_prompt<span>_</span></p>
         </div>
         <div className="header-actions">
-          <button className="button icon-button image-import" type="button" disabled={imageImporting} onClick={() => imageInputRef.current?.click()} aria-label={imageImporting ? text.importing : text.importImage} title={imageImporting ? text.importing : text.importImage}>
-            <HeaderIcon kind="image" />
-          </button>
-          <div className="more-menu">
-            <button className="button icon-button more-button" type="button" onClick={() => setMoreOpen((open) => !open)} aria-expanded={moreOpen} aria-label={text.more} title={text.more}>•••</button>
-            {moreOpen && <div className="more-popover"><button type="button" onClick={() => void openStorage()}>{text.archive}</button></div>}
-          </div>
           {recording ? <span className="recording-state" aria-live="polite"><i />{text.recording} {elapsed}</span> : null}
           {recording ? (
             <button className="button icon-button stop" onClick={() => void finishTrace()} aria-label={text.finish} title={text.finish}><HeaderIcon kind="stop" /></button>
@@ -711,6 +704,13 @@ export default function App() {
           ) : (
             <button className="button icon-button primary" onClick={() => void beginTrace()} disabled={sessionStage === 'starting'} aria-label={sessionStage === 'starting' ? text.preparing : text.start} title={sessionStage === 'starting' ? text.preparing : text.start}><HeaderIcon kind="record" /></button>
           )}
+          <button className="button icon-button image-import" type="button" disabled={imageImporting} onClick={() => imageInputRef.current?.click()} aria-label={imageImporting ? text.importing : text.importImage} title={imageImporting ? text.importing : text.importImage}>
+            <HeaderIcon kind="upload" />
+          </button>
+          <div className="more-menu">
+            <button className="button icon-button more-button" type="button" onClick={() => setMoreOpen((open) => !open)} aria-expanded={moreOpen} aria-label={text.more} title={text.more}>•••</button>
+            {moreOpen && <div className="more-popover"><button type="button" onClick={() => void openStorage()}>{text.archive}</button></div>}
+          </div>
           <button className="language-toggle" type="button" onClick={() => setLocale((current) => current === 'zh' ? 'en' : 'zh')} aria-label={locale === 'zh' ? 'Switch to English' : '切换至中文'}>
             <span className={locale === 'zh' ? 'active' : ''}>中</span><span className={locale === 'en' ? 'active' : ''}>EN</span>
           </button>
