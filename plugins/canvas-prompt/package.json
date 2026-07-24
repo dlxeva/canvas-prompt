@@ -1,0 +1,11 @@
+{
+  "name": "canvas-prompt",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm --prefix app run dev",
+    "build": "npm --prefix app run build",
+    "test": "npm --prefix app run test"
+  }
+}

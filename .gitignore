@@ -7,3 +7,12 @@ Thumbs.db
 *.log
 *.tmp
 *.bak
+__pycache__/
+*.py[cod]
+
+# Never publish dependency trees, generated bundles, or real session data.
+node_modules/
+dist/
+.canvas-prompt/
+plugins/canvas-prompt/app/node_modules/
+plugins/canvas-prompt/app/dist/

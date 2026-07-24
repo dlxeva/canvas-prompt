@@ -1,0 +1,29 @@
+{
+  "name": "canvas-prompt",
+  "version": "0.1.0+codex.20260724054644",
+  "description": "A local Excalidraw thinking canvas for Codex that captures voice, spatial context, and process evidence as Prompt Packages.",
+  "author": {
+    "name": "Canvas Prompt"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Canvas Prompt",
+    "shortDescription": "Capture a thinking process as an auditable Prompt Package.",
+    "longDescription": "Canvas Prompt opens a local Excalidraw canvas in Codex. It records the human input layer\u2014canvas actions, voice, and time\u2014then exports a Prompt Package that downstream AI can inspect with its evidence intact. It deliberately does not claim in-canvas AI generation or automated teaching as a current capability.",
+    "developerName": "Canvas Prompt",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive canvas",
+      "Voice and timeline capture",
+      "Prompt Package export",
+      "Project-local package persistence",
+      "MCP package inspection"
+    ],
+    "defaultPrompt": [
+      "Open the Canvas Prompt thinking canvas for this project.",
+      "Export this Canvas Prompt session as an auditable Prompt Package.",
+      "Read the latest Canvas Prompt Package for this project."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

@@ -1,130 +1,95 @@
 # Canvas Prompt
 
-Canvas Prompt is an open, high-bandwidth input protocol for thinking with AI before goals are fully formed.
+**Put unfinished thinking on the canvas.**
 
-## The Problem
+Canvas Prompt is a local canvas for the work that happens before a clean chat prompt exists. Draw, circle, move, and explain; it keeps the canvas, the spoken explanation, and the changes made along the way together as context that Codex can pick up.
 
-Most AI interfaces assume you already know what you want.
+It is designed for two everyday moments:
 
-They work well once a task can be written as:
+- **Work through an open question** — sketch branches, revise structure, and explain the thought while it is still forming.
+- **Review visual work** — place an image on the canvas, circle an area, and say what should change without first translating the location into a long written description.
 
-- a prompt
-- a PRD
-- an issue
-- a structured request
+## What happens in one round
 
-But many important tasks start earlier than that.
+1. Open Canvas Prompt from Codex.
+2. Draw, circle, move, and optionally speak.
+3. Finish and export the round.
+4. Canvas Prompt saves a local Prompt Package under the active project's `.canvas-prompt/` folder.
+5. Ask Codex to read the latest Canvas Prompt Package and continue from that context.
 
-Before the goal is fully formed, people think in fragments:
+Each exported round can include a canvas snapshot, timestamped canvas actions, optional local speech transcription, the original recording, Process IR, and a Compact Package. The bundled MCP server can read the latest package for the active project.
 
-- sketches
-- arrows
-- spatial grouping
-- revisions
-- spoken clarifications
-- partial structures
+## Install
 
-That stage is still poorly supported by today's AI interfaces.
+```bash
+codex plugin marketplace add https://github.com/dlxeva/canvas-prompt
+codex plugin install canvas-prompt@canvas-prompt
+```
 
-## The Claim
+Then ask Codex: **Open Canvas Prompt for this project.**
 
-Canvas Prompt is based on a simple claim:
+## Local development
 
-**the evidence produced while you think should be available as part of the input.**
+```bash
+cd plugins/canvas-prompt
+npm test
+npm run build
+./scripts/start-canvas.sh /absolute/path/to/active-project
+```
 
-Instead of forcing early-stage thinking into a linear chat box, we treat:
+The canvas runs at `http://127.0.0.1:43223/`. Exported rounds stay in the active project; the plugin remains reusable across projects.
 
-- canvas state
-- drawing order
-- grouping
-- spatial hierarchy
-- voice
-- revision history
+## Privacy and license
 
-as a richer, auditable input layer for AI collaboration.
+Canvas Prompt is local-first. A round may contain a recording, transcript, canvas snapshot, and derived context files. Do not commit real session data. Read the [privacy guide](./plugins/canvas-prompt/PRIVACY.md) before recording.
 
-## Current Direction
+Canvas Prompt-owned code is licensed under [AGPL-3.0-or-later](./LICENSE). Third-party components retain their own licenses; see [third-party notices](./plugins/canvas-prompt/THIRD_PARTY_NOTICES.md).
 
-This project is exploring three layers:
+---
 
-1. `Final canvas understanding`
-   AI reads the final whiteboard as a structured thinking artifact.
+# Canvas Prompt 中文说明
 
-2. `Event timeline as evidence`
-   The protocol preserves what changed and when. It does not by itself prove the identity or meaning of an anonymous stroke.
+**把还没想清楚的事，放到画布上说。**
 
-3. `Voice + timeline + canvas alignment`
-   Spoken explanations and canvas changes can support traceable, text-level process conclusions such as revision, convergence, or a stated next step.
+Canvas Prompt 是给“提示词之前那段工作”准备的本地画布。你可以画、圈、移动、说；它把画布、口头说明和过程中的修改保留在一起，成为 Codex 可以继续接住的上下文。
 
-## Current Status
+它适合两类日常工作：
 
-This is an active research and prototype project.
+- **推演一个尚未成形的问题**：把分支、修改和解释留在思考发生的地方。
+- **批阅视觉作品**：把图片放到画布上，圈出位置，直接说你希望怎么改，不必先把位置翻译成一段冗长文字。
 
-What already exists:
+## 一轮如何完成
 
-- a web MVP
-- Prompt Package export
-- whiteboard event capture
-- final canvas snapshot export
-- voice capture diagnostics
-- early multimodal interpretation experiments
+1. 从 Codex 打开 Canvas Prompt。
+2. 画、圈、移动；需要时直接说出来。
+3. 结束并导出本轮。
+4. Canvas Prompt 将本轮 Prompt Package 保存到当前项目的 `.canvas-prompt/` 文件夹。
+5. 让 Codex 读取最新的 Canvas Prompt Package，并从这段上下文继续。
 
-What is still being validated:
+每一轮可以包含画布快照、带时间戳的画布动作、可选的本地语音转写、原始录音、Process IR 与 Compact Package。随插件提供的 MCP 可以读取当前项目最新的一轮。
 
-- robust speech-to-text quality
-- stable multimodal alignment
-- whether process evidence improves understanding on held-out, human-gold-labelled examples
-- reliable named-object association before making object-level state claims
+## 安装
 
-## Evidence Boundary
+```bash
+codex plugin marketplace add https://github.com/dlxeva/canvas-prompt
+codex plugin install canvas-prompt@canvas-prompt
+```
 
-Canvas Prompt distinguishes three kinds of output:
+安装后对 Codex 说：**为这个项目打开 Canvas Prompt。**
 
-1. **Raw evidence** — canvas snapshots, event records, and optional voice references.
-2. **Text-level process evidence** — a stated revision, convergence, or next step, linked back to source evidence.
-3. **Object-level claims** — for example, that a specific object was promoted, rejected, or superseded. These require a named object or another auditable association; time proximity alone is not enough.
+## 本地开发
 
-This repository publishes the protocol and examples, not a claim that every drawing action can reveal a person's intent.
+```bash
+cd plugins/canvas-prompt
+npm test
+npm run build
+./scripts/start-canvas.sh /绝对路径/你的项目
+```
 
-## Privacy and Examples
+画布默认运行在 `http://127.0.0.1:43223/`。每轮导出只写入当前项目，插件本身可复用于其他项目。
 
-Public examples must be synthetic or explicitly consented and de-identified. Do not publish raw recordings, transcripts, screenshots, or whiteboards from real sessions without clear permission.
+## 隐私与许可
 
-## Why This Matters
+Canvas Prompt 采用本地优先的方式工作。一轮内容可能包含录音、转写、画布快照和派生产物；不要提交真实会话数据。开始录音前请阅读[隐私说明](./plugins/canvas-prompt/PRIVACY.md)。
 
-If this works, AI no longer waits only for finished prompts.
-
-It can collaborate earlier, while ideas are still forming.
-
-That opens a path toward:
-
-- better strategic thinking support
-- better creative collaboration
-- better knowledge externalization
-- higher-bandwidth human-AI co-thinking
-
-## Scope
-
-Canvas Prompt is **not** trying to replace all chat interfaces.
-
-It is designed for cases where:
-
-- the thinking is complex
-- the structure matters
-- the process matters
-- linear text is too lossy
-
-## Early Keywords
-
-- high-bandwidth AI input
-- pre-goal collaboration
-- Prompt Package
-- nonlinear input protocol
-- cognitive event stream
-- whiteboard-native AI collaboration
-
-## License
-
-This repository is licensed under **GNU AGPL-3.0-or-later**. It is intended to keep public modifications to the protocol implementation and any network-deployed derivative available to the community under the same license.
-
-The license applies to the contents of this repository; it does not publish private recordings, evaluation data, or other materials that are not included here.
+Canvas Prompt 自有代码采用 [AGPL-3.0-or-later](./LICENSE)；第三方组件保留各自许可证，见[第三方声明](./plugins/canvas-prompt/THIRD_PARTY_NOTICES.md)。

@@ -1,0 +1,33 @@
+[
+  {
+    "observation_id": "ocr_001",
+    "text": "底层很重要",
+    "confidence": 1,
+    "polygon": [
+      { "x": 93, "y": 66 },
+      { "x": 508, "y": 63 },
+      { "x": 508, "y": 155 },
+      { "x": 93, "y": 158 }
+    ],
+    "bounding_box": { "x": 93, "y": 63, "width": 415, "height": 95 },
+    "source": "paddleocr-js",
+    "model": "PP-OCRv5",
+    "assertion_level": "observation"
+  },
+  {
+    "observation_id": "ocr_002",
+    "text": "向上推演",
+    "confidence": 1,
+    "polygon": [
+      { "x": 94, "y": 207 },
+      { "x": 356, "y": 204 },
+      { "x": 356, "y": 276 },
+      { "x": 94, "y": 278 }
+    ],
+    "bounding_box": { "x": 94, "y": 204, "width": 262, "height": 74 },
+    "source": "paddleocr-js",
+    "model": "PP-OCRv5",
+    "assertion_level": "observation"
+  }
+]
+
