@@ -494,18 +494,58 @@ export default function App() {
     void importImageFile(file)
   }
 
+  const importDroppedImageSource = async (source: string) => {
+    try {
+      if (!/^data:image\//i.test(source) && !/^(https?:|blob:)/i.test(source)) {
+        throw new Error('拖拽内容不是可读取的图片')
+      }
+      const response = await fetch(source)
+      if (!response.ok) throw new Error('无法读取聊天中的图片数据')
+      const blob = await response.blob()
+      const mimeType = blob.type || (/^data:image\/([^;,]+)/i.exec(source)?.[1] ? `image/${/^data:image\/([^;,]+)/i.exec(source)?.[1]}` : '')
+      if (!mimeType.startsWith('image/')) throw new Error('拖拽内容不是图片')
+      const extension = mimeType.split('/')[1]?.replace('svg+xml', 'svg') || 'png'
+      await importImageFile(new File([blob], `聊天图片.${extension}`, { type: mimeType }))
+    } catch (error) {
+      setImageNotice(`无法直接读取聊天图片：${error instanceof Error ? error.message : '请使用“导入图片”'}`)
+    }
+  }
+
+  const droppedImageSource = (transfer: DataTransfer) => {
+    const uri = transfer.getData('text/uri-list').split('\n').map((line) => line.trim()).find((line) => line && !line.startsWith('#'))
+    if (uri) return uri
+    const html = transfer.getData('text/html')
+    const imageSource = /<img[^>]+src=["']([^"']+)["']/i.exec(html)?.[1]
+    if (imageSource) return imageSource
+    const plain = transfer.getData('text/plain').trim()
+    return /^(data:image\/|https?:|blob:)/i.test(plain) ? plain : null
+  }
+
+  const canDropImage = (transfer: DataTransfer) => {
+    const types = Array.from(transfer.types)
+    return types.includes('Files') || types.includes('text/uri-list') || types.includes('text/html') || types.includes('text/plain')
+  }
+
   const handleExternalDragOver = (event: React.DragEvent<HTMLElement>) => {
-    if (!Array.from(event.dataTransfer.types).includes('Files')) return
+    if (!canDropImage(event.dataTransfer)) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
     setImageDropActive(true)
   }
 
   const handleExternalDrop = (event: React.DragEvent<HTMLElement>) => {
-    if (!Array.from(event.dataTransfer.types).includes('Files')) return
+    if (!canDropImage(event.dataTransfer)) return
     event.preventDefault()
     setImageDropActive(false)
-    void importImageFile(event.dataTransfer.files[0])
+    const file = event.dataTransfer.files[0]
+    const source = file ? null : droppedImageSource(event.dataTransfer)
+    if (file) {
+      void importImageFile(file)
+    } else if (source) {
+      void importDroppedImageSource(source)
+    } else {
+      setImageNotice('没有读到可导入的图片数据；请用“导入图片”选择文件。')
+    }
   }
 
   const changeZoom = (factor: number) => {
