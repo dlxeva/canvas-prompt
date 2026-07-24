@@ -496,7 +496,7 @@ export default function App() {
 
   const importDroppedImageSource = async (source: string) => {
     try {
-      if (!/^data:image\//i.test(source) && !/^(https?:|blob:)/i.test(source)) {
+      if (!/^data:image\//i.test(source) && !/^(https?:|blob:|app:|attachment:)/i.test(source)) {
         throw new Error('拖拽内容不是可读取的图片')
       }
       const response = await fetch(source)
@@ -514,27 +514,30 @@ export default function App() {
   const droppedImageSource = (transfer: DataTransfer) => {
     const uri = transfer.getData('text/uri-list').split('\n').map((line) => line.trim()).find((line) => line && !line.startsWith('#'))
     if (uri) return uri
+    const downloadUrl = transfer.getData('DownloadURL')
+    const downloadedImage = /^image\/[^:]+:[^:]*:(.+)$/i.exec(downloadUrl)?.[1]
+    if (downloadedImage) return downloadedImage
+    const mozUrl = transfer.getData('text/x-moz-url').split('\n')[0]?.trim()
+    if (mozUrl) return mozUrl
     const html = transfer.getData('text/html')
     const imageSource = /<img[^>]+src=["']([^"']+)["']/i.exec(html)?.[1]
     if (imageSource) return imageSource
     const plain = transfer.getData('text/plain').trim()
-    return /^(data:image\/|https?:|blob:)/i.test(plain) ? plain : null
-  }
-
-  const canDropImage = (transfer: DataTransfer) => {
-    const types = Array.from(transfer.types)
-    return types.includes('Files') || types.includes('text/uri-list') || types.includes('text/html') || types.includes('text/plain')
+    if (/^(data:image\/|https?:|blob:|app:|attachment:)/i.test(plain)) return plain
+    for (const type of Array.from(transfer.types)) {
+      const value = transfer.getData(type).trim()
+      if (/^(data:image\/|https?:|blob:|app:|attachment:)/i.test(value)) return value
+    }
+    return null
   }
 
   const handleExternalDragOver = (event: React.DragEvent<HTMLElement>) => {
-    if (!canDropImage(event.dataTransfer)) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
     setImageDropActive(true)
   }
 
   const handleExternalDrop = (event: React.DragEvent<HTMLElement>) => {
-    if (!canDropImage(event.dataTransfer)) return
     event.preventDefault()
     setImageDropActive(false)
     const file = event.dataTransfer.files[0]
@@ -544,7 +547,8 @@ export default function App() {
     } else if (source) {
       void importDroppedImageSource(source)
     } else {
-      setImageNotice('没有读到可导入的图片数据；请用“导入图片”选择文件。')
+      const types = Array.from(event.dataTransfer.types).join('、') || '无可读拖拽类型'
+      setImageNotice(`Codex 没有交付可读取的图片数据（${types}）。请改用“导入图片”。`)
     }
   }
 
@@ -679,9 +683,9 @@ export default function App() {
       <section
         className={imageDropActive ? 'canvas-wrap spike-canvas drop-active' : 'canvas-wrap spike-canvas'}
         onPointerMove={capturePointer}
-        onDragOver={handleExternalDragOver}
+        onDragOverCapture={handleExternalDragOver}
         onDragLeave={() => setImageDropActive(false)}
-        onDrop={handleExternalDrop}
+        onDropCapture={handleExternalDrop}
       >
         <nav
           className={toolsCollapsed ? 'canvas-tools collapsed' : 'canvas-tools'}
