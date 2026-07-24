@@ -597,6 +597,15 @@ export default function App() {
     }
   }
 
+  const handleExternalPaste = (event: React.ClipboardEvent<HTMLElement>) => {
+    const file = Array.from(event.clipboardData.files).find((candidate) => candidate.type.startsWith('image/'))
+    const source = file ? null : droppedImageSource(event.clipboardData)
+    if (!file && !source) return
+    event.preventDefault()
+    if (file) void importImageFile(file)
+    else if (source) void importDroppedImageSource(source)
+  }
+
   const changeZoom = (factor: number) => {
     const canvasApi = apiRef.current ?? api
     if (!canvasApi) return
@@ -734,6 +743,7 @@ export default function App() {
         onDragOverCapture={handleExternalDragOver}
         onDragLeave={() => setImageDropActive(false)}
         onDropCapture={handleExternalDrop}
+        onPasteCapture={handleExternalPaste}
       >
         <nav
           className={toolsCollapsed ? 'canvas-tools collapsed' : 'canvas-tools'}
