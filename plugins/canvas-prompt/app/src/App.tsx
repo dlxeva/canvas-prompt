@@ -680,9 +680,6 @@ export default function App() {
           <button className="button image-import" type="button" disabled={imageImporting} onClick={() => imageInputRef.current?.click()}>
             {imageImporting ? text.importing : text.importImage}
           </button>
-          <button className="language-toggle" type="button" onClick={() => setLocale((current) => current === 'zh' ? 'en' : 'zh')} aria-label={locale === 'zh' ? 'Switch to English' : '切换至中文'}>
-            <span className={locale === 'zh' ? 'active' : ''}>中</span><span className={locale === 'en' ? 'active' : ''}>EN</span>
-          </button>
           <div className="more-menu">
             <button className="button more-button" type="button" onClick={() => setMoreOpen((open) => !open)} aria-expanded={moreOpen} aria-label={text.more}>•••</button>
             {moreOpen && <div className="more-popover"><button type="button" onClick={() => void openStorage()}>{text.archive}</button></div>}
@@ -702,6 +699,9 @@ export default function App() {
           ) : (
             <button className="button primary" onClick={() => void beginTrace()} disabled={sessionStage === 'starting'}>{sessionStage === 'starting' ? text.preparing : text.start}</button>
           )}
+          <button className="language-toggle" type="button" onClick={() => setLocale((current) => current === 'zh' ? 'en' : 'zh')} aria-label={locale === 'zh' ? 'Switch to English' : '切换至中文'}>
+            <span className={locale === 'zh' ? 'active' : ''}>中</span><span className={locale === 'en' ? 'active' : ''}>EN</span>
+          </button>
         </div>
       </header>
 
@@ -799,6 +799,7 @@ export default function App() {
         </nav>
         <Excalidraw
           excalidrawAPI={bindCanvasApi}
+          langCode={locale === 'zh' ? 'zh-CN' : 'en'}
           onChange={handleChange}
           initialData={{ appState: { currentItemStrokeColor: strokeColors[0], currentItemStrokeWidth: 1 } }}
           UIOptions={{
