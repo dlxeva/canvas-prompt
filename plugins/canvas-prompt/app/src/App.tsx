@@ -16,16 +16,42 @@ import type { CanvasObject, PromptPackage } from './prompt-package-compiler'
 
 type CanvasTool = 'selection' | 'freedraw' | 'line' | 'arrow' | 'rectangle' | 'ellipse' | 'eraser'
 type HistoryAction = 'undo' | 'redo'
+type Locale = 'zh' | 'en'
 
-const tools: Array<{ id: CanvasTool; label: string; hint: string }> = [
-  { id: 'selection', label: '选择', hint: '移动、缩放、框选' },
-  { id: 'freedraw', label: '画笔', hint: '自由手绘' },
-  { id: 'line', label: '直线', hint: '直线输入' },
-  { id: 'arrow', label: '箭头', hint: '快速连接两个对象' },
-  { id: 'rectangle', label: '矩形', hint: '矩形或方形' },
-  { id: 'ellipse', label: '圆形', hint: '椭圆；按 Shift 画正圆' },
-  { id: 'eraser', label: '擦除', hint: '删除笔迹或对象' },
+const tools: Array<{ id: CanvasTool; zh: string; en: string }> = [
+  { id: 'selection', zh: '选择', en: 'Select' },
+  { id: 'freedraw', zh: '画笔', en: 'Draw' },
+  { id: 'line', zh: '直线', en: 'Line' },
+  { id: 'arrow', zh: '箭头', en: 'Arrow' },
+  { id: 'rectangle', zh: '矩形', en: 'Rectangle' },
+  { id: 'ellipse', zh: '圆形', en: 'Ellipse' },
+  { id: 'eraser', zh: '擦除', en: 'Erase' },
 ]
+
+const ui = {
+  zh: { importImage: '导入图片', importing: '正在导入…', more: '更多功能', archive: '本地档案', recording: '录音中', finish: '结束推演', processing: '处理中', export: '导出本轮', retryExport: '重新导出本轮', sending: '正在导出…', saved: '✓ 本轮已保存', next: '开始下一轮', start: '开始推演', preparing: '准备中…', canvasTools: '画布工具', expandTools: '展开画布工具', collapseTools: '收起画布工具', undo: '撤销（⌘Z）', redo: '重做（⇧⌘Z）', zoomOut: '缩小', zoomIn: '放大', color: '颜色', weight: '粗细', releaseToImport: '松开以导入图片', archiveDescription: '保存在本项目的', archiveDescriptionEnd: '。不自动上传云端；删除后无法恢复。', closeArchive: '关闭本地档案', loadingArchive: '正在读取本地档案…', noArchive: '还没有已归档的推演。', seconds: '秒', unknownDuration: '时长未知', snapshot: '画布快照', noSnapshot: '无快照', audio: '录音', noAudio: '无录音', delivered: '已送达', sent: '已发送', local: '仅本地', delete: '删除' },
+  en: { importImage: 'Import image', importing: 'Importing…', more: 'More', archive: 'Local archive', recording: 'Recording', finish: 'Finish session', processing: 'Processing', export: 'Export round', retryExport: 'Retry export', sending: 'Exporting…', saved: '✓ Round saved', next: 'Start next round', start: 'Start session', preparing: 'Preparing…', canvasTools: 'Canvas tools', expandTools: 'Expand tools', collapseTools: 'Collapse tools', undo: 'Undo (⌘Z)', redo: 'Redo (⇧⌘Z)', zoomOut: 'Zoom out', zoomIn: 'Zoom in', color: 'Color', weight: 'Weight', releaseToImport: 'Release to import image', archiveDescription: 'Stored locally in', archiveDescriptionEnd: '. Nothing is uploaded automatically; deleted rounds cannot be recovered.', closeArchive: 'Close local archive', loadingArchive: 'Loading local archive…', noArchive: 'No saved rounds yet.', seconds: 'sec', unknownDuration: 'duration unknown', snapshot: 'canvas snapshot', noSnapshot: 'no snapshot', audio: 'audio', noAudio: 'no audio', delivered: 'delivered', sent: 'sent', local: 'local only', delete: 'Delete' },
+} as const
+
+function visibleWorkflowMessage(message: string, locale: Locale) {
+  if (locale === 'zh') return message
+  const translated: Record<string, string> = {
+    '画下来，圈出来，需要时说出来。': 'Draw it, circle it, and speak when useful.',
+    '正在准备本次推演…': 'Preparing this session…',
+    '推演中 · 画、圈、移动，也可以直接说。语音会在后台分段整理。': 'In session · Draw, circle, move, and speak. Audio is transcribed in the background.',
+    '推演中 · 画、圈、移动，也可以直接说。': 'In session · Draw, circle, move, and speak.',
+    '推演中 · 麦克风不可用，但画布过程仍会被记录。': 'In session · Microphone unavailable; canvas activity is still recorded.',
+    '正在结束录音…': 'Finishing the recording…',
+    '正在完成最后的语音片段…': 'Finishing the last audio segment…',
+    '少量语音片段需要回退补齐…': 'A few audio segments need recovery…',
+    '正在整理画布和标记…': 'Compiling canvas marks…',
+    '正在准备本轮上下文…': 'Preparing this round’s context…',
+    '本轮内容已整理完成。导出后会作为主对话的上下文。': 'This round is ready. Export it as context for the main conversation.',
+    '本轮内容已整理完成；当前没有可用的语音转写。': 'This round is ready; no usable voice transcript is available.',
+    '正在归档并发送到当前对话…': 'Archiving and sending to the current conversation…',
+  }
+  return translated[message] ?? message
+}
 
 const strokeColors = ['#1e1e1e', '#64748b', '#2563eb', '#7c3aed', '#dc2626', '#ea580c', '#16a34a', '#0f766e']
 const strokeWidths = [1, 2, 4]
@@ -91,6 +117,8 @@ function sceneBounds(elements: readonly CanvasElement[]) {
 }
 
 export default function App() {
+  const [locale, setLocale] = useState<Locale>(() => window.localStorage.getItem('canvas-prompt-locale') === 'en' ? 'en' : 'zh')
+  const text = ui[locale]
   const [recording, setRecording] = useState(false)
   const [startedAt, setStartedAt] = useState<number | null>(null)
   const [events, setEvents] = useState<TraceEvent[]>([])
@@ -104,6 +132,7 @@ export default function App() {
   const [strokeWidth, setStrokeWidth] = useState(1)
   const [sessionStage, setSessionStage] = useState<SessionStage>('idle')
   const [workflowMessage, setWorkflowMessage] = useState('画下来，圈出来，需要时说出来。')
+  const displayWorkflow = visibleWorkflowMessage(workflowMessage, locale)
   const [asrProgress, setAsrProgress] = useState<AsrWindowProgress>({ completed: 0, pending: 0, failed: 0, active: 0 })
   const [compiledPackage, setCompiledPackage] = useState<PromptPackage | null>(null)
   const [lastRecording, setLastRecording] = useState<RecordingResult | null>(null)
@@ -133,6 +162,10 @@ export default function App() {
   const lastPointer = useRef<{ t: number; x: number; y: number } | null>(null)
   const lastPointerSampleAt = useRef(0)
   const baselineImageIds = useRef(new Set<string>())
+
+  useEffect(() => {
+    window.localStorage.setItem('canvas-prompt-locale', locale)
+  }, [locale])
 
   const bindCanvasApi = useCallback((canvasApi: ExcalidrawImperativeAPI) => {
     apiRef.current = canvasApi
@@ -645,26 +678,29 @@ export default function App() {
         </div>
         <div className="header-actions">
           <button className="button image-import" type="button" disabled={imageImporting} onClick={() => imageInputRef.current?.click()}>
-            {imageImporting ? '正在导入…' : '导入图片'}
+            {imageImporting ? text.importing : text.importImage}
+          </button>
+          <button className="language-toggle" type="button" onClick={() => setLocale((current) => current === 'zh' ? 'en' : 'zh')} aria-label={locale === 'zh' ? 'Switch to English' : '切换至中文'}>
+            <span className={locale === 'zh' ? 'active' : ''}>中</span><span className={locale === 'en' ? 'active' : ''}>EN</span>
           </button>
           <div className="more-menu">
-            <button className="button more-button" type="button" onClick={() => setMoreOpen((open) => !open)} aria-expanded={moreOpen} aria-label="更多功能">•••</button>
-            {moreOpen && <div className="more-popover"><button type="button" onClick={() => void openStorage()}>本地档案</button></div>}
+            <button className="button more-button" type="button" onClick={() => setMoreOpen((open) => !open)} aria-expanded={moreOpen} aria-label={text.more}>•••</button>
+            {moreOpen && <div className="more-popover"><button type="button" onClick={() => void openStorage()}>{text.archive}</button></div>}
           </div>
-          {recording ? <span className="recording-state" aria-live="polite"><i />录音中 {elapsed}</span> : null}
+          {recording ? <span className="recording-state" aria-live="polite"><i />{text.recording} {elapsed}</span> : null}
           {recording ? (
-            <button className="button stop" onClick={() => void finishTrace()}>结束推演</button>
+            <button className="button stop" onClick={() => void finishTrace()}>{text.finish}</button>
           ) : sessionStage === 'compiling' ? (
-            <div className="compile-progress" role="status" aria-live="polite" aria-label={workflowMessage}>
-              <div className="compile-progress-copy"><span>{workflowMessage}</span><strong>{asrProgress.completed > 0 ? `已整理 ${asrProgress.completed} 段` : '处理中'}</strong></div>
+            <div className="compile-progress" role="status" aria-live="polite" aria-label={displayWorkflow}>
+              <div className="compile-progress-copy"><span>{displayWorkflow}</span><strong>{asrProgress.completed > 0 ? `${asrProgress.completed} ${locale === 'zh' ? '段已整理' : 'segments ready'}` : text.processing}</strong></div>
               <small>{asrProgress.pending > 0 ? `${asrProgress.pending} 段正在处理` : asrProgress.failed > 0 ? `${asrProgress.failed} 段待回退处理` : '不会重跑已完成的语音片段'}</small>
             </div>
           ) : sessionStage === 'ready' && exportStatus !== 'saved' ? (
-            <button className="button primary" onClick={() => void exportPromptPackage()} disabled={exportStatus === 'exporting'}>{exportStatus === 'exporting' ? '正在导出…' : exportStatus === 'error' ? '重新导出本轮' : '导出本轮'}</button>
+            <button className="button primary" onClick={() => void exportPromptPackage()} disabled={exportStatus === 'exporting'}>{exportStatus === 'exporting' ? text.sending : exportStatus === 'error' ? text.retryExport : text.export}</button>
           ) : sessionStage === 'ready' && exportStatus === 'saved' ? (
-            <><span className="receipt-status" role="status">✓ 本轮已保存</span><button className="button primary" onClick={() => void beginTrace()}>开始下一轮</button></>
+            <><span className="receipt-status" role="status">{text.saved}</span><button className="button primary" onClick={() => void beginTrace()}>{text.next}</button></>
           ) : (
-            <button className="button primary" onClick={() => void beginTrace()} disabled={sessionStage === 'starting'}>{sessionStage === 'starting' ? '准备中…' : '开始推演'}</button>
+            <button className="button primary" onClick={() => void beginTrace()} disabled={sessionStage === 'starting'}>{sessionStage === 'starting' ? text.preparing : text.start}</button>
           )}
         </div>
       </header>
@@ -674,7 +710,7 @@ export default function App() {
 
         <section className={recording || sessionStage === 'compiling' || sessionStage === 'error' || exportStatus === 'error' ? 'guide' : 'guide guide-empty'} aria-label="当前推演状态">
           {(recording || sessionStage === 'compiling' || sessionStage === 'error' || exportStatus === 'error') && <>
-            <span>{workflowMessage}</span>
+            <span>{displayWorkflow}</span>
             <strong>{sessionStage === 'compiling' ? (asrProgress.completed > 0 ? `后台已完成 ${asrProgress.completed} 段语音整理；结束时只收尾未完成片段。` : '正在完成第一段语音整理。') : sessionStage === 'error' ? '本轮尚未发送；可重新开始。' : exportStatus === 'error' ? '原始录音已保留在本地档案；修复后可直接重新发送。' : asrProgress.completed > 0 ? `后台已整理 ${asrProgress.completed} 段语音，不会打断当前推演。` : '画、圈、移动与语音会记录在这一轮。'}</strong>
           </>}
         </section>
@@ -689,22 +725,22 @@ export default function App() {
       >
         <nav
           className={toolsCollapsed ? 'canvas-tools collapsed' : 'canvas-tools'}
-          aria-label="画布工具"
+          aria-label={text.canvasTools}
         >
           {toolsCollapsed ? (
             <button
               type="button"
               className="menu-toggle"
               onClick={() => setToolsCollapsed(false)}
-              aria-label="展开画布工具"
-              title="展开工具"
+              aria-label={text.expandTools}
+              title={text.expandTools}
             >
               <span aria-hidden="true">☰</span>
             </button>
           ) : <>
             <div className="tool-row">
-              <button type="button" className="canvas-tool history-tool" onClick={() => triggerHistoryAction('undo')} title="撤销（⌘Z）" aria-label="撤销">↶</button>
-              <button type="button" className="canvas-tool history-tool" onClick={() => triggerHistoryAction('redo')} title="重做（⇧⌘Z）" aria-label="重做">↷</button>
+              <button type="button" className="canvas-tool history-tool" onClick={() => triggerHistoryAction('undo')} title={text.undo} aria-label={text.undo}>↶</button>
+              <button type="button" className="canvas-tool history-tool" onClick={() => triggerHistoryAction('redo')} title={text.redo} aria-label={text.redo}>↷</button>
               <span className="tool-divider" />
               {tools.map((tool) => (
               <button
@@ -712,28 +748,28 @@ export default function App() {
                 type="button"
                 className={activeTool === tool.id ? 'canvas-tool active' : 'canvas-tool'}
                 onClick={() => activateTool(tool.id)}
-                title={tool.hint}
-                aria-label={tool.label}
+                title={tool[locale]}
+                aria-label={tool[locale]}
                 aria-pressed={activeTool === tool.id}
               >
                 <ToolIcon tool={tool.id} />
               </button>
             ))}
-              <button type="button" className="zoom-button" onClick={() => changeZoom(0.8)} aria-label="缩小">−</button>
+              <button type="button" className="zoom-button" onClick={() => changeZoom(0.8)} aria-label={text.zoomOut}>−</button>
               <span className="zoom-label">{zoomPercent}%</span>
-              <button type="button" className="zoom-button" onClick={() => changeZoom(1.25)} aria-label="放大">＋</button>
+              <button type="button" className="zoom-button" onClick={() => changeZoom(1.25)} aria-label={text.zoomIn}>＋</button>
               <button
                 type="button"
                 className="menu-toggle"
                 onClick={() => setToolsCollapsed(true)}
-                aria-label="收起画布工具"
-                title="收起工具"
+                aria-label={text.collapseTools}
+                title={text.collapseTools}
               >
                 <span aria-hidden="true">‹</span>
               </button>
             </div>
-            <div className="style-row" aria-label="画笔样式">
-              <span className="style-label">颜色</span>
+            <div className="style-row" aria-label={text.canvasTools}>
+              <span className="style-label">{text.color}</span>
               {strokeColors.map((color) => (
               <button
                 key={color}
@@ -741,18 +777,18 @@ export default function App() {
                 className={strokeColor === color ? 'color-swatch active' : 'color-swatch'}
                 style={{ '--swatch': color } as React.CSSProperties}
                 onClick={() => changeStrokeColor(color)}
-                aria-label={`颜色 ${color}`}
+                aria-label={`${text.color} ${color}`}
                 aria-pressed={strokeColor === color}
               />
             ))}
-              <span className="style-label width-label">粗细</span>
+              <span className="style-label width-label">{text.weight}</span>
               {strokeWidths.map((width) => (
               <button
                 key={width}
                 type="button"
                 className={strokeWidth === width ? 'width-swatch active' : 'width-swatch'}
                 onClick={() => changeStrokeWidth(width)}
-                aria-label={`${width} 号线宽`}
+                aria-label={`${text.weight} ${width}`}
                 aria-pressed={strokeWidth === width}
               >
                 <i style={{ height: width + 1 }} />
@@ -778,20 +814,20 @@ export default function App() {
             },
           }}
         />
-        {imageDropActive && <div className="drop-image-hint" aria-hidden="true">松开以导入图片</div>}
+        {imageDropActive && <div className="drop-image-hint" aria-hidden="true">{text.releaseToImport}</div>}
       </section>
 
       {storageOpen && <div className="storage-backdrop" role="presentation" onClick={() => setStorageOpen(false)}>
-        <section className="storage-dialog" role="dialog" aria-modal="true" aria-label="本地档案" onClick={(event) => event.stopPropagation()}>
+        <section className="storage-dialog" role="dialog" aria-modal="true" aria-label={text.archive} onClick={(event) => event.stopPropagation()}>
           <div className="storage-dialog-head">
-            <div><h2>本地档案</h2><p>保存在本项目的 <code>.canvas-prompt/rounds</code>。不自动上传云端；删除后无法恢复。</p></div>
-            <button className="dialog-close" type="button" onClick={() => setStorageOpen(false)} aria-label="关闭本地档案">×</button>
+            <div><h2>{text.archive}</h2><p>{text.archiveDescription} <code>.canvas-prompt/rounds</code>{text.archiveDescriptionEnd}</p></div>
+            <button className="dialog-close" type="button" onClick={() => setStorageOpen(false)} aria-label={text.closeArchive}>×</button>
           </div>
           <div className="storage-list">
-            {storageLoading ? <p>正在读取本地档案…</p> : storedRounds.length === 0 ? <p>还没有已归档的推演。</p> : storedRounds.map((round) => (
+            {storageLoading ? <p>{text.loadingArchive}</p> : storedRounds.length === 0 ? <p>{text.noArchive}</p> : storedRounds.map((round) => (
               <article className="storage-item" key={round.package_id}>
-                <div><strong>{new Date(round.exported_at).toLocaleString('zh-CN')}</strong><span>{round.duration_ms ? `${Math.round(round.duration_ms / 1000)} 秒` : '时长未知'} · {round.has_snapshot ? '画布快照' : '无快照'} · {round.has_audio ? '录音' : '无录音'}</span></div>
-                <div className="storage-item-actions"><span className="round-local">本地已保存</span><button type="button" onClick={() => void deleteStoredRound(round)}>删除</button></div>
+                <div><strong>{new Date(round.exported_at).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')}</strong><span>{round.duration_ms ? `${Math.round(round.duration_ms / 1000)} ${text.seconds}` : text.unknownDuration} · {round.has_snapshot ? text.snapshot : text.noSnapshot} · {round.has_audio ? text.audio : text.noAudio}</span></div>
+                <div className="storage-item-actions"><span className="round-local">{text.local}</span><button type="button" onClick={() => void deleteStoredRound(round)}>{text.delete}</button></div>
               </article>
             ))}
           </div>

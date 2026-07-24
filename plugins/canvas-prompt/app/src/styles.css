@@ -110,6 +110,10 @@ h1 { font-size: 18px; font-weight: 720; letter-spacing: -.035em; }
 .stop { color: #f6f1e7; background: #c8462b; border-color: #c8462b; }
 .image-import, .more-button { color: #171512; background: rgba(255,253,247,.58); border-color: #d9d0be; }
 .image-import:hover:not(:disabled), .more-button:hover { background: #fffdf7; border-color: #171512; }
+.language-toggle { display: inline-flex; min-height: 30px; align-items: center; gap: 2px; border: 1px solid #d9d0be; border-radius: 4px; padding: 2px; color: #736d62; background: rgba(255,253,247,.58); font: 10px "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace; cursor: pointer; }
+.language-toggle:hover { border-color: #171512; background: #fffdf7; }
+.language-toggle span { display: grid; min-width: 22px; height: 22px; place-items: center; border-radius: 2px; }
+.language-toggle span.active { color: #f6f1e7; background: #171512; }
 .more-popover { border-color: #d9d0be; border-radius: 4px; background: #fffdf7; box-shadow: 8px 10px 0 rgba(200,70,43,.12); }
 .more-popover button { color: #171512; border-radius: 3px; }
 .more-popover button:hover { background: #f9d9ce; }
