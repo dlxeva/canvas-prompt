@@ -8,7 +8,7 @@ description: Open the local Canvas Prompt thinking canvas for the active Codex p
 Start the local canvas for the active project and open the URL reported by the launcher in Codex's in-app browser.
 
 ```bash
-./scripts/start-canvas.sh /absolute/path/to/the/active/project
+CANVAS_PROMPT_DELIVERY_MODE=codex ./scripts/start-canvas.sh /absolute/path/to/the/active/project
 ```
 
 The launcher prefers `http://127.0.0.1:43223/`, reuses a healthy instance of the current plugin, removes stale Canvas Prompt servers, and otherwise selects an available local port. Read its output and open the actual reported URL; do not assume the default port.

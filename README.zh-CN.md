@@ -61,6 +61,16 @@ codex plugin add canvas-prompt@canvas-prompt
 
 安装或更新插件后，请新建一个 Codex 任务，让最新的 Skill 与 MCP 工具重新载入。
 
+## 其他本地 AI 终端
+
+Canvas Prompt 的稳定产物是项目内的 Prompt Package 和本地 MCP 读取器。接入其他侧边栏 AI 终端时，用本地交付模式启动：
+
+```bash
+CANVAS_PROMPT_DELIVERY_MODE=local ./scripts/start-canvas.sh /当前项目的绝对路径
+```
+
+画布会完成本地保存与编译。让该终端以同一个项目路径设置 `CANVAS_PROMPT_PROJECT_DIR` 并运行随插件提供的 MCP server，即可读取最新 Canvas Prompt Package。Codex 是第一个具备自动交付的宿主；其他宿主通过这条本地上下文包与 MCP 路径接入。
+
 ## 隐私
 
 请阅读 [隐私说明](./PRIVACY.zh-CN.md) 或 [Privacy](./PRIVACY.md)。未经明确许可，请勿公开 `.canvas-prompt/` 数据、真实录音、截图、转写或白板内容。

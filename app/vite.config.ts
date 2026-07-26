@@ -26,12 +26,14 @@ const projectDir = resolve(process.env.CANVAS_PROMPT_PROJECT_DIR ?? resolve(conf
 const latestPackagePath = resolve(projectDir, '.canvas-prompt', 'latest-prompt-package.json')
 const roundsDir = resolve(projectDir, '.canvas-prompt', 'rounds')
 const runCommand = promisify(execFile)
+const deliveryMode = process.env.CANVAS_PROMPT_DELIVERY_MODE === 'codex' ? 'codex' : 'local'
 
 function runtimeIdentity() {
   return realpath(projectDir).catch(() => projectDir).then((canonicalProjectDir) => ({
     project_dir: canonicalProjectDir,
     project_hash: createHash('sha256').update(canonicalProjectDir).digest('hex'),
     service_version: '0.1.2',
+    delivery_mode: deliveryMode,
   }))
 }
 
@@ -61,8 +63,8 @@ async function readMacPasteboardPng(board: 'general' | 'drag') {
 }
 
 type EngineResult = { ok: boolean; error?: string; process_ir_path?: string; compact_package_path?: string }
-type HandoffStatus = 'accepted' | 'delivered' | 'accepted_timeout' | 'accepted_observer_lost' | 'completed_failed' | 'completed_cancelled' | 'accepted_failed' | 'failed' | 'timed_out'
-type HandoffResult = { status?: HandoffStatus; attempted: boolean; accepted?: boolean; delivered: boolean; threadId?: string; reason?: string; turn?: unknown; handoff_attempt_id?: string }
+type HandoffStatus = 'archived' | 'accepted' | 'delivered' | 'accepted_timeout' | 'accepted_observer_lost' | 'completed_failed' | 'completed_cancelled' | 'accepted_failed' | 'failed' | 'timed_out'
+type HandoffResult = { status?: HandoffStatus; attempted: boolean; accepted?: boolean; delivered: boolean; host?: 'codex' | 'local'; threadId?: string; reason?: string; turn?: unknown; handoff_attempt_id?: string }
 type RoundRecord = {
   package_id: string
   exported_at: string
@@ -339,8 +341,11 @@ function promptPackagePersistence(): Plugin {
                 await writeFile(resolve(roundPath, 'archive.json'), `${JSON.stringify({ schema_version: 1, storage: 'local_project', retention: 'kept_until_deleted_by_user', contents: ['prompt-package.json', 'canvas-snapshot.png', 'state-frames/ when captured', 'audio.* when recorded', 'raw-trace.ndjson.gz when available', 'raw-trace-manifest.json when available', 'engine/', 'handoff.json when sent'], raw_trace: archived.artifacts.rawTraceManifest ?? undefined, created_at: new Date().toISOString() }, null, 2)}\n`, 'utf8')
               },
               startHandoff: async (archived: { roundPackagePath: string; engine: EngineResult; artifacts: { snapshotPath?: string | null; keyframePaths?: string[] } | null }) => {
+                if (deliveryMode === 'local') {
+                  return { status: 'archived', attempted: false, accepted: false, delivered: false, host: 'local', reason: 'Context is saved locally for the active AI host to read through Canvas Prompt MCP.' } satisfies HandoffResult
+                }
                 const artifacts = archived.artifacts ?? await existingRoundArtifacts(roundPath)
-                return await handoffToMainThread({ projectDir, packagePath: archived.roundPackagePath, roundPath, snapshotPath: artifacts.snapshotPath ?? null, keyframePaths: artifacts.keyframePaths ?? [], engine: archived.engine }) as HandoffResult
+                return { ...await handoffToMainThread({ projectDir, packagePath: archived.roundPackagePath, roundPath, snapshotPath: artifacts.snapshotPath ?? null, keyframePaths: artifacts.keyframePaths ?? [], engine: archived.engine }) as HandoffResult, host: 'codex' }
               },
             })
             const { roundPackagePath, engine, handoff } = submitted
