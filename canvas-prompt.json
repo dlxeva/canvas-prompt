@@ -3,5 +3,7 @@
   "name": "canvas-prompt",
   "entrypoints": {"cli": "node bin/canvas-prompt.mjs", "mcp": "scripts/start-mcp.sh", "codex_plugin": ".codex-plugin/plugin.json"},
   "portable_contract": {"archive_dir": ".canvas-prompt", "reader": "canvas_prompt.get_latest_prompt_package"},
-  "host_routing": {"codex": "plugin_and_automatic_handoff", "mcp_capable": "cli_plus_project_bound_mcp", "command_only": "cli_plus_manual_export", "neither": "manual_export_only"}
+  "host_routing": {"codex": "plugin_and_automatic_handoff", "mcp_capable": "cli_plus_project_bound_mcp_plus_host_skill", "command_only": "cli_plus_manual_export", "neither": "manual_export_only"},
+  "routing_guards": {"current_host_identity_required": true, "codex_binary_presence_is_not_host_identity": true, "forbid_cross_project_fallback_reads": true},
+  "adapters": {"workbuddy": {"skill": "adapters/workbuddy/SKILL.md", "automatic_turn_start": false}}
 }
