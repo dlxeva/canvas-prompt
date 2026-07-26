@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import { deleteRoundAndUpdateLatest } from '../round-store.mjs'
-import { HANDOFF_COMPLETION_TIMEOUT_MS, appServerCommandCandidates, appServerEnvironment, createHandoffStatusWriter, deliveryReceiptMessageId, handoffMessage, handoffToMainThread, isVerifiedMainThreadBinding, matchesExpectedTurn, resolveAppServerCommand, selectMainThreadId } from '../codex-main-thread-handoff.mjs'
+import { HANDOFF_COMPLETION_TIMEOUT_MS, appServerCommandCandidates, appServerEnvironment, createHandoffStatusWriter, deliveryReceiptMessageId, handoffMessage, handoffToMainThread, isVerifiedMainThreadBinding, matchesExpectedTurn, resolveAppServerCommand, selectMainThreadId, visibleReceiptMessage } from '../codex-main-thread-handoff.mjs'
 
 async function waitFor<T>(read: () => Promise<T>, accept: (value: T) => boolean, label: string, timeoutMs = 1_500): Promise<T> {
   const deadline = Date.now() + timeoutMs
@@ -168,6 +168,19 @@ describe('main-thread handoff routing', () => {
     })
     expect(message).toContain('先用 Canvas Prompt MCP 读取 Compact Package')
     expect(message).toContain('不要打开浏览器画布')
+  })
+
+  it('keeps the visible attachment message separate from the internal handoff instructions', async () => {
+    expect(visibleReceiptMessage()).toBe('Canvas Prompt｜本轮画布已送入主对话。')
+    const harness = await createHarness('visible_message', `
+      console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_visible_message' } } }))
+    `)
+    await startHandoff(harness)
+    const turnStart = JSON.parse(await readFile(harness.turnStartPath, 'utf8'))
+    expect(turnStart.input).toContainEqual({ type: 'text', text: visibleReceiptMessage() })
+    expect(turnStart.input.some((item: { text?: string }) => item.text?.includes('Compact Package'))).toBe(false)
+    expect(turnStart.additionalContext['canvas-prompt-handoff']).toMatchObject({ kind: 'application' })
+    expect(turnStart.additionalContext['canvas-prompt-handoff'].value).toContain('先用 Canvas Prompt MCP 读取 Compact Package')
   })
 
   it('gives the visible snapshot anchor a stable client message identity', async () => {

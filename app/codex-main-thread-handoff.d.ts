@@ -45,6 +45,7 @@ export function selectMainThreadId(
 
 export function handoffToMainThread(input: MainThreadHandoffInput): Promise<MainThreadHandoffResult>
 export function deliveryReceiptMessageId(roundPath: string): string
+export function visibleReceiptMessage(): string
 
 export function appServerCommandCandidates(home?: string, environment?: NodeJS.ProcessEnv): Array<string | undefined>
 export function resolveAppServerCommand(override?: string): string
