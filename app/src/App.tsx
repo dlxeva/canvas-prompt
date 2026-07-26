@@ -34,8 +34,8 @@ const tools: Array<{ id: CanvasTool; zh: string; en: string }> = [
 ]
 
 const ui = {
-  zh: { importImage: '导入图片', importing: '正在导入…', more: '更多功能', archive: '本地档案', recording: '录音中', asrUnavailable: '语音仅保存', finish: '结束推演', processing: '处理中', export: '发送到当前对话', retryExport: '重新发送到当前对话', sending: '正在发送…', archived: '✓ 已保存到本地', accepted: '✓ 已送入主对话', deliveredReceipt: '✓ 主对话已完成处理', failedReceipt: '已保存 · 推送失败', next: '开始下一轮', start: '开始推演', preparing: '准备中…', canvasTools: '画布工具', expandTools: '展开画布工具', collapseTools: '收起画布工具', undo: '撤销（⌘Z）', redo: '重做（⇧⌘Z）', zoomOut: '缩小', zoomIn: '放大', color: '颜色', weight: '粗细', releaseToImport: '松开以导入图片', archiveDescription: '保存在本项目的', archiveDescriptionEnd: '。不自动上传云端；删除后无法恢复。', closeArchive: '关闭本地档案', loadingArchive: '正在读取本地档案…', noArchive: '还没有已归档的推演。', seconds: '秒', unknownDuration: '时长未知', snapshot: '画布快照', noSnapshot: '无快照', audio: '录音', noAudio: '无录音', delivered: '已送达', sent: '已接收', sendFailed: '发送失败', local: '仅本地', delete: '删除' },
-  en: { importImage: 'Import image', importing: 'Importing…', more: 'More', archive: 'Local archive', recording: 'Recording', asrUnavailable: 'Audio saved only', finish: 'Finish session', processing: 'Processing', export: 'Send to Codex', retryExport: 'Retry sending', sending: 'Sending…', archived: '✓ Saved locally', accepted: '✓ Sent to main conversation', deliveredReceipt: '✓ Main conversation completed', failedReceipt: 'Saved · send failed', next: 'Start next round', start: 'Start session', preparing: 'Preparing…', canvasTools: 'Canvas tools', expandTools: 'Expand tools', collapseTools: 'Collapse tools', undo: 'Undo (⌘Z)', redo: 'Redo (⇧⌘Z)', zoomOut: 'Zoom out', zoomIn: 'Zoom in', color: 'Color', weight: 'Weight', releaseToImport: 'Release to import image', archiveDescription: 'Stored locally in', archiveDescriptionEnd: '. Nothing is uploaded automatically; deleted rounds cannot be recovered.', closeArchive: 'Close local archive', loadingArchive: 'Loading local archive…', noArchive: 'No saved rounds yet.', seconds: 'sec', unknownDuration: 'duration unknown', snapshot: 'canvas snapshot', noSnapshot: 'no snapshot', audio: 'audio', noAudio: 'no audio', delivered: 'delivered', sent: 'received', sendFailed: 'send failed', local: 'local only', delete: 'Delete' },
+  zh: { importImage: '导入图片', importing: '正在导入…', more: '更多功能', archive: '本地档案', recording: '录音中', asrPreparing: '语音准备中', asrUnavailable: '语音仅保存', finish: '结束推演', processing: '处理中', export: '发送到当前对话', retryExport: '重新发送到当前对话', sending: '正在发送…', archived: '✓ 已保存到本地', accepted: '✓ 已送入主对话', deliveredReceipt: '✓ 主对话已完成处理', failedReceipt: '已保存 · 推送失败', next: '开始下一轮', start: '开始推演', startVisualOnly: '不等语音，开始画', preparing: '准备中…', canvasTools: '画布工具', expandTools: '展开画布工具', collapseTools: '收起画布工具', undo: '撤销（⌘Z）', redo: '重做（⇧⌘Z）', zoomOut: '缩小', zoomIn: '放大', color: '颜色', weight: '粗细', releaseToImport: '松开以导入图片', archiveDescription: '保存在本项目的', archiveDescriptionEnd: '。不自动上传云端；删除后无法恢复。', closeArchive: '关闭本地档案', loadingArchive: '正在读取本地档案…', noArchive: '还没有已归档的推演。', seconds: '秒', unknownDuration: '时长未知', snapshot: '画布快照', noSnapshot: '无快照', audio: '录音', noAudio: '无录音', delivered: '已送达', sent: '已接收', sendFailed: '发送失败', local: '仅本地', delete: '删除' },
+  en: { importImage: 'Import image', importing: 'Importing…', more: 'More', archive: 'Local archive', recording: 'Recording', asrPreparing: 'Speech preparing', asrUnavailable: 'Audio saved only', finish: 'Finish session', processing: 'Processing', export: 'Send to Codex', retryExport: 'Retry sending', sending: 'Sending…', archived: '✓ Saved locally', accepted: '✓ Sent to main conversation', deliveredReceipt: '✓ Main conversation completed', failedReceipt: 'Saved · send failed', next: 'Start next round', start: 'Start session', startVisualOnly: 'Start without speech', preparing: 'Preparing…', canvasTools: 'Canvas tools', expandTools: 'Expand tools', collapseTools: 'Collapse tools', undo: 'Undo (⌘Z)', redo: 'Redo (⇧⌘Z)', zoomOut: 'Zoom out', zoomIn: 'Zoom in', color: 'Color', weight: 'Weight', releaseToImport: 'Release to import image', archiveDescription: 'Stored locally in', archiveDescriptionEnd: '. Nothing is uploaded automatically; deleted rounds cannot be recovered.', closeArchive: 'Close local archive', loadingArchive: 'Loading local archive…', noArchive: 'No saved rounds yet.', seconds: 'sec', unknownDuration: 'duration unknown', snapshot: 'canvas snapshot', noSnapshot: 'no snapshot', audio: 'audio', noAudio: 'no audio', delivered: 'delivered', sent: 'received', sendFailed: 'send failed', local: 'local only', delete: 'Delete' },
 } as const
 
 function visibleWorkflowMessage(message: string, locale: Locale) {
@@ -159,6 +159,7 @@ export default function App() {
   const displayWorkflow = visibleWorkflowMessage(workflowMessage, locale)
   const [asrProgress, setAsrProgress] = useState<AsrWindowProgress>({ completed: 0, pending: 0, failed: 0, active: 0 })
   const [asrAvailable, setAsrAvailable] = useState(false)
+  const [asrPreparing, setAsrPreparing] = useState(true)
   const [asrEndpoint, setAsrEndpoint] = useState('http://127.0.0.1:8080')
   const [compiledPackage, setCompiledPackage] = useState<PromptPackage | null>(null)
   const [lastRecording, setLastRecording] = useState<RecordingResult | null>(null)
@@ -211,10 +212,11 @@ export default function App() {
 
   useEffect(() => {
     void fetch('/api/runtime-identity', { cache: 'no-store' })
-      .then(async (response) => response.ok ? await response.json() as { delivery_mode?: DeliveryMode; asr_url?: string | null } : null)
+      .then(async (response) => response.ok ? await response.json() as { delivery_mode?: DeliveryMode; asr_url?: string | null; asr_enabled?: boolean } : null)
       .then((identity) => {
         if (identity?.delivery_mode === 'codex' || identity?.delivery_mode === 'local') setDeliveryMode(identity.delivery_mode)
         if (typeof identity?.asr_url === 'string') setAsrEndpoint(identity.asr_url)
+        setAsrPreparing(identity?.asr_enabled !== false)
       })
       .catch(() => undefined)
   }, [])
@@ -230,6 +232,7 @@ export default function App() {
         && (health.canvas_prompt_asr === true || health.backend === 'whisper' || health.backend === 'faster-whisper')
       asrAvailableRef.current = available
       setAsrAvailable(available)
+      if (available) setAsrPreparing(false)
       return available
     } catch {
       asrAvailableRef.current = false
@@ -243,6 +246,16 @@ export default function App() {
     const timer = window.setInterval(() => { void refreshAsrAvailability() }, 5_000)
     return () => window.clearInterval(timer)
   }, [refreshAsrAvailability])
+
+  // A cold model download can take several minutes. During that time the
+  // canvas remains visible, but a session cannot begin and falsely promise
+  // timestamped speech. After the grace window a failed service becomes the
+  // explicit visual-only state instead of blocking forever.
+  useEffect(() => {
+    if (!asrPreparing || asrAvailable) return
+    const timer = window.setTimeout(() => setAsrPreparing(false), 10 * 60_000)
+    return () => window.clearTimeout(timer)
+  }, [asrAvailable, asrPreparing])
 
   const bindCanvasApi = useCallback((canvasApi: ExcalidrawImperativeAPI) => {
     apiRef.current = canvasApi
@@ -269,7 +282,7 @@ export default function App() {
   }, [recording])
 
   const beginTrace = async () => {
-    if (recording || sessionStage === 'compiling') return
+    if (recording || sessionStage === 'compiling' || asrPreparing) return
     const startElements = (apiRef.current ?? api)?.getSceneElementsIncludingDeleted() ?? []
     setSessionStage('starting')
     setWorkflowMessage('正在准备本次推演…')
@@ -968,7 +981,8 @@ export default function App() {
         </div>
         <div className="header-actions">
           {recording ? <span className="recording-state" aria-live="polite"><i />{text.recording} {elapsed}</span> : null}
-          {!recording && !asrAvailable ? <span className="quiet-state" title={locale === 'zh' ? '当前本机没有可用语音转写；录音仍会保存到本地。' : 'No local speech transcription is available; audio will still be saved locally.'}>{text.asrUnavailable}</span> : null}
+          {!recording && asrPreparing ? <span className="quiet-state" title={locale === 'zh' ? '正在准备本地语音模型；准备完成前不会开始会丢失转写的推演。' : 'The local speech model is preparing; a session stays disabled until timestamped transcription is ready.'}>{text.asrPreparing}</span> : null}
+          {!recording && !asrPreparing && !asrAvailable ? <span className="quiet-state" title={locale === 'zh' ? '当前本机没有可用语音转写；录音仍会保存到本地。' : 'No local speech transcription is available; audio will still be saved locally.'}>{text.asrUnavailable}</span> : null}
           {recording ? (
             <button className="button icon-button stop" onClick={() => void finishTrace()} aria-label={text.finish} title={text.finish}><HeaderIcon kind="stop" /></button>
           ) : sessionStage === 'compiling' ? (
@@ -984,10 +998,12 @@ export default function App() {
             <>
               <span className={`receipt-status receipt-${exportStatus}`} role="status">{receiptText}</span>
               {canRetryHandoff ? <button className="button icon-button" onClick={() => void exportPromptPackage({ retryHandoff: true })} aria-label={retryExportLabel} title={retryExportLabel}><HeaderIcon kind="send" /></button> : null}
-              <button className="button primary session-action" onClick={() => void beginTrace()}><HeaderIcon kind="next" /><span>{text.next}</span></button>
+              <button className="button primary session-action" onClick={() => void beginTrace()} disabled={asrPreparing}><HeaderIcon kind="next" /><span>{text.next}</span></button>
             </>
+          ) : asrPreparing ? (
+            <button className="button session-action" onClick={() => setAsrPreparing(false)} title={locale === 'zh' ? '本轮会保留画布过程；尚未就绪的语音不会转写。' : 'This round keeps the visual process; speech is not transcribed until the local model is ready.'}><HeaderIcon kind="record" /><span>{text.startVisualOnly}</span></button>
           ) : (
-            <button className="button primary session-action" onClick={() => void beginTrace()} disabled={sessionStage === 'starting'}><HeaderIcon kind="record" /><span>{sessionStage === 'starting' ? text.preparing : text.start}</span></button>
+            <button className="button primary session-action" onClick={() => void beginTrace()} disabled={sessionStage === 'starting' || asrPreparing}><HeaderIcon kind="record" /><span>{sessionStage === 'starting' || asrPreparing ? text.preparing : text.start}</span></button>
           )}
           <button className="button icon-button image-import" type="button" disabled={imageImporting} onClick={() => imageInputRef.current?.click()} aria-label={imageImporting ? text.importing : text.importImage} title={imageImporting ? text.importing : text.importImage}>
             <HeaderIcon kind="upload" />

@@ -36,7 +36,11 @@ Default `setup` prepares local ASR; it is not a hidden optional prerequisite.
 The isolated runtime measured about **235 MB** in the current macOS arm64
 check, and the base speech model downloads about **148 MB** into a local cache
 on first start, then is reused. Exact size and first-start time vary by
-platform and network; the installer repeats this before downloading. For a
+platform and network; a cold model download can take several minutes. The
+canvas opens first and clearly shows “Speech preparing.” The person can wait
+for timestamped speech, or explicitly choose “Start without speech”; that
+round preserves visual process only and never pretends unavailable speech was
+transcribed. The installer repeats the download cost before starting. For a
 visual-only canvas, explicitly use `setup --core-only` or set
 `CANVAS_PROMPT_ASR=disabled`; browser speech recognition is never a default or
 silent fallback.

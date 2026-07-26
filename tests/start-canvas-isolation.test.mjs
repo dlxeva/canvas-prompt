@@ -72,3 +72,31 @@ test('a healthy Canvas service from an earlier cache is not mistaken for stale',
     await rm(projects, { recursive: true, force: true })
   }
 })
+
+test('macOS canvas service receives the configured ASR identity instead of reverting to port 8080', async () => {
+  const temp = await mkdtemp(resolve(tmpdir(), 'canvas-asr-identity-'))
+  try {
+    const bin = resolve(temp, 'bin')
+    const submission = resolve(temp, 'launchctl-submit.txt')
+    await mkdir(bin)
+    await fakeCommand(bin, 'lsof', 'exit 0')
+    await fakeCommand(bin, 'curl', "echo '<title>Canvas Prompt</title>'")
+    await fakeCommand(bin, 'launchctl', `if [[ "$1" == "submit" ]]; then printf '%s\\n' "$@" > ${JSON.stringify(submission)}; fi`)
+    const project = resolve(temp, 'project')
+    await mkdir(project)
+    await run('bash', [script, project], {
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        CANVAS_PROMPT_PORT: '43319',
+        CANVAS_PROMPT_ASR_PORT: '18081',
+        CANVAS_PROMPT_ASR: 'disabled',
+      },
+    })
+    const args = await (await import('node:fs/promises')).readFile(submission, 'utf8')
+    assert.match(args, /http:\/\/127\.0\.0\.1:18081/)
+    assert.match(args, /^disabled$/m)
+  } finally {
+    await rm(temp, { recursive: true, force: true })
+  }
+})

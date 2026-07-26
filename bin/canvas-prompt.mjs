@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { realpathSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -83,10 +83,12 @@ try {
     } else if (command === 'open') {
       const host = flag('--host') === 'codex' ? 'codex' : 'local'
       if (process.env.CANVAS_PROMPT_ASR !== 'disabled') {
-        const asr = spawnSync('bash', [resolve(rootDir, 'scripts', 'start-asr.sh')], { stdio: 'inherit', env: runtimeEnvironment() })
-        if ((asr.status ?? 1) !== 0) {
-          console.error('Canvas Prompt will open without speech transcription. Run `canvas-prompt setup` and check `canvas-prompt doctor` to repair the local ASR runtime.')
-        }
+        // Model download can take longer than a canvas launch. Start it in the
+        // background; the canvas polls the same loopback endpoint and shows a
+        // truthful “speech preparing” state until it is actually ready.
+        const asr = spawn('bash', [resolve(rootDir, 'scripts', 'start-asr.sh')], { detached: true, stdio: 'ignore', env: runtimeEnvironment() })
+        asr.unref()
+        console.error(`Canvas Prompt is preparing local speech transcription at ${asrUrl()} in the background.`)
       }
       const result = spawnSync('bash', [resolve(rootDir, 'scripts', 'start-canvas.sh'), project], { stdio: 'inherit', env: { ...runtimeEnvironment(), CANVAS_PROMPT_DELIVERY_MODE: host } })
       process.exitCode = result.status ?? 1
