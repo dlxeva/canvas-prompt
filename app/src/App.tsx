@@ -18,11 +18,11 @@ import { countIncludedBaselineObjects, projectLiveRoundElementIds } from './base
 import { deriveExportReceiptStatus, isReceiptComplete } from './receipt-state'
 import type { ExportReceiptStatus, HandoffReceipt } from './receipt-state'
 import { protectedLocalApiFetch } from './protected-local-api'
+import { resolveInitialLocale, saveLocalePreference } from './locale'
+import type { Locale } from './locale'
 
 type CanvasTool = 'selection' | 'freedraw' | 'line' | 'arrow' | 'rectangle' | 'ellipse' | 'eraser'
 type HistoryAction = 'undo' | 'redo'
-type Locale = 'zh' | 'en'
-
 const tools: Array<{ id: CanvasTool; zh: string; en: string }> = [
   { id: 'selection', zh: '选择', en: 'Select' },
   { id: 'freedraw', zh: '画笔', en: 'Draw' },
@@ -139,7 +139,7 @@ function sceneBounds(elements: readonly CanvasElement[]) {
 }
 
 export default function App() {
-  const [locale, setLocale] = useState<Locale>(() => window.localStorage.getItem('canvas-prompt-locale') === 'en' ? 'en' : 'zh')
+  const [locale, setLocale] = useState<Locale>(() => resolveInitialLocale(window.localStorage, window.navigator.languages, window.navigator.language))
   const text = ui[locale]
   const [recording, setRecording] = useState(false)
   const [startedAt, setStartedAt] = useState<number | null>(null)
@@ -197,9 +197,10 @@ export default function App() {
   const stateFrameMaxTimer = useRef<number | null>(null)
   const activeSessionId = useRef(0)
   const activeHandoffPackageId = useRef<string | null>(null)
+  const sessionLocale = useRef<Locale>(locale)
 
   useEffect(() => {
-    window.localStorage.setItem('canvas-prompt-locale', locale)
+    document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en'
   }, [locale])
 
   const bindCanvasApi = useCallback((canvasApi: ExcalidrawImperativeAPI) => {
@@ -280,6 +281,8 @@ export default function App() {
     setExportStatus('idle')
     setImageNotice(null)
     const start = Date.now()
+    const recordingLocale = locale
+    sessionLocale.current = recordingLocale
     setStartedAt(start)
     setNowMs(start)
     setRecording(true)
@@ -291,7 +294,7 @@ export default function App() {
       if (stream && typeof MediaRecorder !== 'undefined') {
         windowedAsrRef.current = new WindowedAsrSession({
           stream,
-          language: 'zh-CN',
+          language: recordingLocale === 'zh' ? 'zh-CN' : 'en',
           windowMs: 25_000,
           overlapMs: 3_000,
           onProgress: setAsrProgress,
@@ -301,7 +304,7 @@ export default function App() {
         setWorkflowMessage('推演中 · 画、圈、移动，也可以直接说。语音会在后台分段整理。')
       } else {
         // Fallback for browsers without a second MediaRecorder stream.
-        transcriberRef.current = new VoiceTranscriber({ strategy: 'local-whisper', language: 'zh', asrServerUrl: 'http://localhost:8080' })
+        transcriberRef.current = new VoiceTranscriber({ strategy: 'local-whisper', language: recordingLocale, asrServerUrl: 'http://localhost:8080' })
         await transcriberRef.current.start()
         setWorkflowMessage('推演中 · 画、圈、移动，也可以直接说。')
       }
@@ -356,7 +359,7 @@ export default function App() {
       if ((!transcript?.text || backgroundSession?.hasFailures()) && audio?.blob) {
         if (backgroundSession?.hasFailures()) setWorkflowMessage('少量语音片段需要回退补齐…')
         try {
-          const result = await asrClient.transcribe(audio.blob, 'zh')
+          const result = await asrClient.transcribe(audio.blob, sessionLocale.current)
           transcript = {
             text: result.text,
             segments: result.segments.map((segment) => ({ text: segment.text, startMs: segment.start * 1000, endMs: segment.end * 1000, confidence: segment.confidence, isFinal: true })),
@@ -419,7 +422,7 @@ export default function App() {
           x_axis: 'right',
           y_axis: 'down',
         },
-        language: transcript?.language || 'zh-CN',
+        language: transcript?.language || (sessionLocale.current === 'zh' ? 'zh-CN' : 'en'),
         tags: ['canvas-prompt', 'excalidraw'],
         baseArtifacts,
         viewTransformations: viewTransformations.current,
@@ -941,7 +944,11 @@ export default function App() {
             <button className="button icon-button more-button" type="button" onClick={() => setMoreOpen((open) => !open)} aria-expanded={moreOpen} aria-label={text.more} title={text.more}>•••</button>
             {moreOpen && <div className="more-popover"><button type="button" onClick={() => void openStorage()}>{text.archive}</button></div>}
           </div>
-          <button className="language-toggle" type="button" onClick={() => setLocale((current) => current === 'zh' ? 'en' : 'zh')} aria-label={locale === 'zh' ? 'Switch to English' : '切换至中文'}>
+          <button className="language-toggle" type="button" onClick={() => setLocale((current) => {
+            const next = current === 'zh' ? 'en' : 'zh'
+            saveLocalePreference(window.localStorage, next)
+            return next
+          })} aria-label={locale === 'zh' ? 'Switch to English' : '切换至中文'}>
             <span className={locale === 'zh' ? 'active' : ''}>中</span><span className={locale === 'en' ? 'active' : ''}>EN</span>
           </button>
         </div>
