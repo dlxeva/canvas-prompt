@@ -7,8 +7,16 @@ description: Open the local Canvas Prompt thinking canvas for the active Codex p
 
 Start the local canvas for the active project and open the URL reported by the launcher in Codex's in-app browser.
 
+Before the first launch in a new installation, tell the user that bootstrap
+will install Canvas Prompt-managed Node and local-ASR dependencies into an
+isolated runtime (current macOS arm64 check: about 235 MB), and that first ASR
+start downloads a separately cached base model (about 148 MB). Then run the
+managed bootstrap. It reuses healthy local runtime components when available.
+Never ask the user to manually find Whisper, ffmpeg, or a private ASR project.
+
 ```bash
-CANVAS_PROMPT_DELIVERY_MODE=codex ./scripts/start-canvas.sh /absolute/path/to/the/active/project
+node bin/canvas-prompt.mjs setup --project /absolute/path/to/the/active/project
+node bin/canvas-prompt.mjs open --host codex --project /absolute/path/to/the/active/project
 ```
 
 The launcher prefers `http://127.0.0.1:43223/`, reuses a healthy instance of the current plugin, removes stale Canvas Prompt servers, and otherwise selects an available local port. Read its output and open the actual reported URL; do not assume the default port.

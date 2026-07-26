@@ -24,24 +24,35 @@ v0.1 只承诺可靠保存一次白板推演，并把它交给当前 Codex 主�
 
 发布前只修会丢数据、串项目、误导推送状态或泄露内容的问题；新增识别能力进入后续校准。完整的冻结条件和三轮人工验收见 [v0.1 Alpha 发布冻结](./docs/v0.1-alpha-freeze.zh-CN.md)。
 
-## 运行要求
+## 运行依赖与能力契约
 
-当前 Alpha 只在 macOS 与 Codex Desktop 上完成验证。本地开发需要：
+Canvas Prompt 是本地优先产品，不是“零依赖网页”。干净机器需要下列组件；`canvas-prompt setup` 只管理 Canvas Prompt 自己的运行时，不会改写用户的全局 Node/Python 环境。
 
-- Node.js `22.12` 或更高版本，以及 npm；
-- Python `3.11` 或更高版本，用于 Process IR 编译和校验；
-- 使用语音时，需要授予麦克风权限；
-- 如需带时间戳的语音转写，需要在 `http://127.0.0.1:8080` 运行本地 ASR 服务。
+| 层 | 依赖 | 处理方式 |
+| --- | --- | --- |
+| 核心画布 | Node.js `22.12+`、npm | 宿主机器必须提供；锁定的前端依赖首次安装后复用。 |
+| 编译器 | Python `3.11+` | 宿主机器必须提供；当前 Process IR 编译器只使用 Python 标准库。 |
+| 语音转写 | Canvas Prompt 本地 ASR 运行时 | 安装到 `~/.canvas-prompt/runtime/asr-venv`（或 `CANVAS_PROMPT_RUNTIME_DIR`）；首次启动下载并缓存 `faster-whisper` 模型。无需私有项目、全局 Whisper 或手装 `ffmpeg`。 |
+| 录音 | 浏览器麦克风权限 | 仅在需要录音时要求。 |
+| AI 继续对话 | 宿主适配器 + 项目绑定 MCP | Codex 自动交接还要求 Codex Desktop CLI 与当前任务；其他宿主需要已注册 MCP 与对应 Skill/适配器。 |
 
-本地 ASR 未运行时，画布动作和快照仍然可以使用，原始录音也可以进入本地档案；语音时间线会标记为不可用。首次启动开发服务时可能需要下载 npm 依赖。
+默认 `setup` 会准备本地 ASR，而不是把它藏成可选前提。当前 macOS arm64 实测隔离运行时约 **235 MB**；首次启动还会下载约 **148 MB** 的 base 语音模型到本机缓存，后续复用。实际体积和首次启动时间会随平台与网络变化，安装输出会在下载前再次说明。若只需画布视觉上下文，可显式使用 `setup --core-only` 或设置 `CANVAS_PROMPT_ASR=disabled`；浏览器语音识别不是默认或静默回退。
+
+启动器不会搜索任意项目中的 Whisper/ffmpeg；只有健康检查证明兼容本地 Whisper 契约时，才会复用已占用的 ASR 服务。当前仅在 macOS arm64 上完成验证；Intel Mac、Windows 和 Linux 仍属于待验收平台，不能当作已支持承诺。
+
+画布开始前会检查 ASR 健康状态。不可用时界面明确显示**“语音仅保存”**：录音仍会本地归档，但本轮不会产生可供 AI 使用的语音转写。MCP 或宿主交接不可用也必须如实报告；Agent 不得扫描原始归档、更换项目路径，或临时拼接浏览器/音频恢复方案。
 
 ## 本地开发
 
 ```bash
-npm ci
-npm --prefix app ci
-npm run verify
-./scripts/start-canvas.sh /当前项目的绝对路径
+# 安装或复用 Canvas Prompt 的前端与本地 ASR 运行时
+node bin/canvas-prompt.mjs setup --project /当前项目的绝对路径
+
+# 查看项目绑定、ASR 就绪状态与 MCP 配置
+node bin/canvas-prompt.mjs doctor --project /当前项目的绝对路径
+
+# 仅在 Codex 内使用 --host codex；它会启动受管理 ASR 与画布
+node bin/canvas-prompt.mjs open --host codex --project /当前项目的绝对路径
 ```
 
 请打开启动脚本实际输出的地址。脚本会优先使用 `http://127.0.0.1:43223/`，端口被占用时会自动选择其他本地端口。
@@ -69,6 +80,7 @@ Canvas Prompt 的稳定产物是项目内的 Prompt Package 和本地 MCP 读取
 
 ```bash
 node bin/canvas-prompt.mjs init --project /当前项目的绝对路径
+node bin/canvas-prompt.mjs setup --project /当前项目的绝对路径
 node bin/canvas-prompt.mjs open --project /当前项目的绝对路径
 ```
 

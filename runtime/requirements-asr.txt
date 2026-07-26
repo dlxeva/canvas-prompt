@@ -1,0 +1,7 @@
+# Canvas Prompt's managed local speech runtime.
+# The model itself is downloaded by faster-whisper on first use and cached by
+# the local runtime; it is intentionally not committed to this repository.
+fastapi==0.128.0
+uvicorn==0.40.0
+python-multipart==0.0.21
+faster-whisper==1.2.1

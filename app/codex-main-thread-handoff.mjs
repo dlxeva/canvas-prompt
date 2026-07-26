@@ -123,15 +123,25 @@ export function matchesExpectedTurn(expectedTurnId, completed) {
   return Boolean(expectedTurnId) && turnIdFrom(completed) === expectedTurnId
 }
 
+/**
+ * Known desktop CLI locations. The Canvas service is frequently launched by
+ * launchd with a deliberately reduced PATH, while Codex Desktop bundles its
+ * CLI inside ChatGPT.app rather than installing it into a shell directory.
+ */
+export function appServerCommandCandidates(home = homedir(), environment = process.env) {
+  return [
+    environment.CANVAS_PROMPT_CODEX_COMMAND,
+    environment.CODEX_EXECUTABLE,
+    resolve(home, '.npm-global', 'bin', 'codex'),
+    resolve(home, '.local', 'bin', 'codex'),
+    '/Applications/ChatGPT.app/Contents/Resources/codex',
+  ]
+}
+
 /** Resolve the desktop CLI without depending on Vite's reduced PATH. */
 export function resolveAppServerCommand(override) {
   if (typeof override === 'string' && override.trim()) return override.trim()
-  for (const candidate of [
-    process.env.CANVAS_PROMPT_CODEX_COMMAND,
-    process.env.CODEX_EXECUTABLE,
-    resolve(homedir(), '.npm-global', 'bin', 'codex'),
-    resolve(homedir(), '.local', 'bin', 'codex'),
-  ]) {
+  for (const candidate of appServerCommandCandidates()) {
     if (typeof candidate === 'string' && candidate.trim() && existsSync(candidate)) return candidate
   }
   // Retain PATH lookup as a final compatibility fallback. The resulting
@@ -357,7 +367,7 @@ export async function handoffToMainThread({
       id: 1,
       method: 'initialize',
       params: {
-        clientInfo: { name: 'canvas-prompt-handoff', version: '0.1.5' },
+        clientInfo: { name: 'canvas-prompt-handoff', version: '0.1.6' },
         capabilities: { experimentalApi: true },
       },
     })

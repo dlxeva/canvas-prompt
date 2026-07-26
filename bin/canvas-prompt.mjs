@@ -4,6 +4,7 @@ import { realpathSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { homedir } from 'node:os'
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const command = process.argv[2] ?? 'help'
@@ -25,27 +26,69 @@ const mcpConfig = (project) => ({
     },
   },
 })
+// Plugin caches are replaced on update. Keep the managed runtime outside the
+// cache so an installed ASR environment and model can be reused across plugin
+// versions without touching a user's global Python environment.
+const runtimeDir = () => resolve(process.env.CANVAS_PROMPT_RUNTIME_DIR ?? resolve(homedir(), '.canvas-prompt', 'runtime'))
+const asrUrl = () => process.env.CANVAS_PROMPT_ASR_URL ?? `http://127.0.0.1:${process.env.CANVAS_PROMPT_ASR_PORT ?? '8080'}`
+const runtimeEnvironment = () => ({ ...process.env, CANVAS_PROMPT_RUNTIME_DIR: runtimeDir() })
+const runBootstrap = (mode) => spawnSync('bash', [resolve(rootDir, 'scripts', 'bootstrap-runtime.sh'), mode], { stdio: 'inherit', env: runtimeEnvironment() })
+const probeAsr = async () => {
+  const endpoint = asrUrl()
+  try {
+    const response = await fetch(`${endpoint}/health`, { signal: AbortSignal.timeout(1_500) })
+    const value = response.ok ? await response.json() : null
+    const ready = value?.status === 'ok'
+      && value?.whisper_loaded !== false
+      && (value?.canvas_prompt_asr === true || value?.backend === 'whisper' || value?.backend === 'faster-whisper')
+    return { endpoint, ready, response: value }
+  } catch {
+    return { endpoint, ready: false, response: null }
+  }
+}
 const help = () => console.log(`Canvas Prompt host-neutral entrypoint
 
 Usage:
+  canvas-prompt setup [--core-only]
   canvas-prompt open [--project <dir>] [--host codex|local]
   canvas-prompt init [--project <dir>]
   canvas-prompt doctor [--project <dir>]
 
-init prints the MCP configuration for the active project. Do not replace the
-Canvas app with a copy/paste implementation: use this CLI and MCP reader.`)
+setup installs Canvas Prompt-managed dependencies into its local runtime and
+reuses validated existing dependencies. The local ASR model downloads on first
+start. init prints the MCP configuration for the active project.`)
 
 try {
   if (command === 'help' || command === '--help' || command === '-h') help()
   else {
     const project = projectDir()
-    if (command === 'init') console.log(JSON.stringify({ project_dir: project, mcp_config: mcpConfig(project) }, null, 2))
+    if (command === 'setup') {
+      const result = runBootstrap(flag('--core-only') ? '--core-only' : '--with-asr')
+      process.exitCode = result.status ?? 1
+    }
+    else if (command === 'init') console.log(JSON.stringify({ project_dir: project, mcp_config: mcpConfig(project) }, null, 2))
     else if (command === 'doctor') {
       const latest = resolve(project, '.canvas-prompt', 'latest-prompt-package.json')
-      console.log(JSON.stringify({ ok: true, project_dir: project, node: process.version, python_required: 'python3', latest_package_exists: existsSync(latest), mcp_config: mcpConfig(project) }, null, 2))
+      const asr = await probeAsr()
+      console.log(JSON.stringify({
+        ok: true,
+        project_dir: project,
+        node: process.version,
+        python_required: '3.11+',
+        managed_runtime_dir: runtimeDir(),
+        latest_package_exists: existsSync(latest),
+        asr,
+        mcp_config: mcpConfig(project),
+      }, null, 2))
     } else if (command === 'open') {
       const host = flag('--host') === 'codex' ? 'codex' : 'local'
-      const result = spawnSync('bash', [resolve(rootDir, 'scripts', 'start-canvas.sh'), project], { stdio: 'inherit', env: { ...process.env, CANVAS_PROMPT_DELIVERY_MODE: host } })
+      if (process.env.CANVAS_PROMPT_ASR !== 'disabled') {
+        const asr = spawnSync('bash', [resolve(rootDir, 'scripts', 'start-asr.sh')], { stdio: 'inherit', env: runtimeEnvironment() })
+        if ((asr.status ?? 1) !== 0) {
+          console.error('Canvas Prompt will open without speech transcription. Run `canvas-prompt setup` and check `canvas-prompt doctor` to repair the local ASR runtime.')
+        }
+      }
+      const result = spawnSync('bash', [resolve(rootDir, 'scripts', 'start-canvas.sh'), project], { stdio: 'inherit', env: { ...runtimeEnvironment(), CANVAS_PROMPT_DELIVERY_MODE: host } })
       process.exitCode = result.status ?? 1
     } else throw new Error(`Unknown command: ${command}`)
   }
