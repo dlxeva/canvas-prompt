@@ -54,6 +54,8 @@ function visibleWorkflowMessage(message: string, locale: Locale) {
     '正在准备本轮上下文…': 'Preparing this round’s context…',
     '本轮内容已整理完成。导出后会作为主对话的上下文。': 'This round is ready. Export it as context for the main conversation.',
     '本轮内容已整理完成；当前没有可用的语音转写。': 'This round is ready; no usable voice transcript is available.',
+    '本轮内容已整理完成，正在送入当前对话…': 'This round is ready and is being sent to the current conversation…',
+    '本轮内容已整理完成，正在送入当前对话；当前没有可用的语音转写。': 'This round is ready and is being sent to the current conversation; no usable voice transcript is available.',
     '正在归档并发送到当前对话…': 'Archiving and sending to the current conversation…',
   }
   return translated[message] ?? message
@@ -500,10 +502,14 @@ export default function App() {
       const validation = validatePromptPackage(pkg)
       if (!validation.valid) throw new Error(validation.errors.join('；'))
       setCompiledPackage(pkg)
+      // Ending a session is the user's one completion action. Persisting the
+      // package is an internal reliability step of sending it, never a second
+      // user task they must discover after the canvas has stopped recording.
       setWorkflowMessage(transcript?.text
-        ? '本轮内容已整理完成。导出后会作为主对话的上下文。'
-        : '本轮内容已整理完成；当前没有可用的语音转写。')
+        ? '本轮内容已整理完成，正在送入当前对话…'
+        : '本轮内容已整理完成，正在送入当前对话；当前没有可用的语音转写。')
       setSessionStage('ready')
+      await exportPromptPackage({ packageToExport: pkg })
     } catch (error) {
       setWorkflowMessage(`整理失败：${error instanceof Error ? error.message : '请重试'}`)
       setSessionStage('error')
@@ -544,19 +550,19 @@ export default function App() {
     }
   }
 
-  const exportPromptPackage = async ({ retryHandoff = false } = {}) => {
-    if (!compiledPackage) return
+  const exportPromptPackage = async ({ retryHandoff = false, packageToExport = compiledPackage }: { retryHandoff?: boolean; packageToExport?: PromptPackage | null } = {}) => {
+    if (!packageToExport) return
     setExportStatus('exporting')
     setHandoffReceipt(null)
     setWorkflowMessage(deliveryMode === 'codex' ? '正在归档并发送到当前对话…' : '正在归档本轮上下文…')
     const payload = {
-      ...compiledPackage,
+      ...packageToExport,
       source: { canvas: 'excalidraw', trace: trace.current, audio: lastRecording ? { mime_type: lastRecording.blob.type, duration_ms: lastRecording.duration } : null },
     }
 
     try {
       if (lastRecording) {
-        const audioResponse = await protectedLocalApiFetch(`/api/round-audio/${compiledPackage.meta.package_id}`, {
+        const audioResponse = await protectedLocalApiFetch(`/api/round-audio/${packageToExport.meta.package_id}`, {
           method: 'POST',
           headers: { 'content-type': lastRecording.blob.type || 'audio/webm' },
           body: lastRecording.blob,
