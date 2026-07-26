@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, realpath, rename, unlink, writeFile } from 'node:fs/promises'
-import { delimiter, dirname, resolve } from 'node:path'
+import { basename, delimiter, dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { isRoundHandoffCancelled } from './round-lifecycle.mjs'
@@ -60,6 +60,15 @@ export function selectMainThreadId(threads, projectDir, savedBinding) {
   if (typeof exact?.id === 'string' && exact.id.trim()) return { threadId: exact.id, source: 'exact_cwd' }
   if (typeof savedBinding?.threadId === 'string' && savedBinding.threadId.trim()) return { threadId: savedBinding.threadId, source: 'verified_binding' }
   return null
+}
+
+/**
+ * Stable client-side identity for the visible Canvas Prompt input in a Codex
+ * thread. Reusing it on a retry lets Desktop coalesce the same round instead
+ * of presenting duplicate snapshot attachments as separate user actions.
+ */
+export function deliveryReceiptMessageId(roundPath) {
+  return `canvas-prompt:${basename(resolve(roundPath))}`
 }
 
 async function persistHandoffStatus(roundPath, result) {
@@ -205,6 +214,7 @@ export async function handoffToMainThread({
   const canonicalProjectDir = await realpath(projectDir).catch(() => resolve(projectDir))
   const savedBinding = readMainThreadBinding(canonicalProjectDir)
   const resolvedAppServerCommand = resolveAppServerCommand(appServerCommand)
+  const receiptMessageId = deliveryReceiptMessageId(roundPath)
 
   return await new Promise((resolveHandoff) => {
     const child = spawn(resolvedAppServerCommand, ['app-server', '--stdio'], {
@@ -279,6 +289,11 @@ export async function handoffToMainThread({
             method: 'turn/start',
             params: {
               threadId: targetThreadId,
+              // This is a client message, not invisible extra context. It
+              // carries the final snapshot into the target thread so Desktop
+              // can render a user-visible delivery anchor alongside the
+              // complete context below.
+              clientUserMessageId: receiptMessageId,
               input: [
                 ...(snapshotPath ? [{ type: 'localImage', path: snapshotPath, detail: 'high' }] : []),
                 { type: 'text', text: handoffMessage({ packagePath, roundPath, snapshotPath, keyframePaths, engine }) },
@@ -317,6 +332,7 @@ export async function handoffToMainThread({
           const accepted = withAttempt({
             status: 'accepted', stage, attempted: true, accepted: true, delivered: false,
             threadId: targetThreadId, expected_turn_id: expectedTurnId,
+            visible_receipt: { requested: true, client_user_message_id: receiptMessageId, snapshot_attached: Boolean(snapshotPath) },
             accepted_at: new Date().toISOString(), turn: message.result ?? null,
           })
           void statusWriter.write(accepted)
@@ -329,6 +345,7 @@ export async function handoffToMainThread({
           const completed = {
             status: 'delivered', stage, attempted: true, accepted: true, delivered: true,
             threadId: targetThreadId, expected_turn_id: expectedTurnId,
+            visible_receipt: { requested: true, client_user_message_id: receiptMessageId, snapshot_attached: Boolean(snapshotPath) },
             completed_at: new Date().toISOString(), turn: message.params?.turn ?? null,
           }
           return finish(completed)
