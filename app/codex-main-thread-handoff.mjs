@@ -195,6 +195,11 @@ export function handoffMessage({ packagePath, roundPath, engine, snapshotPath, k
   ].join('\n')
 }
 
+/** The only text placed beside the user-visible snapshot attachment. */
+export function visibleReceiptMessage() {
+  return 'Canvas Prompt｜本轮画布已送入主对话。'
+}
+
 /**
  * Starts a turn in the existing Codex Desktop thread. This is intentionally
  * separate from the old bridge, which spawned a new child Codex conversation.
@@ -296,12 +301,19 @@ export async function handoffToMainThread({
               clientUserMessageId: receiptMessageId,
               input: [
                 ...(snapshotPath ? [{ type: 'localImage', path: snapshotPath, detail: 'high' }] : []),
-                { type: 'text', text: handoffMessage({ packagePath, roundPath, snapshotPath, keyframePaths, engine }) },
+                { type: 'text', text: visibleReceiptMessage() },
               ],
               additionalContext: {
                 'canvas-prompt-export': {
                   kind: 'application',
                   value: JSON.stringify({ package_path: packagePath, round_path: roundPath, engine }),
+                },
+                // Keep compiler paths and reasoning instructions out of the
+                // user-visible attachment message. They remain application
+                // context for the receiving main conversation.
+                'canvas-prompt-handoff': {
+                  kind: 'application',
+                  value: handoffMessage({ packagePath, roundPath, snapshotPath, keyframePaths, engine }),
                 },
               },
             },
