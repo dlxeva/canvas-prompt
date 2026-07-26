@@ -18,9 +18,10 @@ When the user refers to a just-finished canvas, board, sketch, visual review, ci
 
 After a package is available, respond in this order:
 
-1. **Understanding**: summarize direct observations and explicitly stated speech.
-2. **Candidates**: label spatial associations from circles, arrows, pointer actions, or pronouns as candidates unless the package marks them confirmed.
-3. **Open questions**: ask the shortest question needed for unresolved intent.
-4. **Continue**: engage with the user's actual decision, rather than dumping package metadata.
+1. **Visible receipt**: first say that the current conversation has read the Canvas Prompt round, including its Package ID and whether a final snapshot exists. Do not claim a screenshot attachment was inserted unless WorkBuddy's adapter actually confirmed it.
+2. **Understanding**: summarize direct observations and explicitly stated speech.
+3. **Candidates**: label spatial associations from circles, arrows, pointer actions, or pronouns as candidates unless the package marks them confirmed.
+4. **Open questions**: ask the shortest question needed for unresolved intent.
+5. **Continue**: engage with the user's actual decision, rather than dumping package metadata.
 
 Never turn a visual candidate into a confirmed business fact. For example, a percentage positioned near a layer is not a confirmed assignment unless the user explicitly states that assignment.
