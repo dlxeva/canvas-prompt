@@ -31,7 +31,7 @@ function runtimeIdentity() {
   return realpath(projectDir).catch(() => projectDir).then((canonicalProjectDir) => ({
     project_dir: canonicalProjectDir,
     project_hash: createHash('sha256').update(canonicalProjectDir).digest('hex'),
-    service_version: '0.1.1',
+    service_version: '0.1.2',
   }))
 }
 
