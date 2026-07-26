@@ -3,8 +3,13 @@
   "version": "0.1.2+codex.20260726130000",
   "description": "A local thinking canvas for Codex: draw, circle, move, and export the context behind your prompt.",
   "author": {
-    "name": "Canvas Prompt"
+    "name": "Canvas Prompt",
+    "url": "https://github.com/dlxeva/canvas-prompt"
   },
+  "homepage": "https://github.com/dlxeva/canvas-prompt",
+  "repository": "https://github.com/dlxeva/canvas-prompt",
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["canvas", "whiteboard", "thinking", "context", "voice"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Canvas Prompt",
