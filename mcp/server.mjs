@@ -202,7 +202,7 @@ async function handleGetRoundArtifact(args = {}) {
 
 const SERVER_INFO = {
   name: 'ai-thinking-whiteboard-mcp',
-  version: '0.1.4',
+  version: '0.1.5',
 };
 
 const PROTOCOL_VERSION = '2024-11-05';
