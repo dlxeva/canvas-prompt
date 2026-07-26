@@ -24,6 +24,12 @@ ASR_TIMEOUT_SECONDS="${CANVAS_PROMPT_CLEAN_ROOM_ASR_TIMEOUT_SECONDS:-900}"
 
 cleanup() {
   local code="$?"
+  # `open` starts ASR asynchronously. On a fast canvas launch the pid file
+  # can appear after the initial read below, so resolve it again during
+  # cleanup before moving the isolated runtime to Trash.
+  if [[ -z "$ASR_PID" && -f "$CANVAS_PROMPT_RUNTIME_DIR/asr.pid" ]]; then
+    ASR_PID="$(cat "$CANVAS_PROMPT_RUNTIME_DIR/asr.pid" 2>/dev/null || true)"
+  fi
   if [[ -n "$SERVICE_LABEL" ]] && command -v launchctl >/dev/null 2>&1; then
     launchctl bootout "gui/$(id -u)/${SERVICE_LABEL}" >/dev/null 2>&1 || true
   fi
