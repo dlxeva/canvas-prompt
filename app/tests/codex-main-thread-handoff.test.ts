@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import { deleteRoundAndUpdateLatest } from '../round-store.mjs'
-import { HANDOFF_COMPLETION_TIMEOUT_MS, appServerCommandCandidates, appServerEnvironment, createHandoffStatusWriter, handoffMessage, handoffToMainThread, isVerifiedMainThreadBinding, matchesExpectedTurn, resolveAppServerCommand, selectMainThreadId } from '../codex-main-thread-handoff.mjs'
+import { HANDOFF_COMPLETION_TIMEOUT_MS, appServerCommandCandidates, appServerEnvironment, createHandoffStatusWriter, deliveryReceiptMessageId, handoffMessage, handoffToMainThread, isVerifiedMainThreadBinding, matchesExpectedTurn, resolveAppServerCommand, selectMainThreadId } from '../codex-main-thread-handoff.mjs'
 
 async function waitFor<T>(read: () => Promise<T>, accept: (value: T) => boolean, label: string, timeoutMs = 1_500): Promise<T> {
   const deadline = Date.now() + timeoutMs
@@ -48,6 +48,7 @@ async function createRound(project: string, packageId: string, exportedAt = new 
 
 async function installFakeAppServer(root: string, name: string, canonicalProject: string, turnStartBehavior: string) {
   const markerPath = resolve(root, `${name}.terminal`)
+  const turnStartPath = resolve(root, `${name}.turn-start.json`)
   const scriptPath = resolve(root, `${name}.mjs`)
   const commandPath = resolve(root, name)
   await writeFile(scriptPath, `
@@ -63,13 +64,14 @@ async function installFakeAppServer(root: string, name: string, canonicalProject
       if (message.id === 2) console.log(JSON.stringify({ id: 2, result: { data: [{ id: 'thread_${name}', cwd: ${JSON.stringify(canonicalProject)} }] } }))
       if (message.id === 3) console.log(JSON.stringify({ id: 3, result: {} }))
       if (message.id === 4) {
+        writeFileSync(${JSON.stringify(turnStartPath)}, JSON.stringify(message.params))
         ${turnStartBehavior}
       }
     }
   `)
   await writeFile(commandPath, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(scriptPath)}\n`)
   await chmod(commandPath, 0o755)
-  return { commandPath, markerPath }
+  return { commandPath, markerPath, turnStartPath }
 }
 
 const temporaryRoots: string[] = []
@@ -166,6 +168,25 @@ describe('main-thread handoff routing', () => {
     })
     expect(message).toContain('先用 Canvas Prompt MCP 读取 Compact Package')
     expect(message).toContain('不要打开浏览器画布')
+  })
+
+  it('gives the visible snapshot anchor a stable client message identity', async () => {
+    expect(deliveryReceiptMessageId('/project/.canvas-prompt/rounds/pp_same')).toBe('canvas-prompt:pp_same')
+    const harness = await createHarness('visible_receipt', `
+      console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_visible_receipt' } } }))
+    `)
+    const snapshotPath = resolve(harness.roundPath, 'canvas-snapshot.png')
+    await writeFile(snapshotPath, 'snapshot')
+    const accepted = await startHandoff(harness, { snapshotPath })
+    expect(accepted).toMatchObject({
+      status: 'accepted',
+      visible_receipt: { requested: true, client_user_message_id: 'canvas-prompt:visible_receipt', snapshot_attached: true },
+    })
+    const turnStart = JSON.parse(await readFile(harness.turnStartPath, 'utf8'))
+    expect(turnStart.clientUserMessageId).toBe('canvas-prompt:visible_receipt')
+    expect(turnStart.input).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'localImage', path: snapshotPath, detail: 'high' }),
+    ]))
   })
 
   it('keeps Node lookup paths when the Canvas service starts with a sparse PATH', () => {

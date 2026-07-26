@@ -44,6 +44,7 @@ export function selectMainThreadId(
 ): { threadId: string; source: 'exact_cwd' | 'verified_binding' } | null
 
 export function handoffToMainThread(input: MainThreadHandoffInput): Promise<MainThreadHandoffResult>
+export function deliveryReceiptMessageId(roundPath: string): string
 
 export function appServerCommandCandidates(home?: string, environment?: NodeJS.ProcessEnv): Array<string | undefined>
 export function resolveAppServerCommand(override?: string): string
