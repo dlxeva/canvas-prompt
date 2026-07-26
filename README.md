@@ -46,7 +46,7 @@ The development source of truth is the plugin directory itself. The local person
 codex plugin add canvas-prompt@personal
 ```
 
-A public Git marketplace release is planned at `dlxeva/canvas-prompt`. These commands are valid only after that repository contains the release layout `.agents/plugins/marketplace.json` plus `plugins/canvas-prompt/`:
+The public Git marketplace is `dlxeva/canvas-prompt`. Add it and install the plugin with:
 
 ```bash
 codex plugin marketplace add https://github.com/dlxeva/canvas-prompt

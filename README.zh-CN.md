@@ -52,7 +52,7 @@ npm run verify
 codex plugin add canvas-prompt@personal
 ```
 
-我们计划在 `dlxeva/canvas-prompt` 发布公开 Git marketplace。只有该仓库已经包含 `.agents/plugins/marketplace.json` 和 `plugins/canvas-prompt/` 的正式发布结构后，下面的命令才成立：
+公开 Git marketplace 已设为 `dlxeva/canvas-prompt`。添加市场并安装插件：
 
 ```bash
 codex plugin marketplace add https://github.com/dlxeva/canvas-prompt
