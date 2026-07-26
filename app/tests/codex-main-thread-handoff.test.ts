@@ -154,7 +154,7 @@ describe('main-thread handoff routing', () => {
   })
 
   it('discovers the Codex CLI bundled in ChatGPT.app when PATH is sparse', () => {
-    expect(appServerCommandCandidates('/Users/example', { PATH: '/usr/bin' })).toContain('/Applications/ChatGPT.app/Contents/Resources/codex')
+    expect(appServerCommandCandidates('/tmp/example', { PATH: '/usr/bin' })).toContain('/Applications/ChatGPT.app/Contents/Resources/codex')
   })
 
   it('tells the receiving task to read Compact Package before any browser canvas', () => {
