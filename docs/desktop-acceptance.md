@@ -1,70 +1,57 @@
-# Canvas Prompt Desktop Acceptance Gate
+# Canvas Prompt v0.1 安装版真人验收
 
-This gate proves facts that unit tests and a fake App Server cannot prove.
-Run it in a real Codex Desktop task before a public plugin release.
+这份运行单只验证 v0.1 已承诺的主链路：一次白板过程被保存到正确项目，并由当前主对话可靠接住。
 
-## Preconditions
+它必须在**准备发布的安装版本**上完成，不能用源码目录、手工读取 JSON、Agent 扫描原始归档或单元测试替代。测试者只需要画、说、发送和观察主对话；验收工具读取的是导出后的不可变轮次产物。
 
-- Start Canvas Prompt with `./scripts/start-canvas.sh <project-dir>`.
-- Open the URL reported by the launcher, not an assumed port.
-- In the same Codex task, verify the MCP server stderr reports the canonical
-  `<project-dir>` rather than `unbound` or the plugin installation directory.
+## 开始前
 
-## Mixed-material round
+- 新建两个空项目目录：项目 A 和项目 B。
+- 通过安装候选的 `Open Canvas Prompt canvas` 打开项目 A；使用启动结果给出的地址，不假定固定端口。
+- 等界面显示语音可用后再进行含语音的轮次。若明确选择“不等语音，开始画”，该轮只能作为视觉回合，不可替代下方的含语音验收。
+- 每一轮发送后记下界面显示的 Package ID；若界面未显示，可在该项目的本地归档中找到最新轮次目录名。
 
-1. Start a round on an empty board, then import one or more images while recording.
-2. Continue drawing ordinary diagram content; circle two regions on one material, describing only one of them by voice.
-3. Zoom, pan, move one mark, then export and send to the current task.
-4. Inspect `<project>/.canvas-prompt/rounds/<package_id>/`.
+## Round 1：空白画布推演（项目 A）
 
-Expected evidence:
+1. 从空白画布开始，画一个简单结构。
+2. 边画边说一句说明；圈一个区域、拉一条连接线，再移动一个对象。
+3. 点击发送，等待白板明确显示“已送入主对话”。
+4. 在当前主对话确认它接住了这轮上下文，并基于它继续讨论。
 
-- `prompt-package.json`, `engine/process-ir.json`,
-  `engine/compact-package.json`, `round.json`, `archive.json`, and
-  `handoff.json` exist.
-- Every imported material is retained as an independently addressable artifact,
-  including materials added after the round began. The package does not emit a
-  whiteboard-decided `round_kind`.
-- A circle, freehand mark, or arrow overlapping a material becomes an
-  unresolved, image-relative observation; it is not promoted to an edit intent.
-- The unspoken mark has `speech_link_status: unavailable`.
-- Zoom/pan appear only as viewport observations; object movement remains a
-  layout observation.
-- `handoff.json` reaches `accepted` or `delivered` with the exact thread/turn
-  identifiers; a visible Desktop reply is required for `delivered`.
-- `get_latest_prompt_package` and `get_round_artifact(process_ir)` read this
-  project only. Inline image data must be excluded from MCP output.
+**通过条件：** 包含画笔记录、编译产物和 `accepted` 或 `delivered` 的交接回执；主对话没有要求测试者手动粘贴 JSON 或切换到别的项目。
 
-## P0 deictic-binding round
+## Round 2：图片批阅（项目 A）
 
-1. 在同一回合中放置至少两个可区分的对象或素材区域。
-2. 只说 `this / here` 或“这个 / 这里”，并在说话时圈选、指向或移动其中一个对象。
-3. 导出后检查 Process IR / Compact Package。
+1. 新开一轮，导入一张图片。
+2. 圈出两个区域，但只口述其中一个；缩放、平移并移动一个批注。
+3. 发送并记下 Package ID。
 
-Expected evidence:
+**通过条件：** 轮次包含图片素材和相对素材的批注观察；未口述的圈保持未决，不被说成已确认的编辑意图；视图缩放/平移不被改写成对象移动语义。
 
-- 每个指代语音片段都有时间范围与 `reference_candidate`；
-- 候选对象或素材区域带空间边界，并说明来自 `nearby_canvas_action`、`pointer_hit`、素材相对位置等何种支撑；
-- 无唯一证据时保持 `unresolved`，不输出确定对象绑定；
-- 主对话只能基于候选复述或追问，不能把候选写成用户已确认的事实。
+## Round 3：项目隔离（项目 B）
 
-## Consecutive-round isolation
+1. 通过同一安装候选为项目 B 打开画布。
+2. 完成一轮简短画图和发送，记下 Package ID。
+3. 对比项目 A、B 的运行时身份与本地归档位置。
 
-1. Immediately export a second, visibly different round.
-2. Confirm `latest-prompt-package.json` identifies round B.
-3. Confirm the prompt packages, screenshots, Process IRs, Compact packages and
-  handoff receipts under rounds A and B still identify their own package IDs.
-4. Delete B in Local Archive and confirm latest rolls back to A; wait past any pending handoff completion and confirm B is not recreated.
-5. Delete A and confirm latest is removed.
+**通过条件：** 两个项目各自只读写自己的 `.canvas-prompt/`；项目 B 没有复用项目 A 的服务身份、最新轮次或交接内容。
 
-## Fail conditions
+## 生成验收报告
 
-Do not release if any of these occurs:
+三轮结束后，运行安装包内的验收工具。报告只可保存在本地或私有 PR，绝不能加入公开仓库：
 
-- Canvas service for project B reuses project A's identity or storage.
-- MCP reports `unbound`, plugin-root scope, or reads another project.
-- `handoff.json` claims acceptance before `turn/start` is accepted.
-- A later `accepted`, timeout, or failure receipt overwrites an earlier `delivered` receipt.
-- An accepted handoff times out or exits while the UI remains indefinitely in “processing”.
-- A deleted round is recreated by a late handoff write.
-- A package without timestamped segments binds speech to a review mark.
+```bash
+python3 maintainer-skills/canvas-prompt-demo-acceptance/scripts/check_demo_acceptance.py \
+  --project-a /绝对路径/项目A \
+  --blank-round pp_空白轮次ID \
+  --review-round pp_图片轮次ID \
+  --project-b /绝对路径/项目B \
+  --isolation-round pp_隔离轮次ID \
+  --report /绝对路径/私有位置/demo-acceptance-report.json
+```
+
+`passed: true` 是发布前的必要证据，但不证明英语泛化、自动意图识别或唯一指代绑定。任何一轮的 `failed`、`timed_out`、仅保存未交接、串项目或需要手工补救，均为失败；修复后必须重新做那一轮，不能原地修改产物。
+
+## 不属于 v0.1 发布阻塞的校准
+
+`this / here`、圈画、箭头、光标停驻和英语表达会保留为带时间与空间证据的候选。可额外收集样本用于发布后校准，但不把“自动绑定到唯一对象”的准确率作为这三轮验收的隐含要求。
