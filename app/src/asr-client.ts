@@ -46,10 +46,15 @@ export class ASRClient {
     this.timeout = options.timeout || 120000
   }
 
+  /** The canvas runtime publishes the loopback ASR endpoint it actually started. */
+  setBaseUrl(baseUrl: string): void {
+    this.baseUrl = baseUrl.replace(/\/$/, '')
+  }
+
   /**
    * 健康检查
    */
-  async health(): Promise<{ status: string; backend: string; whisper_loaded: boolean }> {
+  async health(): Promise<{ status: string; backend?: string; whisper_loaded?: boolean; canvas_prompt_asr?: boolean }> {
     const response = await fetch(`${this.baseUrl}/health`)
     if (!response.ok) {
       throw new Error(`Health check failed: ${response.status}`)

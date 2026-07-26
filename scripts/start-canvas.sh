@@ -102,8 +102,8 @@ if [ ! -f "$CORE_APP_DIR/package.json" ]; then
   exit 1
 fi
 
+"$ROOT_DIR/scripts/bootstrap-runtime.sh" --core-only
 cd "$CORE_APP_DIR"
-if [ ! -d node_modules ] || [ ! -x node_modules/.bin/vite ]; then npm install; fi
 PORT_SELECTION="$(select_port)"
 if [[ "$PORT_SELECTION" == reuse:* ]]; then exit 0; fi
 PORT="$PORT_SELECTION"

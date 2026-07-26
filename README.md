@@ -18,24 +18,52 @@ Draw, circle, move, and explain. Canvas Prompt preserves the canvas state, event
 
 This alpha does not include in-canvas AI generation, automated teaching, BoardScript write-back, or PDF/PPT review. OCR exists as an isolated research path and is not enabled in the main app flow.
 
-## Requirements
+## Runtime dependencies and capability contract
 
-The current alpha is validated on macOS with Codex Desktop. Local development requires:
+Canvas Prompt is local-first, not zero-dependency. A clean machine needs the
+following; `canvas-prompt setup` manages Canvas Prompt-owned dependencies and
+does **not** modify global Node/Python installs.
 
-- Node.js `22.12` or newer and npm;
-- Python `3.11` or newer for the Process IR compiler and validators;
-- microphone permission for voice capture;
-- an optional local ASR service at `http://127.0.0.1:8080` for timestamped transcription.
+| Layer | Requirement | How it is handled |
+| --- | --- | --- |
+| Core canvas | Node.js `22.12+`, npm | Required from the host machine; locked app packages are installed once and then reused. |
+| Compiler | Python `3.11+` | Required from the host machine; the current Process IR compiler uses only the Python standard library. |
+| Speech transcription | Canvas Prompt local ASR runtime | Installed into `~/.canvas-prompt/runtime/asr-venv` (or `CANVAS_PROMPT_RUNTIME_DIR`); first start downloads the selected `faster-whisper` model to the local cache. No private project, global Whisper, or manually-installed `ffmpeg` is assumed. |
+| Voice capture | Browser microphone permission | Required only to record audio. |
+| AI continuation | Host adapter + project-bound MCP | Codex automatic handoff additionally needs Codex Desktop's CLI and a current task. Other hosts need a registered MCP server plus their host Skill/adapter. |
 
-Without the local ASR service, canvas actions and snapshots still work and the original recording can be archived, but timestamped speech evidence will be unavailable. The first development start may download npm dependencies.
+Default `setup` prepares local ASR; it is not a hidden optional prerequisite.
+The isolated runtime measured about **235 MB** in the current macOS arm64
+check, and the base speech model downloads about **148 MB** into a local cache
+on first start, then is reused. Exact size and first-start time vary by
+platform and network; the installer repeats this before downloading. For a
+visual-only canvas, explicitly use `setup --core-only` or set
+`CANVAS_PROMPT_ASR=disabled`; browser speech recognition is never a default or
+silent fallback.
+
+The launcher never probes arbitrary project folders for Whisper/ffmpeg; it
+reuses an occupied ASR endpoint only after its health response proves a
+supported local Whisper-compatible contract. macOS arm64 is the only validated
+platform today. Intel Macs, Windows, and Linux remain acceptance-test targets,
+not supported-platform claims.
+
+Before starting a session, the canvas checks local ASR health. If it is not
+ready, the UI says **“Audio saved only”**: recording is archived locally, but
+the round contains no speech transcript. A missing MCP or host handoff is also
+reported as unavailable; an agent must not scan raw archives or invent a
+browser/audio fallback.
 
 ## Local development
 
 ```bash
-npm ci
-npm --prefix app ci
-npm run verify
-./scripts/start-canvas.sh /absolute/path/to/active-project
+# Installs/reuses the Canvas Prompt app and local ASR runtime.
+node bin/canvas-prompt.mjs setup --project /absolute/path/to/active-project
+
+# Shows project binding, ASR readiness, and the MCP configuration.
+node bin/canvas-prompt.mjs doctor --project /absolute/path/to/active-project
+
+# Starts the managed ASR service and the canvas. Use --host codex only inside Codex.
+node bin/canvas-prompt.mjs open --host codex --project /absolute/path/to/active-project
 ```
 
 Open the URL printed by the launcher. It prefers `http://127.0.0.1:43223/` and selects another local port when necessary.
@@ -63,6 +91,7 @@ Canvas Prompt's durable output is a project-local Prompt Package plus a local MC
 
 ```bash
 node bin/canvas-prompt.mjs init --project /absolute/path/to/active-project
+node bin/canvas-prompt.mjs setup --project /absolute/path/to/active-project
 node bin/canvas-prompt.mjs open --project /absolute/path/to/active-project
 ```
 

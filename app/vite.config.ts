@@ -27,13 +27,25 @@ const latestPackagePath = resolve(projectDir, '.canvas-prompt', 'latest-prompt-p
 const roundsDir = resolve(projectDir, '.canvas-prompt', 'rounds')
 const runCommand = promisify(execFile)
 const deliveryMode = process.env.CANVAS_PROMPT_DELIVERY_MODE === 'codex' ? 'codex' : 'local'
+const configuredAsrUrl = process.env.CANVAS_PROMPT_ASR_URL ?? `http://127.0.0.1:${process.env.CANVAS_PROMPT_ASR_PORT ?? '8080'}`
+
+function localAsrUrl() {
+  try {
+    const value = new URL(configuredAsrUrl)
+    if (value.protocol !== 'http:' || !['127.0.0.1', 'localhost', '::1'].includes(value.hostname)) return null
+    return value.toString().replace(/\/$/, '')
+  } catch {
+    return null
+  }
+}
 
 function runtimeIdentity() {
   return realpath(projectDir).catch(() => projectDir).then((canonicalProjectDir) => ({
     project_dir: canonicalProjectDir,
     project_hash: createHash('sha256').update(canonicalProjectDir).digest('hex'),
-    service_version: '0.1.5',
+    service_version: '0.1.6',
     delivery_mode: deliveryMode,
+    asr_url: localAsrUrl(),
   }))
 }
 

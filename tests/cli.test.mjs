@@ -22,5 +22,16 @@ test('doctor reports a missing package without treating it as a failure', () => 
   const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
   const result = run('doctor', '--project', project)
   assert.equal(result.status, 0, result.stderr)
-  assert.equal(JSON.parse(result.stdout).latest_package_exists, false)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.latest_package_exists, false)
+  assert.equal(typeof report.managed_runtime_dir, 'string')
+  assert.equal(typeof report.asr.ready, 'boolean')
+  assert.equal(typeof report.asr.endpoint, 'string')
+})
+
+test('setup can prepare only the core runtime without changing a global environment', () => {
+  const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
+  const result = run('setup', '--core-only', '--project', project)
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stderr, /Canvas Prompt app dependencies|Reusing Canvas Prompt app dependencies/)
 })

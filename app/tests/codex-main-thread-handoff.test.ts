@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import { deleteRoundAndUpdateLatest } from '../round-store.mjs'
-import { HANDOFF_COMPLETION_TIMEOUT_MS, appServerEnvironment, createHandoffStatusWriter, handoffMessage, handoffToMainThread, isVerifiedMainThreadBinding, matchesExpectedTurn, resolveAppServerCommand, selectMainThreadId } from '../codex-main-thread-handoff.mjs'
+import { HANDOFF_COMPLETION_TIMEOUT_MS, appServerCommandCandidates, appServerEnvironment, createHandoffStatusWriter, handoffMessage, handoffToMainThread, isVerifiedMainThreadBinding, matchesExpectedTurn, resolveAppServerCommand, selectMainThreadId } from '../codex-main-thread-handoff.mjs'
 
 async function waitFor<T>(read: () => Promise<T>, accept: (value: T) => boolean, label: string, timeoutMs = 1_500): Promise<T> {
   const deadline = Date.now() + timeoutMs
@@ -97,7 +97,11 @@ function startHandoff(harness: Awaited<ReturnType<typeof createHarness>>, overri
     roundPath: harness.roundPath,
     engine: { ok: true },
     appServerCommand: harness.commandPath,
-    startupTimeoutMs: 2_000,
+    // The fake App Server starts a fresh Node process. Give it the same
+    // headroom under the full Vitest suite as it has in isolated execution;
+    // two seconds is intermittently too short when the browser bundle tests
+    // are compiling in parallel.
+    startupTimeoutMs: 5_000,
     completionTimeoutMs: 500,
     focusThread: async () => false,
     ...overrides,
@@ -147,6 +151,10 @@ describe('main-thread handoff routing', () => {
 
   it('uses an explicit app-server command before PATH discovery', () => {
     expect(resolveAppServerCommand('/tmp/codex-test')).toBe('/tmp/codex-test')
+  })
+
+  it('discovers the Codex CLI bundled in ChatGPT.app when PATH is sparse', () => {
+    expect(appServerCommandCandidates('/Users/example', { PATH: '/usr/bin' })).toContain('/Applications/ChatGPT.app/Contents/Resources/codex')
   })
 
   it('tells the receiving task to read Compact Package before any browser canvas', () => {
