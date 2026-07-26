@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "canvas_prompt": {
+      "command": "bash",
+      "args": ["./scripts/start-mcp.sh"],
+      "cwd": ".",
+      "env_vars": ["CANVAS_PROMPT_PROJECT_DIR"]
+    }
+  }
+}

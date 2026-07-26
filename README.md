@@ -1,130 +1,64 @@
-# Canvas Prompt
+# Canvas Prompt for Codex
 
-Canvas Prompt is an open, high-bandwidth input protocol for thinking with AI before goals are fully formed.
+[简体中文](./README.zh-CN.md) · English
 
-## The Problem
+Canvas Prompt is a local thinking canvas for the work that happens before a clean chat prompt exists.
 
-Most AI interfaces assume you already know what you want.
+Draw, circle, move, and explain. Canvas Prompt preserves the canvas state, event timeline, voice alignment, and revisions as a project-local **Prompt Package** that Codex can inspect while keeping observations, inferences, and unresolved points separate.
 
-They work well once a task can be written as:
+## Alpha scope
 
-- a prompt
-- a PRD
-- an issue
-- a structured request
+- **Reasoning rounds**: preserve how a question took shape, including branches, movement, resizing, deletion, and revision.
+- **Image review rounds**: place an image on the canvas, mark regions, and explain requested changes aloud.
+- **Project-local archive**: save the Prompt Package, original recording, canvas snapshot, Process IR, Compact Package, and handoff receipt under the active project's `.canvas-prompt/` directory.
+- **Codex handoff**: submit one immutable round to the current Codex task and distinguish local save, task acceptance, delivery, and failure.
+- **Evidence boundary**: retain observable canvas and speech evidence without presenting inferred intent as a direct fact.
 
-But many important tasks start earlier than that.
+This alpha does not include in-canvas AI generation, automated teaching, BoardScript write-back, or PDF/PPT review. OCR exists as an isolated research path and is not enabled in the main app flow.
 
-Before the goal is fully formed, people think in fragments:
+## Requirements
 
-- sketches
-- arrows
-- spatial grouping
-- revisions
-- spoken clarifications
-- partial structures
+The current alpha is validated on macOS with Codex Desktop. Local development requires:
 
-That stage is still poorly supported by today's AI interfaces.
+- Node.js `22.12` or newer and npm;
+- Python `3.11` or newer for the Process IR compiler and validators;
+- microphone permission for voice capture;
+- an optional local ASR service at `http://127.0.0.1:8080` for timestamped transcription.
 
-## The Claim
+Without the local ASR service, canvas actions and snapshots still work and the original recording can be archived, but timestamped speech evidence will be unavailable. The first development start may download npm dependencies.
 
-Canvas Prompt is based on a simple claim:
+## Local development
 
-**the evidence produced while you think should be available as part of the input.**
+```bash
+npm ci
+npm --prefix app ci
+npm run verify
+./scripts/start-canvas.sh /absolute/path/to/active-project
+```
 
-Instead of forcing early-stage thinking into a linear chat box, we treat:
+Open the URL printed by the launcher. It prefers `http://127.0.0.1:43223/` and selects another local port when necessary.
 
-- canvas state
-- drawing order
-- grouping
-- spatial hierarchy
-- voice
-- revision history
+## Plugin installation status
 
-as a richer, auditable input layer for AI collaboration.
+The development source of truth is the plugin directory itself. The local personal marketplace can install it with:
 
-## Current Direction
+```bash
+codex plugin add canvas-prompt@personal
+```
 
-This project is exploring three layers:
+A public Git marketplace release is planned at `dlxeva/canvas-prompt`. These commands are valid only after that repository contains the release layout `.agents/plugins/marketplace.json` plus `plugins/canvas-prompt/`:
 
-1. `Final canvas understanding`
-   AI reads the final whiteboard as a structured thinking artifact.
+```bash
+codex plugin marketplace add https://github.com/dlxeva/canvas-prompt
+codex plugin add canvas-prompt@canvas-prompt
+```
 
-2. `Event timeline as evidence`
-   The protocol preserves what changed and when. It does not by itself prove the identity or meaning of an anonymous stroke.
+After installing or updating the plugin, open a new Codex task so the current skills and MCP tools are loaded.
 
-3. `Voice + timeline + canvas alignment`
-   Spoken explanations and canvas changes can support traceable, text-level process conclusions such as revision, convergence, or a stated next step.
+## Privacy
 
-## Current Status
-
-This is an active research and prototype project.
-
-What already exists:
-
-- a web MVP
-- Prompt Package export
-- whiteboard event capture
-- final canvas snapshot export
-- voice capture diagnostics
-- early multimodal interpretation experiments
-
-What is still being validated:
-
-- robust speech-to-text quality
-- stable multimodal alignment
-- whether process evidence improves understanding on held-out, human-gold-labelled examples
-- reliable named-object association before making object-level state claims
-
-## Evidence Boundary
-
-Canvas Prompt distinguishes three kinds of output:
-
-1. **Raw evidence** — canvas snapshots, event records, and optional voice references.
-2. **Text-level process evidence** — a stated revision, convergence, or next step, linked back to source evidence.
-3. **Object-level claims** — for example, that a specific object was promoted, rejected, or superseded. These require a named object or another auditable association; time proximity alone is not enough.
-
-This repository publishes the protocol and examples, not a claim that every drawing action can reveal a person's intent.
-
-## Privacy and Examples
-
-Public examples must be synthetic or explicitly consented and de-identified. Do not publish raw recordings, transcripts, screenshots, or whiteboards from real sessions without clear permission.
-
-## Why This Matters
-
-If this works, AI no longer waits only for finished prompts.
-
-It can collaborate earlier, while ideas are still forming.
-
-That opens a path toward:
-
-- better strategic thinking support
-- better creative collaboration
-- better knowledge externalization
-- higher-bandwidth human-AI co-thinking
-
-## Scope
-
-Canvas Prompt is **not** trying to replace all chat interfaces.
-
-It is designed for cases where:
-
-- the thinking is complex
-- the structure matters
-- the process matters
-- linear text is too lossy
-
-## Early Keywords
-
-- high-bandwidth AI input
-- pre-goal collaboration
-- Prompt Package
-- nonlinear input protocol
-- cognitive event stream
-- whiteboard-native AI collaboration
+See [PRIVACY.md](./PRIVACY.md) or [隐私说明](./PRIVACY.zh-CN.md). Do not publish `.canvas-prompt/` data or real recordings, screenshots, transcripts, or whiteboards without explicit permission.
 
 ## License
 
-This repository is licensed under **GNU AGPL-3.0-or-later**. It is intended to keep public modifications to the protocol implementation and any network-deployed derivative available to the community under the same license.
-
-The license applies to the contents of this repository; it does not publish private recordings, evaluation data, or other materials that are not included here.
+Canvas Prompt-owned code is available under [AGPL-3.0-or-later](./LICENSE). Third-party components retain their own licenses; see [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).

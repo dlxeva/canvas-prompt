@@ -1,0 +1,33 @@
+{
+  "name": "canvas-prompt",
+  "version": "0.1.1+codex.20260726130000",
+  "description": "A local thinking canvas for Codex: draw, circle, move, and export the context behind your prompt.",
+  "author": {
+    "name": "Canvas Prompt"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Canvas Prompt",
+    "shortDescription": "Draw, circle, move, and export the context behind your prompt.",
+    "longDescription": "Canvas Prompt is a local canvas for the work that happens before a clean chat prompt exists. Draw, circle, move, and explain; export the round as project-local context that Codex can read.",
+    "developerName": "Canvas Prompt",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive canvas",
+      "Voice and timeline capture",
+      "Prompt Package export",
+      "Project-local package persistence",
+      "MCP package inspection"
+    ],
+    "brandColor": "#C8462B",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "logoDark": "./assets/logo-dark.png",
+    "defaultPrompt": [
+      "Open the Canvas Prompt thinking canvas for this project.",
+      "Export this Canvas Prompt session as a Prompt Package.",
+      "Read the latest Canvas Prompt Package for this project."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

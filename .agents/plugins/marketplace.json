@@ -1,0 +1,20 @@
+{
+  "name": "canvas-prompt",
+  "interface": {
+    "displayName": "Canvas Prompt"
+  },
+  "plugins": [
+    {
+      "name": "canvas-prompt",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

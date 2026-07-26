@@ -1,0 +1,365 @@
+import { spawn } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
+import { mkdir, realpath, rename, unlink, writeFile } from 'node:fs/promises'
+import { delimiter, dirname, resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { randomUUID } from 'node:crypto'
+import { isRoundHandoffCancelled } from './round-lifecycle.mjs'
+
+// The receipt is persisted as soon as the target turn accepts it.  This guard
+// only bounds the optional completion watcher, so it must never leave the UI
+// looking as if export itself is still running.
+// Acceptance is the user-facing completion point: the person can continue in
+// the main conversation immediately.  Completion is a background observer
+// only, so it must accommodate a genuinely long model turn rather than turn a
+// healthy handoff into an artificial timeout after 75 seconds.
+export const HANDOFF_COMPLETION_TIMEOUT_MS = 10 * 60_000
+const HANDOFF_STARTUP_TIMEOUT_MS = 20_000
+
+function readMainThreadBinding(projectDir) {
+  const path = resolve(projectDir, '.canvas-prompt', 'main-thread.json')
+  if (!existsSync(path)) return null
+  try {
+    const value = JSON.parse(readFileSync(path, 'utf8'))
+    if (!isVerifiedMainThreadBinding(value, projectDir)) return null
+    return { threadId: value.thread_id, path }
+  } catch {
+    return null
+  }
+}
+
+export function isVerifiedMainThreadBinding(value, projectDir) {
+  return value?.version === 2
+    && value?.enabled === true
+    && typeof value.thread_id === 'string'
+    && Boolean(value.thread_id.trim())
+    && value.project_dir === projectDir
+}
+
+async function saveMainThreadBinding(projectDir, threadId) {
+  if (!threadId) return
+  const directory = resolve(projectDir, '.canvas-prompt')
+  try {
+    await mkdir(directory, { recursive: true })
+    await writeFile(resolve(directory, 'main-thread.json'), `${JSON.stringify({
+      version: 2,
+      project_dir: projectDir,
+      enabled: true,
+      thread_id: threadId,
+      source: 'automatic-project-recency',
+      updated_at: new Date().toISOString(),
+    }, null, 2)}\n`, 'utf8')
+  } catch {
+    // A convenience binding must never block the export itself.
+  }
+}
+
+/** Exact project identity only. A matching folder name is never enough to route user data. */
+export function selectMainThreadId(threads, projectDir, savedBinding) {
+  const exact = threads.find((thread) => thread?.cwd === projectDir)
+  if (typeof exact?.id === 'string' && exact.id.trim()) return { threadId: exact.id, source: 'exact_cwd' }
+  if (typeof savedBinding?.threadId === 'string' && savedBinding.threadId.trim()) return { threadId: savedBinding.threadId, source: 'verified_binding' }
+  return null
+}
+
+async function persistHandoffStatus(roundPath, result) {
+  const path = resolve(roundPath, 'handoff.json')
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`
+  const attemptId = typeof result.handoff_attempt_id === 'string' ? result.handoff_attempt_id : null
+  const attemptPath = attemptId ? resolve(roundPath, 'handoff-attempts', `${attemptId}.json`) : null
+  const attemptTemporary = attemptPath ? `${attemptPath}.${process.pid}.${randomUUID()}.tmp` : null
+  try {
+    // The immutable round must already exist. Never recreate a user-deleted
+    // round merely because the App Server reports a late terminal event.
+    if (isRoundHandoffCancelled(roundPath) || !existsSync(roundPath)) return false
+    const receipt = `${JSON.stringify({ updated_at: new Date().toISOString(), ...result }, null, 2)}\n`
+    if (attemptPath && attemptTemporary) {
+      await mkdir(dirname(attemptPath), { recursive: true })
+      await writeFile(attemptTemporary, receipt, 'utf8')
+    }
+    await writeFile(temporary, receipt, 'utf8')
+    if (isRoundHandoffCancelled(roundPath) || !existsSync(roundPath)) {
+      await unlink(temporary).catch(() => undefined)
+      if (attemptTemporary) await unlink(attemptTemporary).catch(() => undefined)
+      return false
+    }
+    if (attemptPath && attemptTemporary) await rename(attemptTemporary, attemptPath)
+    await rename(temporary, path)
+    return true
+  } catch {
+    await unlink(temporary).catch(() => undefined)
+    if (attemptTemporary) await unlink(attemptTemporary).catch(() => undefined)
+    // Handoff observability must not change the export result.
+    return false
+  }
+}
+
+/**
+ * Serialize all receipt writes. Explicit Codex terminal states are never
+ * overwritten by a later observer event from the same App Server process.
+ */
+export function createHandoffStatusWriter(roundPath, persist = persistHandoffStatus) {
+  let queue = Promise.resolve()
+  let terminal = false
+  return {
+    write(result) {
+      queue = queue.then(async () => {
+        if (terminal) return
+        await persist(roundPath, result)
+        if (['delivered', 'completed_failed', 'completed_cancelled'].includes(result.status)) terminal = true
+      })
+      return queue
+    },
+    flush() { return queue },
+  }
+}
+
+export function turnIdFrom(value) {
+  const candidate = value?.turn?.id ?? value?.turn_id ?? value?.id
+  return typeof candidate === 'string' && candidate.trim() ? candidate : null
+}
+
+export function matchesExpectedTurn(expectedTurnId, completed) {
+  return Boolean(expectedTurnId) && turnIdFrom(completed) === expectedTurnId
+}
+
+/** Resolve the desktop CLI without depending on Vite's reduced PATH. */
+export function resolveAppServerCommand(override) {
+  if (typeof override === 'string' && override.trim()) return override.trim()
+  for (const candidate of [
+    process.env.CANVAS_PROMPT_CODEX_COMMAND,
+    process.env.CODEX_EXECUTABLE,
+    resolve(homedir(), '.npm-global', 'bin', 'codex'),
+    resolve(homedir(), '.local', 'bin', 'codex'),
+  ]) {
+    if (typeof candidate === 'string' && candidate.trim() && existsSync(candidate)) return candidate
+  }
+  // Retain PATH lookup as a final compatibility fallback. The resulting
+  // failure is persisted in handoff.json instead of being reported as sent.
+  return 'codex'
+}
+
+/**
+ * launchd starts the Canvas service with a deliberately small PATH. The
+ * desktop CLI installed by npm uses `#!/usr/bin/env node`, so preserve the
+ * Node locations that can execute that shim instead of relying on the shell
+ * environment that happened to launch Vite.
+ */
+export function appServerEnvironment(base = process.env) {
+  const pathEntries = [
+    dirname(process.execPath),
+    resolve(homedir(), '.local', 'bin'),
+    resolve(homedir(), '.npm-global', 'bin'),
+    base.PATH,
+  ].filter((value, index, values) => typeof value === 'string' && value && values.indexOf(value) === index)
+  return { ...base, PATH: pathEntries.join(delimiter) }
+}
+
+export function handoffMessage({ packagePath, roundPath, engine, snapshotPath, keyframePaths = [] }) {
+  const enginePaths = [engine?.process_ir_path, engine?.compact_package_path].filter(Boolean)
+  return [
+    '[Canvas Prompt｜本轮推演上下文]',
+    snapshotPath ? '上方附件是本轮画布最终快照；完整上下文已随本轮一同接收。' : '本轮完整上下文已接收。',
+    '请将下面的本地文件作为本轮输入上下文读取；它记录的是画布、语音、时间、空间关系和变换过程。',
+    `Prompt Package：${packagePath}`,
+    `本轮目录：${roundPath}`,
+    ...(keyframePaths.length ? [`状态帧（仅在需要理解沉默的空间重组时查看）：${keyframePaths.join('；')}`] : []),
+    ...(enginePaths.length ? [`核心编译产物：${enginePaths.join('；')}`] : []),
+    [
+      '快速读取规则：先用 Canvas Prompt MCP 读取 Compact Package；不要打开浏览器画布、索取 Base64 截图，或回放原始笔迹作为第一步。只有 Compact Package 明确留下重要视觉歧义时，才查看一个本地快照。',
+      '协作规则：先读取 Prompt Package 与核心编译产物，再选择协作路由；不要只做泛泛复述。',
+      '1. 推演：若语音或明确对象能支持问题/目标，先给出你确认的结构与尚未解决的关键点，然后帮助人推进一个下一步（遗漏、风险、取舍或决策），不替代人的判断。',
+      '2. 图片批阅：若存在导入图片与圈画/标注，按区域列出可执行修改；没有对应语音时只说“已标出，修改意图待确认”。',
+      '3. 语义不足但有空间重组：先报告可直接观察到的创建、移动、缩放、删除与状态帧变化；不要给对象杜撰名称或优先级。只提出一个最小澄清问题，说明回答后你能继续做什么。',
+      '把“观察”“合理推断”“待确认”明确分开。位置、颜色、缩放、停顿只能作为弱线索，不能单独证明意图。',
+    ].join('\n'),
+  ].join('\n')
+}
+
+/**
+ * Starts a turn in the existing Codex Desktop thread. This is intentionally
+ * separate from the old bridge, which spawned a new child Codex conversation.
+ */
+export async function handoffToMainThread({
+  projectDir,
+  packagePath,
+  roundPath,
+  snapshotPath,
+  keyframePaths,
+  engine,
+  appServerCommand = undefined,
+  startupTimeoutMs = HANDOFF_STARTUP_TIMEOUT_MS,
+  completionTimeoutMs = HANDOFF_COMPLETION_TIMEOUT_MS,
+  handoffAttemptId = randomUUID(),
+}) {
+  const canonicalProjectDir = await realpath(projectDir).catch(() => resolve(projectDir))
+  const savedBinding = readMainThreadBinding(canonicalProjectDir)
+  const resolvedAppServerCommand = resolveAppServerCommand(appServerCommand)
+
+  return await new Promise((resolveHandoff) => {
+    const child = spawn(resolvedAppServerCommand, ['app-server', '--stdio'], {
+      cwd: projectDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: appServerEnvironment(),
+    })
+    let buffer = ''
+    let settled = false
+    let initialized = false
+    let resumed = false
+    let stage = 'spawned'
+    let targetThreadId = null
+    let expectedTurnId = null
+    let startupTimer = null
+    let completionTimer = null
+    const statusWriter = createHandoffStatusWriter(roundPath)
+
+    const withAttempt = (result) => ({ ...result, handoff_attempt_id: handoffAttemptId })
+    const finish = (result, { terminate = true } = {}) => {
+      if (settled) return
+      settled = true
+      if (startupTimer) clearTimeout(startupTimer)
+      if (completionTimer) clearTimeout(completionTimer)
+      if (terminate) child.kill('SIGTERM')
+      const receipt = withAttempt(result)
+      void statusWriter.write(receipt).finally(() => resolveHandoff(receipt))
+    }
+    const send = (message) => child.stdin.write(`${JSON.stringify(message)}\n`)
+    startupTimer = setTimeout(() => finish({ status: 'failed', stage, attempted: true, accepted: false, delivered: false, threadId: targetThreadId, reason: '主对话桥接未能在初始化阶段建立连接。' }), startupTimeoutMs)
+
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.trim()) continue
+        let message
+        try { message = JSON.parse(line) } catch { continue }
+        if (message.id === 1 && message.result && !initialized) {
+          initialized = true
+          stage = 'initialized'
+          send({ method: 'initialized', params: {} })
+          // The canvas may only route to the exact project directory or a
+          // binding previously verified for that same canonical directory.
+          send({ id: 2, method: 'thread/list', params: {
+            limit: 100,
+            sortKey: 'recency_at',
+            sortDirection: 'desc',
+          } })
+          continue
+        }
+        if (message.id === 2) {
+          const threads = Array.isArray(message.result?.data) ? message.result.data : []
+          const selected = selectMainThreadId(threads, canonicalProjectDir, savedBinding)
+          targetThreadId = selected?.threadId ?? null
+          if (!targetThreadId) {
+            return finish({ status: 'failed', stage, attempted: true, accepted: false, delivered: false, reason: '未找到此项目的 Codex 主对话' })
+          }
+          stage = 'thread_selected'
+          void saveMainThreadBinding(canonicalProjectDir, targetThreadId)
+          send({ id: 3, method: 'thread/resume', params: { threadId: targetThreadId } })
+          continue
+        }
+        if (message.id === 3) {
+          if (message.error) return finish({ status: 'failed', stage, attempted: true, accepted: false, delivered: false, reason: message.error.message ?? '无法连接当前主对话' })
+          resumed = true
+          stage = 'resumed'
+          send({
+            id: 4,
+            method: 'turn/start',
+            params: {
+              threadId: targetThreadId,
+              input: [
+                ...(snapshotPath ? [{ type: 'localImage', path: snapshotPath, detail: 'high' }] : []),
+                { type: 'text', text: handoffMessage({ packagePath, roundPath, snapshotPath, keyframePaths, engine }) },
+              ],
+              additionalContext: {
+                'canvas-prompt-export': {
+                  kind: 'application',
+                  value: JSON.stringify({ package_path: packagePath, round_path: roundPath, engine }),
+                },
+              },
+            },
+          })
+          continue
+        }
+        if (message.id === 4) {
+          if (message.error) return finish({ status: 'failed', stage, attempted: true, accepted: false, delivered: false, reason: message.error.message ?? '主对话未接受本轮上下文' })
+          expectedTurnId = turnIdFrom(message.result)
+          if (!expectedTurnId) {
+            stage = 'turn_start_invalid'
+            return finish({
+              status: 'failed', stage, attempted: true, accepted: false, delivered: false,
+              threadId: targetThreadId,
+              reason: '主对话未返回有效的 turn ID，本轮未确认接收。',
+            })
+          }
+          // A turn has only been accepted here; killing app-server at this
+          // point aborts that turn before Desktop can receive it. Keep this
+          // process alive until the server reports completion or times out.
+          stage = 'turn_accepted'
+          if (startupTimer) clearTimeout(startupTimer)
+          completionTimer = setTimeout(() => finish({
+            status: 'accepted_timeout', stage, attempted: true, accepted: true, delivered: false,
+            threadId: targetThreadId, expected_turn_id: expectedTurnId,
+            reason: `主对话已接受本轮，但未在 ${Math.round(completionTimeoutMs / 1000)} 秒内报告完成。`,
+          }), completionTimeoutMs)
+          const accepted = withAttempt({
+            status: 'accepted', stage, attempted: true, accepted: true, delivered: false,
+            threadId: targetThreadId, expected_turn_id: expectedTurnId,
+            accepted_at: new Date().toISOString(), turn: message.result ?? null,
+          })
+          void statusWriter.write(accepted)
+          resolveHandoff(accepted)
+          continue
+        }
+        if (message.method === 'turn/completed') {
+          if (!matchesExpectedTurn(expectedTurnId, message.params)) continue
+          stage = 'turn_completed'
+          const completed = {
+            status: 'delivered', stage, attempted: true, accepted: true, delivered: true,
+            threadId: targetThreadId, expected_turn_id: expectedTurnId,
+            completed_at: new Date().toISOString(), turn: message.params?.turn ?? null,
+          }
+          return finish(completed)
+        }
+        if (message.method === 'turn/failed' || message.method === 'turn/cancelled') {
+          if (!matchesExpectedTurn(expectedTurnId, message.params)) continue
+          const cancelled = message.method === 'turn/cancelled'
+          stage = cancelled ? 'turn_cancelled' : 'turn_failed'
+          return finish({
+            status: cancelled ? 'completed_cancelled' : 'completed_failed',
+            stage, attempted: true, accepted: true, delivered: false,
+            threadId: targetThreadId, expected_turn_id: expectedTurnId,
+            completed_at: new Date().toISOString(),
+            reason: message.params?.error?.message ?? message.params?.reason ?? (cancelled ? '主对话取消了本轮处理。' : '主对话未能完成本轮处理。'),
+            turn: message.params?.turn ?? null,
+          })
+        }
+      }
+    })
+    const failureReceipt = (reason) => expectedTurnId
+      ? {
+          status: 'accepted_observer_lost', stage, attempted: true, accepted: true, delivered: false,
+          threadId: targetThreadId ?? undefined, expected_turn_id: expectedTurnId, reason,
+        }
+      : {
+          status: 'failed', stage, attempted: true, accepted: false, delivered: false,
+          threadId: targetThreadId ?? undefined, reason,
+        }
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', () => undefined)
+    child.once('error', (error) => finish(failureReceipt(error.message)))
+    child.once('exit', (code) => {
+      if (!settled) finish(failureReceipt(`主对话桥接已退出 (${code ?? 'unknown'})`), { terminate: false })
+    })
+    send({
+      id: 1,
+      method: 'initialize',
+      params: {
+        clientInfo: { name: 'canvas-prompt-handoff', version: '0.1.1' },
+        capabilities: { experimentalApi: true },
+      },
+    })
+  })
+}
