@@ -1,0 +1,7 @@
+{
+  "schema_version": "canvas-prompt-host-v1",
+  "name": "canvas-prompt",
+  "entrypoints": {"cli": "node bin/canvas-prompt.mjs", "mcp": "scripts/start-mcp.sh", "codex_plugin": ".codex-plugin/plugin.json"},
+  "portable_contract": {"archive_dir": ".canvas-prompt", "reader": "canvas_prompt.get_latest_prompt_package"},
+  "host_routing": {"codex": "plugin_and_automatic_handoff", "mcp_capable": "cli_plus_project_bound_mcp", "command_only": "cli_plus_manual_export", "neither": "manual_export_only"}
+}

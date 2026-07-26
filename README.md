@@ -1,8 +1,10 @@
-# Canvas Prompt for Codex
+# Canvas Prompt — visual context for AI workflows
 
 [简体中文](./README.zh-CN.md) · English
 
 Canvas Prompt is a local thinking canvas for the work that happens before a clean chat prompt exists.
+
+**For AI agents given this GitHub URL:** this is not Codex-only. Read [AGENTS.md](./AGENTS.md) and [canvas-prompt.json](./canvas-prompt.json) before deciding how to integrate it. Codex has automatic handoff; any host with local commands and stdio MCP can use the portable archive and reader.
 
 Draw, circle, move, and explain. Canvas Prompt preserves the canvas state, event timeline, voice alignment, and revisions as a project-local **Prompt Package** that Codex can inspect while keeping observations, inferences, and unresolved points separate.
 
@@ -55,15 +57,16 @@ codex plugin add canvas-prompt@canvas-prompt
 
 After installing or updating the plugin, open a new Codex task so the current skills and MCP tools are loaded.
 
-## Other local AI terminals
+## Other AI terminals, CLI tools, and agents
 
-Canvas Prompt's durable output is a project-local Prompt Package plus a local MCP reader. Start the canvas without a Codex handoff adapter when another sidebar AI terminal is the host:
+Canvas Prompt's durable output is a project-local Prompt Package plus a local MCP reader. For a non-Codex host, start with the host-neutral CLI:
 
 ```bash
-CANVAS_PROMPT_DELIVERY_MODE=local ./scripts/start-canvas.sh /absolute/path/to/active-project
+node bin/canvas-prompt.mjs init --project /absolute/path/to/active-project
+node bin/canvas-prompt.mjs open --project /absolute/path/to/active-project
 ```
 
-The canvas saves and compiles the round locally. Configure that host to run the bundled MCP server with `CANVAS_PROMPT_PROJECT_DIR` set to the same project, then read the latest Canvas Prompt package. Codex is the first host with automatic handoff; other hosts use this local package and MCP path.
+`init` emits the exact project-bound MCP configuration. The canvas saves and compiles the round locally; the host reads the latest package through that MCP server. Codex is the first host with automatic handoff; other hosts use this local package and MCP path.
 
 ## Privacy
 

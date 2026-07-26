@@ -1,12 +1,15 @@
 {
   "name": "canvas-prompt",
   "private": true,
-  "version": "0.1.3",
+  "version": "0.1.4",
   "type": "module",
+  "bin": {
+    "canvas-prompt": "./bin/canvas-prompt.mjs"
+  },
   "scripts": {
     "dev": "npm --prefix app run dev",
     "build": "npm --prefix app run build",
-    "test": "npm --prefix app run test && node --test tests/round-store.test.mjs tests/round-archive.test.mjs tests/round-submission.test.mjs tests/start-canvas-isolation.test.mjs mcp/server.test.mjs",
+    "test": "npm --prefix app run test && node --test tests/cli.test.mjs tests/round-store.test.mjs tests/round-archive.test.mjs tests/round-submission.test.mjs tests/start-canvas-isolation.test.mjs mcp/server.test.mjs",
     "test:python": "python3 -m unittest prompt_package_builder/test_compile_runtime_package.py prompt_package_builder/test_process_ir.py prompt_package_builder/test_evidence_contract.py",
     "verify:version": "node scripts/verify-release-version.mjs",
     "verify:assets": "bash scripts/verify-brand-assets.sh",
