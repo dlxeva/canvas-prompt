@@ -46,6 +46,7 @@ function runtimeIdentity() {
     service_version: '0.1.6',
     delivery_mode: deliveryMode,
     asr_url: localAsrUrl(),
+    asr_enabled: process.env.CANVAS_PROMPT_ASR !== 'disabled',
   }))
 }
 

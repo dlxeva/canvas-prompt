@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CALLER_DIR="$PWD"
 PROJECT_DIR="${CANVAS_PROMPT_PROJECT_DIR:-${1:-$CALLER_DIR}}"
 PORT="${CANVAS_PROMPT_PORT:-43223}"
+ASR_URL="${CANVAS_PROMPT_ASR_URL:-http://127.0.0.1:${CANVAS_PROMPT_ASR_PORT:-8080}}"
+ASR_ENABLED="${CANVAS_PROMPT_ASR:-enabled}"
 CORE_APP_DIR="$ROOT_DIR/app"
 RUNNER="$ROOT_DIR/scripts/run-canvas-service.sh"
 export CANVAS_PROMPT_PROJECT_DIR="$PROJECT_DIR"
@@ -123,7 +125,7 @@ SERVICE_LOG="${TMPDIR:-/tmp}/${SERVICE_LABEL}.log"
 # A prior crashed job can survive without a listener. Remove it before submit.
 launchctl bootout "gui/$(id -u)/${SERVICE_LABEL}" >/dev/null 2>&1 || true
 launchctl submit -l "$SERVICE_LABEL" -o "$SERVICE_LOG" -e "$SERVICE_LOG" -- \
-  "$RUNNER" "$CORE_APP_DIR" "$PROJECT_DIR" "$PORT" "$NODE_BIN"
+  "$RUNNER" "$CORE_APP_DIR" "$PROJECT_DIR" "$PORT" "$NODE_BIN" "$ASR_URL" "$ASR_ENABLED"
 
 for _ in {1..20}; do
   if curl --silent --show-error --max-time 1 "http://127.0.0.1:${PORT}/" 2>/dev/null | grep -q '<title>Canvas Prompt</title>'; then

@@ -52,7 +52,11 @@ else
   echo "Installing Canvas Prompt local ASR runtime…" >&2
   mkdir -p "$RUNTIME_DIR"
   "$PYTHON_BIN" -m venv "$VENV_DIR"
-  "$ASR_PYTHON" -m pip install --disable-pip-version-check --upgrade pip
+  # Do not upgrade pip here. A surprise upgrade adds another network request
+  # and changes the first-run dependency graph before we even install Canvas
+  # Prompt. The venv's bundled pip is enough for the pinned direct runtime
+  # requirements below.
   "$ASR_PYTHON" -m pip install --disable-pip-version-check -r "$ROOT_DIR/runtime/requirements-asr.txt"
+  "$ASR_PYTHON" -m pip check
 fi
 printf '%s\n' "$ASR_PYTHON"

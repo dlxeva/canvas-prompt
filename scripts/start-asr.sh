@@ -41,7 +41,8 @@ nohup "$ASR_PYTHON" "$ROOT_DIR/runtime/asr-server.py" --host 127.0.0.1 --port "$
 echo $! >"$PID_FILE"
 
 echo "Starting Canvas Prompt local ASR at $ASR_URL. On first launch the base speech model downloads to the local cache (about 148 MB)." >&2
-for _ in {1..240}; do
+STARTUP_TIMEOUT_SECONDS="${CANVAS_PROMPT_ASR_STARTUP_TIMEOUT_SECONDS:-600}"
+for ((attempt = 0; attempt < STARTUP_TIMEOUT_SECONDS * 2; attempt++)); do
   if healthy_asr; then
     echo "Canvas Prompt local ASR is ready at $ASR_URL" >&2
     exit 0
@@ -53,5 +54,5 @@ for _ in {1..240}; do
   sleep 0.5
 done
 
-echo "Canvas Prompt local ASR is still preparing. Log: $LOG_FILE" >&2
+echo "Canvas Prompt local ASR is still preparing after ${STARTUP_TIMEOUT_SECONDS}s. It may still be downloading the model. Log: $LOG_FILE" >&2
 exit 1
