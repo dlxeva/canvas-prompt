@@ -1,0 +1,4 @@
+interface:
+  display_name: "Read Canvas Prompt Round"
+  short_description: "Read an exported canvas round with evidence boundaries"
+  default_prompt: "Use $canvas-prompt-read-round to read the latest Canvas Prompt Package for this project."

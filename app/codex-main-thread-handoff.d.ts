@@ -1,0 +1,46 @@
+export type MainThreadHandoffInput = {
+  projectDir: string
+  packagePath: string
+  roundPath: string
+  snapshotPath?: string | null
+  keyframePaths?: string[]
+  engine: { ok: boolean; error?: string; process_ir_path?: string; compact_package_path?: string }
+  appServerCommand?: string
+  startupTimeoutMs?: number
+  completionTimeoutMs?: number
+  handoffAttemptId?: string
+}
+
+export type MainThreadHandoffStatus =
+  | 'accepted'
+  | 'delivered'
+  | 'accepted_timeout'
+  | 'accepted_observer_lost'
+  | 'completed_failed'
+  | 'completed_cancelled'
+  | 'failed'
+
+export type MainThreadHandoffResult = {
+  status: MainThreadHandoffStatus
+  attempted: boolean
+  accepted: boolean
+  delivered: boolean
+  threadId?: string
+  expected_turn_id?: string | null
+  reason?: string
+  turn?: unknown
+  handoff_attempt_id?: string
+}
+
+/** Background completion observer; acceptance remains the UI handoff point. */
+export const HANDOFF_COMPLETION_TIMEOUT_MS: number
+
+export function isVerifiedMainThreadBinding(value: unknown, projectDir: string): boolean
+
+export function selectMainThreadId(
+  threads: Array<{ id?: string; cwd?: string }>,
+  projectDir: string,
+  savedBinding?: { threadId: string } | null,
+): { threadId: string; source: 'exact_cwd' | 'verified_binding' } | null
+
+export function handoffToMainThread(input: MainThreadHandoffInput): Promise<MainThreadHandoffResult>
