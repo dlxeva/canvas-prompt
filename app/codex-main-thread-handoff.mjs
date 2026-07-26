@@ -357,7 +357,7 @@ export async function handoffToMainThread({
       id: 1,
       method: 'initialize',
       params: {
-        clientInfo: { name: 'canvas-prompt-handoff', version: '0.1.3' },
+        clientInfo: { name: 'canvas-prompt-handoff', version: '0.1.4' },
         capabilities: { experimentalApi: true },
       },
     })

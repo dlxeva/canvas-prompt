@@ -1,8 +1,10 @@
-# Canvas Prompt for Codex
+# Canvas Prompt：面向 AI 工作流的视觉上下文
 
 简体中文 · [English](./README.md)
 
 Canvas Prompt 是一块运行在本地的思考画布，承接那些还没被整理成一句清晰提示词的过程。
+
+**如果你是拿到此 GitHub URL 的 AI agent：** 它不是 Codex-only。先读 [AGENTS.md](./AGENTS.md) 与 [canvas-prompt.json](./canvas-prompt.json)，再判断接入方式。Codex 有自动交付；任何能运行本地命令且支持 stdio MCP 的宿主都可以读取同一份本地上下文包。
 
 你可以在上面画、圈、移动、缩放并同步讲述。Canvas Prompt 会把画布状态、事件时间线、语音对齐和修改过程保存成项目内的 **Prompt Package**。Codex 读取它时，会区分直接观察、推断和仍待确认的部分。
 
@@ -61,15 +63,16 @@ codex plugin add canvas-prompt@canvas-prompt
 
 安装或更新插件后，请新建一个 Codex 任务，让最新的 Skill 与 MCP 工具重新载入。
 
-## 其他本地 AI 终端
+## 其他 AI 终端、CLI 与 agent
 
-Canvas Prompt 的稳定产物是项目内的 Prompt Package 和本地 MCP 读取器。接入其他侧边栏 AI 终端时，用本地交付模式启动：
+Canvas Prompt 的稳定产物是项目内的 Prompt Package 和本地 MCP 读取器。非 Codex 宿主使用通用 CLI：
 
 ```bash
-CANVAS_PROMPT_DELIVERY_MODE=local ./scripts/start-canvas.sh /当前项目的绝对路径
+node bin/canvas-prompt.mjs init --project /当前项目的绝对路径
+node bin/canvas-prompt.mjs open --project /当前项目的绝对路径
 ```
 
-画布会完成本地保存与编译。让该终端以同一个项目路径设置 `CANVAS_PROMPT_PROJECT_DIR` 并运行随插件提供的 MCP server，即可读取最新 Canvas Prompt Package。Codex 是第一个具备自动交付的宿主；其他宿主通过这条本地上下文包与 MCP 路径接入。
+`init` 会输出当前项目绑定的 MCP 配置。画布完成本地保存与编译后，宿主即可经 MCP 读取最新 Canvas Prompt Package。Codex 是第一个具备自动交付的宿主；其他宿主通过这条本地上下文包与 MCP 路径接入。
 
 ## 隐私
 
