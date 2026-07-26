@@ -93,6 +93,7 @@ function HeaderIcon({ kind }: { kind: 'upload' | 'record' | 'stop' | 'send' | 'n
 
 type SessionStage = 'idle' | 'starting' | 'recording' | 'compiling' | 'ready' | 'error'
 type ExportStatus = ExportReceiptStatus | 'error'
+type DeliveryMode = 'codex' | 'local'
 type StoredRound = {
   package_id: string
   exported_at: string
@@ -160,6 +161,7 @@ export default function App() {
   const [lastRecording, setLastRecording] = useState<RecordingResult | null>(null)
   const [transcription, setTranscription] = useState<TranscriptionResult | null>(null)
   const [exportStatus, setExportStatus] = useState<ExportStatus>('idle')
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>('local')
   const [handoffReceipt, setHandoffReceipt] = useState<HandoffReceipt | null>(null)
   const [storedRounds, setStoredRounds] = useState<StoredRound[]>([])
   const [storageOpen, setStorageOpen] = useState(false)
@@ -202,6 +204,13 @@ export default function App() {
   useEffect(() => {
     document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en'
   }, [locale])
+
+  useEffect(() => {
+    void fetch('/api/runtime-identity', { cache: 'no-store' })
+      .then(async (response) => response.ok ? await response.json() as { delivery_mode?: DeliveryMode } : null)
+      .then((identity) => { if (identity?.delivery_mode === 'codex' || identity?.delivery_mode === 'local') setDeliveryMode(identity.delivery_mode) })
+      .catch(() => undefined)
+  }, [])
 
   const bindCanvasApi = useCallback((canvasApi: ExcalidrawImperativeAPI) => {
     apiRef.current = canvasApi
@@ -488,7 +497,7 @@ export default function App() {
     if (!compiledPackage) return
     setExportStatus('exporting')
     setHandoffReceipt(null)
-    setWorkflowMessage('正在归档并发送到当前对话…')
+    setWorkflowMessage(deliveryMode === 'codex' ? '正在归档并发送到当前对话…' : '正在归档本轮上下文…')
     const payload = {
       ...compiledPackage,
       source: { canvas: 'excalidraw', trace: trace.current, audio: lastRecording ? { mime_type: lastRecording.blob.type, duration_ms: lastRecording.duration } : null },
@@ -515,7 +524,9 @@ export default function App() {
       const receiptStatus = deriveExportReceiptStatus(result.handoff)
       setHandoffReceipt(result.handoff ?? null)
       setExportStatus(receiptStatus)
-      setWorkflowMessage(receiptStatus === 'delivered'
+      setWorkflowMessage(deliveryMode === 'local'
+        ? '本轮已保存在本地。请在你的 AI 终端中读取 Canvas Prompt 上下文。'
+        : receiptStatus === 'delivered'
         ? '本轮已送达当前 Codex 对话。'
           : receiptStatus === 'accepted'
             ? '本轮已送入主对话，请在主对话继续。'
@@ -876,7 +887,9 @@ export default function App() {
 
   const latestEvent = events.at(-1)
   const hasReceipt = exportStatus !== 'error' && isReceiptComplete(exportStatus)
-  const canRetryHandoff = exportStatus === 'failed' && handoffReceipt?.accepted !== true
+  const canRetryHandoff = deliveryMode === 'codex' && exportStatus === 'failed' && handoffReceipt?.accepted !== true
+  const exportLabel = deliveryMode === 'codex' ? text.export : locale === 'zh' ? '保存上下文' : 'Save context'
+  const retryExportLabel = deliveryMode === 'codex' ? text.retryExport : locale === 'zh' ? '重新保存上下文' : 'Save context again'
   const receiptText = exportStatus === 'delivered'
     ? text.deliveredReceipt
     : exportStatus === 'accepted'
@@ -926,12 +939,12 @@ export default function App() {
             </div>
           ) : sessionStage === 'ready' && !hasReceipt ? (
             <button className="button primary session-action" onClick={() => void exportPromptPackage()} disabled={exportStatus === 'exporting'}>
-              <HeaderIcon kind="send" /><span>{exportStatus === 'exporting' ? text.sending : exportStatus === 'error' ? text.retryExport : text.export}</span>
+              <HeaderIcon kind="send" /><span>{exportStatus === 'exporting' ? text.sending : exportStatus === 'error' ? retryExportLabel : exportLabel}</span>
             </button>
           ) : sessionStage === 'ready' && hasReceipt ? (
             <>
               <span className={`receipt-status receipt-${exportStatus}`} role="status">{receiptText}</span>
-              {canRetryHandoff ? <button className="button icon-button" onClick={() => void exportPromptPackage({ retryHandoff: true })} aria-label={text.retryExport} title={text.retryExport}><HeaderIcon kind="send" /></button> : null}
+              {canRetryHandoff ? <button className="button icon-button" onClick={() => void exportPromptPackage({ retryHandoff: true })} aria-label={retryExportLabel} title={retryExportLabel}><HeaderIcon kind="send" /></button> : null}
               <button className="button primary session-action" onClick={() => void beginTrace()}><HeaderIcon kind="next" /><span>{text.next}</span></button>
             </>
           ) : (

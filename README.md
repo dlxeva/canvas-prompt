@@ -55,6 +55,16 @@ codex plugin add canvas-prompt@canvas-prompt
 
 After installing or updating the plugin, open a new Codex task so the current skills and MCP tools are loaded.
 
+## Other local AI terminals
+
+Canvas Prompt's durable output is a project-local Prompt Package plus a local MCP reader. Start the canvas without a Codex handoff adapter when another sidebar AI terminal is the host:
+
+```bash
+CANVAS_PROMPT_DELIVERY_MODE=local ./scripts/start-canvas.sh /absolute/path/to/active-project
+```
+
+The canvas saves and compiles the round locally. Configure that host to run the bundled MCP server with `CANVAS_PROMPT_PROJECT_DIR` set to the same project, then read the latest Canvas Prompt package. Codex is the first host with automatic handoff; other hosts use this local package and MCP path.
+
 ## Privacy
 
 See [PRIVACY.md](./PRIVACY.md) or [隐私说明](./PRIVACY.zh-CN.md). Do not publish `.canvas-prompt/` data or real recordings, screenshots, transcripts, or whiteboards without explicit permission.

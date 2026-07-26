@@ -5,6 +5,7 @@ describe('export receipt truthfulness', () => {
   it.each([
     [undefined, 'archived'],
     [{ attempted: false, delivered: false }, 'archived'],
+    [{ attempted: false, status: 'archived', delivered: false, host: 'local' }, 'archived'],
     [{ attempted: true, status: 'failed', accepted: false, delivered: false }, 'failed'],
     [{ attempted: true, status: 'timed_out', accepted: true, delivered: false }, 'failed'],
     [{ attempted: true, status: 'accepted_timeout', accepted: true, delivered: false }, 'accepted'],

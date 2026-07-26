@@ -4,7 +4,8 @@ export type HandoffReceipt = {
   attempted?: boolean
   accepted?: boolean
   delivered?: boolean
-  status?: 'accepted' | 'delivered' | 'accepted_timeout' | 'accepted_observer_lost' | 'completed_failed' | 'completed_cancelled' | 'accepted_failed' | 'failed' | 'timed_out'
+  status?: 'archived' | 'accepted' | 'delivered' | 'accepted_timeout' | 'accepted_observer_lost' | 'completed_failed' | 'completed_cancelled' | 'accepted_failed' | 'failed' | 'timed_out'
+  host?: 'codex' | 'local'
   reason?: string
 }
 
@@ -14,6 +15,7 @@ export type HandoffReceipt = {
  * actually proves it.
  */
 export function deriveExportReceiptStatus(handoff: HandoffReceipt | null | undefined): ExportReceiptStatus {
+  if (handoff?.status === 'archived') return 'archived'
   if (handoff?.delivered || handoff?.status === 'delivered') return 'delivered'
   if (handoff?.status === 'failed' || handoff?.status === 'timed_out' || handoff?.status === 'completed_failed' || handoff?.status === 'completed_cancelled' || handoff?.status === 'accepted_failed') return 'failed'
   if (handoff?.status === 'accepted_timeout' || handoff?.status === 'accepted_observer_lost') return 'accepted'
