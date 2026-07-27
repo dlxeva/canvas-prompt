@@ -164,10 +164,13 @@ def validate_package(data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
         else:
             structural_fields = ["reference_candidates", "handdrawn_connection_candidates", "handdrawn_arrowhead_candidates", "visual_unit_candidates"]
             compact_version = str((data.get("meta") or {}).get("version") or "")
-            if compact_version in {"2.3", "2.4"}:
+            if compact_version in {"2.3", "2.4", "2.5"}:
                 structural_fields.append("handdrawn_circle_candidates")
-            if compact_version == "2.4":
+            if compact_version in {"2.4", "2.5"}:
                 structural_fields.append("handdrawn_cross_candidates")
+            if compact_version == "2.5":
+                structural_fields.append("handdrawn_check_candidates")
+                structural_fields.append("paired_symbol_choice_candidates")
             for field in structural_fields:
                 values = structural.get(field)
                 if not isinstance(values, list):

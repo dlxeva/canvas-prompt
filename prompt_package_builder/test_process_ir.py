@@ -10,7 +10,7 @@ VALIDATORS_DIR = MODULE_DIR.parent / "validators"
 if str(VALIDATORS_DIR) not in sys.path:
     sys.path.insert(0, str(VALIDATORS_DIR))
 from build_compact_package import build_structural_observations
-from process_ir import _ink_circle_candidates, _ink_cross_candidates, _layout_transform_observations, _reference_candidates
+from process_ir import _ink_check_candidates, _ink_circle_candidates, _ink_cross_candidates, _layout_transform_observations, _paired_symbol_choice_candidates, _reference_candidates
 from process_ir import compile_process_ir
 from validate_process_ir import validate_process_ir
 
@@ -68,21 +68,51 @@ class LayoutTransformObservationTests(unittest.TestCase):
         candidates = _ink_cross_candidates(package, objects)
 
         self.assertEqual(1, len(candidates))
-        self.assertEqual("unresolved_handdrawn_cross", candidates[0]["type"])
+        self.assertEqual("unresolved_intersecting_stroke_pair", candidates[0]["type"])
         self.assertEqual(["obj_text"], candidates[0]["candidate_object_ids"])
         self.assertEqual("unresolved", candidates[0]["resolution_status"])
 
     def test_circle_contract_is_versioned_without_rejecting_legacy_v04(self):
         package = {"meta": {"package_id": "pp_circle"}, "strokes": []}
         current = compile_process_ir(package, [], [], [])
-        self.assertEqual("process-ir-v0.6", current["schema_version"])
-        self.assertEqual("process-ir-compiler-v0.5", current["source"]["compiler_version"])
+        self.assertEqual("process-ir-v0.7", current["schema_version"])
+        self.assertEqual("process-ir-compiler-v0.6", current["source"]["compiler_version"])
         self.assertEqual([], validate_process_ir(current))
 
         legacy = deepcopy(current)
         legacy["schema_version"] = "process-ir-v0.4"
         legacy.pop("ink_circle_candidates")
+        legacy.pop("ink_cross_candidates")
+        legacy.pop("ink_check_candidates")
+        legacy.pop("paired_symbol_choice_candidates")
         self.assertEqual([], validate_process_ir(legacy))
+
+    def test_pairs_x_and_checklike_strokes_on_peer_objects_without_executing_them(self):
+        package = {
+            "strokes": [
+                {"stroke_id": "slash_a", "points": [{"x": 20, "y": 20}, {"x": 100, "y": 100}]},
+                {"stroke_id": "slash_b", "points": [{"x": 100, "y": 20}, {"x": 20, "y": 100}]},
+                {"stroke_id": "check", "points": [{"x": 160, "y": 40}, {"x": 185, "y": 90}, {"x": 280, "y": 15}]},
+            ],
+        }
+        objects = [
+            {"object_id": "obj_left", "bounds": {"x": 10, "y": 10, "width": 110, "height": 110}},
+            {"object_id": "obj_right", "bounds": {"x": 140, "y": 10, "width": 150, "height": 110}},
+            {"object_id": "obj_slash_a", "bounds": {"x": 20, "y": 20, "width": 80, "height": 80}, "source_strokes": ["slash_a"]},
+            {"object_id": "obj_slash_b", "bounds": {"x": 20, "y": 20, "width": 80, "height": 80}, "source_strokes": ["slash_b"]},
+            {"object_id": "obj_check", "bounds": {"x": 160, "y": 15, "width": 120, "height": 75}, "source_strokes": ["check"]},
+        ]
+
+        crosses = _ink_cross_candidates(package, objects)
+        checks = _ink_check_candidates(package, objects)
+        pairs = _paired_symbol_choice_candidates(crosses, checks, objects)
+
+        self.assertEqual(1, len(checks))
+        self.assertEqual(["obj_right"], checks[0]["candidate_object_ids"])
+        self.assertEqual(1, len(pairs))
+        self.assertEqual("obj_left", pairs[0]["candidate_outcome_mapping"]["negative_object_id"])
+        self.assertEqual("obj_right", pairs[0]["candidate_outcome_mapping"]["positive_object_id"])
+        self.assertEqual("unresolved", pairs[0]["resolution_status"])
 
     def test_reference_candidates_keep_ordered_pointer_dwell_evidence(self):
         captions = [{"caption_id": "seg_001", "start_ms": 1_000, "end_ms": 4_000, "text": "这里和这里只能留一个"}]
