@@ -963,6 +963,10 @@ export default function App() {
 
   const capturePointer = (event: React.PointerEvent<HTMLElement>) => {
     if (!recording || !startedAt || !api) return
+    // Excalidraw handles pointer events internally and can stop bubbling.
+    // Capture at the canvas boundary so a natural hover remains evidence even
+    // when no canvas element changes; ignore our own toolbar controls.
+    if ((event.target as Element).closest('.canvas-tools')) return
     const now = Date.now()
     if (now - lastPointerSampleAt.current < 100) return
     lastPointerSampleAt.current = now
@@ -1047,7 +1051,7 @@ export default function App() {
 
       <section
         className={imageDropActive ? 'canvas-wrap spike-canvas drop-active' : 'canvas-wrap spike-canvas'}
-        onPointerMove={capturePointer}
+        onPointerMoveCapture={capturePointer}
         onDragOverCapture={handleExternalDragOver}
         onDragLeave={() => setImageDropActive(false)}
         onDropCapture={handleExternalDrop}
