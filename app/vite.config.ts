@@ -46,7 +46,7 @@ function runtimeIdentity() {
   return realpath(projectDir).catch(() => projectDir).then((canonicalProjectDir) => ({
     project_dir: canonicalProjectDir,
     project_hash: createHash('sha256').update(canonicalProjectDir).digest('hex'),
-    service_version: '0.1.9',
+    service_version: '0.1.10',
     delivery_mode: deliveryMode,
     asr_url: localAsrUrl(),
     asr_enabled: process.env.CANVAS_PROMPT_ASR !== 'disabled',
