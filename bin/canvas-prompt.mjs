@@ -52,11 +52,40 @@ const firstOpenAsrPort = () => {
   for (let port = 18080; port < 18100; port += 1) if (!portInUse(port)) return port
   throw new Error('Canvas Prompt could not find a free local ASR port between 18080 and 18099.')
 }
+const existingCanvasRuntime = async (project) => {
+  for (let port = 43223; port < 43243; port += 1) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/runtime-identity`, { signal: AbortSignal.timeout(500) })
+      const identity = response.ok ? await response.json() : null
+      if (identity?.project_dir === project) return { ...identity, port }
+    } catch {
+      // An occupied port is common. Only a matching Canvas runtime identity
+      // may influence this project's ASR choice.
+    }
+  }
+  return null
+}
+const localAsrPort = (endpoint) => {
+  try {
+    const url = new URL(endpoint)
+    if ((url.hostname === '127.0.0.1' || url.hostname === 'localhost') && url.port) return url.port
+  } catch {
+    // A non-local endpoint is handled by the explicit environment contract.
+  }
+  return null
+}
 // A generic service on 8080 can be an older, slower ASR with a different
 // lifecycle. Reuse only a Canvas Prompt-managed service by default; an
 // explicit endpoint or opt-in flag remains available for advanced hosts.
-const asrEnvironmentForOpen = async () => {
+const asrEnvironmentForOpen = async (project) => {
   if (process.env.CANVAS_PROMPT_ASR_URL) return {}
+  // Reopening a project must reuse the exact ASR endpoint already published by
+  // its healthy canvas. Choosing a new free port before noticing the reusable
+  // canvas leaves an orphan ASR process and makes the readiness gate lie about
+  // what the visible canvas will actually use.
+  const existing = await existingCanvasRuntime(project)
+  const existingPort = localAsrPort(existing?.asr_url)
+  if (existingPort) return { CANVAS_PROMPT_ASR_PORT: existingPort }
   const current = await probeAsr()
   if (current.ready || !portInUse(Number(process.env.CANVAS_PROMPT_ASR_PORT ?? '8080'))) return {}
   return { CANVAS_PROMPT_ASR_PORT: String(firstOpenAsrPort()) }
@@ -97,7 +126,7 @@ try {
       }, null, 2))
     } else if (command === 'open') {
       const host = flag('--host') === 'codex' ? 'codex' : 'local'
-      const asrEnvironment = await asrEnvironmentForOpen()
+      const asrEnvironment = await asrEnvironmentForOpen(project)
       const environment = runtimeEnvironment(asrEnvironment)
       if (process.env.CANVAS_PROMPT_ASR !== 'disabled') {
         // Opening a session is a gate, not a race between an already-visible
