@@ -18,6 +18,29 @@ test('init emits project-bound MCP configuration', () => {
   assert.equal(parsed.mcp_config.mcpServers.canvas_prompt.env.CANVAS_PROMPT_PROJECT_DIR, canonicalProject)
 })
 
+test('init emits a conversation-bound MCP configuration when the host supplies a thread ID', () => {
+  const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
+  const threadId = '019fa-codex-thread-12345678'
+  const result = run('init', '--project', project, '--thread-id', threadId)
+  assert.equal(result.status, 0, result.stderr)
+  const parsed = JSON.parse(result.stdout)
+  assert.equal(parsed.storage_kind, 'project')
+  assert.equal(typeof parsed.thread_scope_key, 'string')
+  assert.equal(parsed.mcp_config.mcpServers.canvas_prompt.env.CANVAS_PROMPT_THREAD_ID, threadId)
+  assert.equal(parsed.mcp_config.mcpServers.canvas_prompt.env.CANVAS_PROMPT_REQUIRE_THREAD, '1')
+})
+
+test('init supports a project-less conversation only when a host thread ID is explicit', () => {
+  const threadId = '019fa-temporary-thread-12345678'
+  const result = run('init', '--conversation-only', '--thread-id', threadId)
+  assert.equal(result.status, 0, result.stderr)
+  const parsed = JSON.parse(result.stdout)
+  assert.equal(parsed.project_dir, null)
+  assert.equal(parsed.storage_kind, 'conversation')
+  assert.equal(parsed.mcp_config.mcpServers.canvas_prompt.env.CANVAS_PROMPT_PROJECT_DIR, undefined)
+  assert.equal(parsed.mcp_config.mcpServers.canvas_prompt.env.CANVAS_PROMPT_THREAD_ID, threadId)
+})
+
 test('doctor reports a missing package without treating it as a failure', () => {
   const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
   const result = run('doctor', '--project', project)

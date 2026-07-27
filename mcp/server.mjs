@@ -17,6 +17,7 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { resolve, dirname, basename, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveConversationScope, validThreadId } from '../app/conversation-scope.mjs';
 
 // ============================================================
 // Constants
@@ -32,13 +33,20 @@ const PROJECT_ROOT = resolve(__dirname, '..');
  * active project with another project's Canvas rounds.
  */
 const CONFIGURED_PROJECT_DIR = process.env.CANVAS_PROMPT_PROJECT_DIR;
-const ACTIVE_PROJECT_DIR = resolve(CONFIGURED_PROJECT_DIR || PROJECT_ROOT);
-const PROJECT_SCOPE_ERROR = !CONFIGURED_PROJECT_DIR
-  ? 'Canvas Prompt MCP was not given CANVAS_PROMPT_PROJECT_DIR; refusing to read the plugin installation directory.'
+const CONFIGURED_THREAD_ID = process.env.CANVAS_PROMPT_THREAD_ID;
+const REQUIRE_THREAD = process.env.CANVAS_PROMPT_REQUIRE_THREAD === '1';
+const ACTIVE_PROJECT_DIR = CONFIGURED_PROJECT_DIR ? resolve(CONFIGURED_PROJECT_DIR) : null;
+const conversationScope = (ACTIVE_PROJECT_DIR || validThreadId(CONFIGURED_THREAD_ID))
+  ? resolveConversationScope({ projectDir: ACTIVE_PROJECT_DIR, threadId: CONFIGURED_THREAD_ID })
+  : null;
+const PROJECT_SCOPE_ERROR = REQUIRE_THREAD && !validThreadId(CONFIGURED_THREAD_ID)
+  ? 'Canvas Prompt MCP requires an explicit host-provided conversation thread ID; refusing to guess a current conversation.'
+  : !conversationScope
+    ? 'Canvas Prompt MCP was not given CANVAS_PROMPT_PROJECT_DIR or an explicit conversation thread ID; refusing to read the plugin installation directory.'
   : ACTIVE_PROJECT_DIR === PROJECT_ROOT
     ? 'Canvas Prompt MCP project directory resolves to the plugin installation directory; refusing to read it.'
     : null;
-const CANVAS_PROMPT_DIR = resolve(ACTIVE_PROJECT_DIR, '.canvas-prompt');
+const CANVAS_PROMPT_DIR = conversationScope?.canvasDir ?? null;
 const MAX_LATEST_PACKAGE_TEXT_BYTES = 1_500_000;
 const MAX_ARTIFACT_BYTES = 4 * 1024 * 1024;
 const MAX_RAW_PACKAGE_BYTES = 32 * 1024 * 1024;
@@ -202,7 +210,7 @@ async function handleGetRoundArtifact(args = {}) {
 
 const SERVER_INFO = {
   name: 'ai-thinking-whiteboard-mcp',
-  version: '0.1.10',
+  version: '0.1.11',
 };
 
 const PROTOCOL_VERSION = '2024-11-05';
@@ -244,7 +252,7 @@ function error(id, code, message, data) {
 const TOOLS = [
   {
     name: 'get_latest_prompt_package',
-    description: 'Read the latest Prompt Package exported by this active project Canvas Prompt sidebar. The project scope is fixed when MCP starts.',
+    description: 'Read the latest Prompt Package inside this fixed Canvas Prompt project/conversation scope. The server never guesses a current conversation.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -252,7 +260,7 @@ const TOOLS = [
   },
   {
     name: 'get_round_artifact',
-    description: 'Read one bounded, project-local artifact from an immutable Canvas Prompt round.',
+    description: 'Read one bounded artifact from an immutable Canvas Prompt round in this fixed project/conversation scope.',
     inputSchema: {
       type: 'object',
       properties: {

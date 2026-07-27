@@ -43,7 +43,7 @@ export function isVerifiedMainThreadBinding(value: unknown, projectDir: string):
 export function selectMainThreadId(
   explicitThreadId?: string | null,
   savedBinding?: { threadId: string } | null,
-): { threadId: string; source: 'explicit_host_context' | 'verified_binding' } | null
+): { threadId: string; source: 'explicit_host_context' } | null
 
 export function handoffToMainThread(input: MainThreadHandoffInput): Promise<MainThreadHandoffResult>
 export function deliveryReceiptMessageId(roundPath: string): string
