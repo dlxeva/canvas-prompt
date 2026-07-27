@@ -182,7 +182,7 @@ describe('main-thread handoff routing', () => {
   })
 
   it('keeps the visible attachment message separate from the internal handoff instructions', async () => {
-    expect(visibleReceiptMessage()).toBe('Canvas Prompt｜本轮画布上下文已注入当前对话。')
+    expect(visibleReceiptMessage()).toBe('Canvas Prompt｜本轮画布已整理，可继续讨论。')
     const harness = await createHarness('visible_message', `
       console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_visible_message' } } }))
     `)

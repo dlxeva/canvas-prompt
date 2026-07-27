@@ -183,7 +183,7 @@ export function handoffMessage({ packagePath, roundPath, engine, snapshotPath, k
 
 /** The only text placed beside the user-visible snapshot attachment. */
 export function visibleReceiptMessage() {
-  return 'Canvas Prompt｜本轮画布上下文已注入当前对话。'
+  return 'Canvas Prompt｜本轮画布已整理，可继续讨论。'
 }
 
 /**
