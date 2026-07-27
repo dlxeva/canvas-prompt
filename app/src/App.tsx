@@ -290,6 +290,24 @@ export default function App() {
     return () => window.clearInterval(timer)
   }, [recording])
 
+  // A stationary mouse does not keep emitting pointermove events. Once a
+  // pointer has entered the drawing surface, sample its last scene position
+  // while it remains there so an intentional hover becomes a dwell gesture.
+  useEffect(() => {
+    if (!recording || !startedAt) return
+    const timer = window.setInterval(() => {
+      const previous = lastPointer.current
+      if (!previous) return
+      const now = Date.now()
+      if (now - lastPointerSampleAt.current < 100) return
+      const t = now - startedAt
+      pointerSamples.current.push({ t, x: previous.x, y: previous.y, speed: 0 })
+      lastPointer.current = { t, x: previous.x, y: previous.y }
+      lastPointerSampleAt.current = now
+    }, 100)
+    return () => window.clearInterval(timer)
+  }, [recording, startedAt])
+
   const beginTrace = async () => {
     if (recording || sessionStage === 'compiling' || asrPreparing) return
     const startElements = (apiRef.current ?? api)?.getSceneElementsIncludingDeleted() ?? []
@@ -966,7 +984,10 @@ export default function App() {
     // Excalidraw handles pointer events internally and can stop bubbling.
     // Capture at the canvas boundary so a natural hover remains evidence even
     // when no canvas element changes; ignore our own toolbar controls.
-    if ((event.target as Element).closest('.canvas-tools')) return
+    if ((event.target as Element).closest('.canvas-tools')) {
+      lastPointer.current = null
+      return
+    }
     const now = Date.now()
     if (now - lastPointerSampleAt.current < 100) return
     lastPointerSampleAt.current = now
@@ -978,6 +999,11 @@ export default function App() {
     const speed = previous ? Math.hypot(x - previous.x, y - previous.y) / Math.max(1, t - previous.t) : 0
     pointerSamples.current.push({ t, x, y, speed, pressure: event.pressure || undefined })
     lastPointer.current = { t, x, y }
+  }
+
+  const stopPointerCapture = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return
+    lastPointer.current = null
   }
 
   return (
@@ -1052,6 +1078,7 @@ export default function App() {
       <section
         className={imageDropActive ? 'canvas-wrap spike-canvas drop-active' : 'canvas-wrap spike-canvas'}
         onPointerMoveCapture={capturePointer}
+        onPointerOutCapture={stopPointerCapture}
         onDragOverCapture={handleExternalDragOver}
         onDragLeave={() => setImageDropActive(false)}
         onDropCapture={handleExternalDrop}
