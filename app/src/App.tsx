@@ -34,8 +34,8 @@ const tools: Array<{ id: CanvasTool; zh: string; en: string }> = [
 ]
 
 const ui = {
-  zh: { importImage: '导入图片', importing: '正在导入…', more: '更多功能', archive: '本地档案', recording: '录音中', asrPreparing: '语音准备中', asrUnavailable: '语音仅保存', finish: '结束推演', processing: '处理中', export: '发送到当前对话', retryExport: '重新发送到当前对话', sending: '正在发送…', archived: '✓ 已保存到本地', accepted: '✓ 已注入主对话上下文', deliveredReceipt: '✓ 上下文已注入当前对话', failedReceipt: '已保存 · 推送失败', next: '开始下一轮', start: '开始推演', startVisualOnly: '不等语音，开始画', preparing: '准备中…', canvasTools: '画布工具', expandTools: '展开画布工具', collapseTools: '收起画布工具', undo: '撤销（⌘Z）', redo: '重做（⇧⌘Z）', zoomOut: '缩小', zoomIn: '放大', color: '颜色', weight: '粗细', releaseToImport: '松开以导入图片', archiveDescription: '保存在本项目的', archiveDescriptionEnd: '。不自动上传云端；删除后无法恢复。', closeArchive: '关闭本地档案', loadingArchive: '正在读取本地档案…', noArchive: '还没有已归档的推演。', seconds: '秒', unknownDuration: '时长未知', snapshot: '画布快照', noSnapshot: '无快照', audio: '录音', noAudio: '无录音', delivered: '已送达', sent: '已接收', sendFailed: '发送失败', local: '仅本地', delete: '删除' },
-  en: { importImage: 'Import image', importing: 'Importing…', more: 'More', archive: 'Local archive', recording: 'Recording', asrPreparing: 'Speech preparing', asrUnavailable: 'Audio saved only', finish: 'Finish session', processing: 'Processing', export: 'Send to Codex', retryExport: 'Retry sending', sending: 'Sending…', archived: '✓ Saved locally', accepted: '✓ Sent to main conversation', deliveredReceipt: '✓ Main conversation completed', failedReceipt: 'Saved · send failed', next: 'Start next round', start: 'Start session', startVisualOnly: 'Start without speech', preparing: 'Preparing…', canvasTools: 'Canvas tools', expandTools: 'Expand tools', collapseTools: 'Collapse tools', undo: 'Undo (⌘Z)', redo: 'Redo (⇧⌘Z)', zoomOut: 'Zoom out', zoomIn: 'Zoom in', color: 'Color', weight: 'Weight', releaseToImport: 'Release to import image', archiveDescription: 'Stored locally in', archiveDescriptionEnd: '. Nothing is uploaded automatically; deleted rounds cannot be recovered.', closeArchive: 'Close local archive', loadingArchive: 'Loading local archive…', noArchive: 'No saved rounds yet.', seconds: 'sec', unknownDuration: 'duration unknown', snapshot: 'canvas snapshot', noSnapshot: 'no snapshot', audio: 'audio', noAudio: 'no audio', delivered: 'delivered', sent: 'received', sendFailed: 'send failed', local: 'local only', delete: 'Delete' },
+  zh: { importImage: '导入图片', importing: '正在导入…', more: '更多功能', archive: '本地档案', recording: '录音中', asrPreparing: '语音准备中', asrUnavailable: '语音不转写', finish: '结束推演', processing: '处理中', export: '整理本轮', retryExport: '重新整理本轮', sending: '正在整理…', archived: '✓ 本轮已整理', accepted: '✓ 已交给当前对话', deliveredReceipt: '✓ 当前对话已接住', failedReceipt: '已整理 · 回到当前对话继续', next: '开始下一轮', start: '开始推演', startVisualOnly: '不等语音，开始画', preparing: '准备中…', canvasTools: '画布工具', expandTools: '展开画布工具', collapseTools: '收起画布工具', undo: '撤销（⌘Z）', redo: '重做（⇧⌘Z）', zoomOut: '缩小', zoomIn: '放大', color: '颜色', weight: '粗细', releaseToImport: '松开以导入图片', archiveDescription: '保存在本项目的', archiveDescriptionEnd: '。不自动上传云端；删除后无法恢复。', closeArchive: '关闭本地档案', loadingArchive: '正在读取本地档案…', noArchive: '还没有已归档的推演。', seconds: '秒', unknownDuration: '时长未知', snapshot: '画布快照', noSnapshot: '无快照', audio: '录音', noAudio: '无录音', delivered: '已送达', sent: '已接收', sendFailed: '发送失败', local: '已整理', delete: '删除' },
+  en: { importImage: 'Import image', importing: 'Importing…', more: 'More', archive: 'Local archive', recording: 'Recording', asrPreparing: 'Speech preparing', asrUnavailable: 'Speech not transcribed', finish: 'Finish session', processing: 'Processing', export: 'Finish this round', retryExport: 'Try again', sending: 'Finishing…', archived: '✓ Round ready', accepted: '✓ Shared with current conversation', deliveredReceipt: '✓ Current conversation has it', failedReceipt: 'Round ready · Continue in this conversation', next: 'Start next round', start: 'Start session', startVisualOnly: 'Start without speech', preparing: 'Preparing…', canvasTools: 'Canvas tools', expandTools: 'Expand tools', collapseTools: 'Collapse tools', undo: 'Undo (⌘Z)', redo: 'Redo (⇧⌘Z)', zoomOut: 'Zoom out', zoomIn: 'Zoom in', color: 'Color', weight: 'Weight', releaseToImport: 'Release to import image', archiveDescription: 'Stored locally in', archiveDescriptionEnd: '. Nothing is uploaded automatically; deleted rounds cannot be recovered.', closeArchive: 'Close local archive', loadingArchive: 'Loading local archive…', noArchive: 'No saved rounds yet.', seconds: 'sec', unknownDuration: 'duration unknown', snapshot: 'canvas snapshot', noSnapshot: 'no snapshot', audio: 'audio', noAudio: 'no audio', delivered: 'delivered', sent: 'received', sendFailed: 'send failed', local: 'ready', delete: 'Delete' },
 } as const
 
 function visibleWorkflowMessage(message: string, locale: Locale) {
@@ -44,7 +44,7 @@ function visibleWorkflowMessage(message: string, locale: Locale) {
     '画下来，圈出来，需要时说出来。': 'Draw it, circle it, and speak when useful.',
     '正在准备本次推演…': 'Preparing this session…',
     '推演中 · 画、圈、移动，也可以直接说。语音会在后台分段整理。': 'In session · Draw, circle, move, and speak. Audio is transcribed in the background.',
-    '推演中 · 画、圈、移动。录音会保存在本地；当前没有可用语音转写。': 'In session · Draw, circle, and move. Audio will be saved locally; speech transcription is not available.',
+    '推演中 · 画、圈、移动。当前没有可用语音转写。': 'In session · Draw, circle, and move. Speech transcription is not available.',
     '推演中 · 画、圈、移动，也可以直接说。': 'In session · Draw, circle, move, and speak.',
     '推演中 · 麦克风不可用，但画布过程仍会被记录。': 'In session · Microphone unavailable; canvas activity is still recorded.',
     '正在结束录音…': 'Finishing the recording…',
@@ -57,6 +57,9 @@ function visibleWorkflowMessage(message: string, locale: Locale) {
     '本轮内容已整理完成，正在送入当前对话…': 'This round is ready and is being sent to the current conversation…',
     '本轮内容已整理完成，正在送入当前对话；当前没有可用的语音转写。': 'This round is ready and is being sent to the current conversation; no usable voice transcript is available.',
     '正在归档并发送到当前对话…': 'Archiving and sending to the current conversation…',
+    '正在归档本轮上下文…': 'Preparing this round…',
+    '本轮已整理完成。回到当前对话继续说、提问或下达下一步。': 'This round is ready. Continue in the current conversation—say, ask, or direct the next step.',
+    '本轮已整理完成。请回到当前对话继续。': 'This round is ready. Continue in the current conversation.',
   }
   return translated[message] ?? message
 }
@@ -375,7 +378,7 @@ export default function App() {
       } else {
         transcriberRef.current = null
         windowedAsrRef.current = null
-        setWorkflowMessage('推演中 · 画、圈、移动。录音会保存在本地；当前没有可用语音转写。')
+        setWorkflowMessage('推演中 · 画、圈、移动。当前没有可用语音转写。')
       }
     } catch {
       setWorkflowMessage('推演中 · 麦克风不可用，但画布过程仍会被记录。')
@@ -547,7 +550,7 @@ export default function App() {
         }
         if (status === 'failed') {
           setExportStatus('failed')
-          setWorkflowMessage('本轮已保存在本地，但主对话未能完成处理。')
+          setWorkflowMessage('本轮已整理完成。请回到当前对话继续。')
           return
         }
       } catch {
@@ -589,14 +592,14 @@ export default function App() {
       setHandoffReceipt(result.handoff ?? null)
       setExportStatus(receiptStatus)
       setWorkflowMessage(deliveryMode === 'local'
-        ? '本轮已保存在本地。请在你的 AI 终端中读取 Canvas Prompt 上下文。'
+        ? '本轮已整理完成。回到当前对话继续说、提问或下达下一步。'
         : receiptStatus === 'delivered'
         ? '本轮上下文已注入当前对话。'
           : receiptStatus === 'accepted'
             ? '本轮上下文已注入当前对话。'
           : receiptStatus === 'failed'
-            ? `本轮已保存在本地，但主对话没有确认接收：${result.handoff?.reason || '可重新发送'}`
-            : '本轮已保存在本地，并已完成核心编译。')
+            ? '本轮已整理完成。请回到当前对话继续。'
+            : '本轮已整理完成。回到当前对话继续。')
       if (storageOpen) void loadStoredRounds()
       window.dispatchEvent(new Event('canvas-prompt-exported'))
     } catch (error) {
@@ -995,7 +998,7 @@ export default function App() {
         <div className="header-actions">
           {recording ? <span className="recording-state" aria-live="polite"><i />{text.recording} {elapsed}</span> : null}
           {!recording && asrPreparing ? <span className="quiet-state" title={locale === 'zh' ? '正在准备本地语音模型；准备完成前不会开始会丢失转写的推演。' : 'The local speech model is preparing; a session stays disabled until timestamped transcription is ready.'}>{text.asrPreparing}</span> : null}
-          {!recording && !asrPreparing && !asrAvailable ? <span className="quiet-state" title={locale === 'zh' ? '当前本机没有可用语音转写；录音仍会保存到本地。' : 'No local speech transcription is available; audio will still be saved locally.'}>{text.asrUnavailable}</span> : null}
+          {!recording && !asrPreparing && !asrAvailable ? <span className="quiet-state" title={locale === 'zh' ? '当前没有可用语音转写；这一轮不会包含语音文本。' : 'Speech transcription is unavailable; this round will not include speech text.'}>{text.asrUnavailable}</span> : null}
           {recording ? (
             <button className="button icon-button stop" onClick={() => void finishTrace()} aria-label={text.finish} title={text.finish}><HeaderIcon kind="stop" /></button>
           ) : sessionStage === 'compiling' ? (
