@@ -25,6 +25,7 @@ ASR_PORT="${CANVAS_PROMPT_CLEAN_ROOM_ASR_PORT:-18081}"
 CANVAS_PORT="${CANVAS_PROMPT_CLEAN_ROOM_CANVAS_PORT:-43321}"
 TRASH_ROOT="${HOME}/.Trash"
 SERVICE_LABEL=""
+ASR_SERVICE_LABEL=""
 ASR_PID=""
 ASR_TIMEOUT_SECONDS="${CANVAS_PROMPT_CLEAN_ROOM_ASR_TIMEOUT_SECONDS:-900}"
 KEEP_SANDBOX="${CANVAS_PROMPT_CLEAN_ROOM_KEEP:-0}"
@@ -39,6 +40,9 @@ cleanup() {
   fi
   if [[ -n "$SERVICE_LABEL" ]] && command -v launchctl >/dev/null 2>&1; then
     launchctl bootout "gui/$(id -u)/${SERVICE_LABEL}" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$ASR_SERVICE_LABEL" ]] && command -v launchctl >/dev/null 2>&1; then
+    launchctl bootout "gui/$(id -u)/${ASR_SERVICE_LABEL}" >/dev/null 2>&1 || true
   fi
   if [[ -n "$ASR_PID" ]] && kill -0 "$ASR_PID" 2>/dev/null; then
     kill "$ASR_PID" 2>/dev/null || true
@@ -100,6 +104,10 @@ if ! OPEN_OUTPUT="$(
 fi
 printf '%s\n' "$OPEN_OUTPUT"
 SERVICE_LABEL="$(printf '%s\n' "$OPEN_OUTPUT" | sed -n 's/^Service: //p' | tail -n 1)"
+if [[ "$(uname -s)" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
+  asr_service_id="$(printf '%s' "${SANDBOX_REPO}:${ASR_PORT}" | shasum -a 256 | cut -c1-12)"
+  ASR_SERVICE_LABEL="com.canvas-prompt.asr.${asr_service_id}"
+fi
 ASR_PID="$(cat "$CANVAS_PROMPT_RUNTIME_DIR/asr.pid" 2>/dev/null || true)"
 
 echo "[clean-room] waiting up to ${ASR_TIMEOUT_SECONDS}s for first model download and ASR readiness"
