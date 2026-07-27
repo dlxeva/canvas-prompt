@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { realpathSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -100,12 +100,14 @@ try {
       const asrEnvironment = await asrEnvironmentForOpen()
       const environment = runtimeEnvironment(asrEnvironment)
       if (process.env.CANVAS_PROMPT_ASR !== 'disabled') {
-        // Model download can take longer than a canvas launch. Start it in the
-        // background; the canvas polls the same loopback endpoint and shows a
-        // truthful “speech preparing” state until it is actually ready.
-        const asr = spawn('bash', [resolve(rootDir, 'scripts', 'start-asr.sh')], { detached: true, stdio: 'ignore', env: environment })
-        asr.unref()
-        console.error(`Canvas Prompt is preparing local speech transcription at ${asrUrl(environment)} in the background.`)
+        // Opening a session is a gate, not a race between an already-visible
+        // canvas and a detached process that may die with its launcher. The
+        // managed ASR script reports readiness only after the model endpoint
+        // is usable; a person never starts a supposedly voice-enabled round
+        // while the UI is still stuck in “Speech preparing”.
+        console.error(`Canvas Prompt is checking local speech transcription at ${asrUrl(environment)}…`)
+        const asr = spawnSync('bash', [resolve(rootDir, 'scripts', 'start-asr.sh')], { stdio: 'inherit', env: environment })
+        if (asr.status !== 0) throw new Error(`Local speech transcription did not become ready (${asrUrl(environment)}). Set CANVAS_PROMPT_ASR=disabled only for an intentional visual-only session.`)
       }
       const result = spawnSync('bash', [resolve(rootDir, 'scripts', 'start-canvas.sh'), project], { stdio: 'inherit', env: { ...environment, CANVAS_PROMPT_DELIVERY_MODE: host } })
       process.exitCode = result.status ?? 1

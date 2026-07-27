@@ -15,9 +15,9 @@ will install Canvas Prompt-managed Node and local-ASR dependencies into an
 isolated runtime (current macOS arm64 check: about 235 MB), and that first ASR
 start downloads a separately cached base model (about 148 MB; cold downloads
 can take several minutes). Then run the managed bootstrap. It reuses healthy
-local runtime components when available. The canvas may open while the model
-prepares; do not tell the user speech is ready until its UI has left the
-“Speech preparing” state.
+local runtime components when available. Opening runs the local speech
+readiness gate before opening a normal voice-enabled canvas; do not claim the
+canvas is ready until this gate has passed.
 Never ask the user to manually find Whisper, ffmpeg, or a private ASR project.
 
 ```bash
