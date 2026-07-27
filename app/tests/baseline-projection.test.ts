@@ -1,7 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { countIncludedBaselineObjects, projectLiveRoundElementIds } from '../src/baseline-projection'
+import { countIncludedBaselineObjects, projectFinalSnapshotElements, projectLiveRoundElementIds } from '../src/baseline-projection'
 
 describe('baseline projection', () => {
+  it('keeps the live baseline in the final snapshot when a later round only adds annotations', () => {
+    const finalScene = projectFinalSnapshotElements([
+      { id: 'A', isDeleted: false },
+      { id: 'B', isDeleted: false },
+      { id: 'C', isDeleted: false },
+      { id: 'circle_A', isDeleted: false },
+      { id: 'circle_C', isDeleted: false },
+      { id: 'discarded_mark', isDeleted: true },
+    ])
+
+    expect(finalScene.map((element) => element.id)).toEqual(['A', 'B', 'C', 'circle_A', 'circle_C'])
+    expect(countIncludedBaselineObjects(new Set(['A', 'B', 'C']), new Set(finalScene.map((element) => element.id)))).toBe(3)
+  })
+
   it('does not count a baseline image after it is deleted during the round', () => {
     const baselineIds = new Set(['image_base', 'text_base'])
     const projected = projectLiveRoundElementIds([
