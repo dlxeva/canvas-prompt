@@ -36,12 +36,15 @@ def validate_process_ir(data: Any) -> list[str]:
         return ["Process IR must be an object."]
     schema_version = data.get("schema_version")
     required_fields = set(BASE_REQUIRED_FIELDS)
-    if schema_version in {"process-ir-v0.5", "process-ir-v0.6"}:
+    if schema_version in {"process-ir-v0.5", "process-ir-v0.6", "process-ir-v0.7"}:
         required_fields.add("ink_circle_candidates")
-    if schema_version == "process-ir-v0.6":
+    if schema_version in {"process-ir-v0.6", "process-ir-v0.7"}:
         required_fields.add("ink_cross_candidates")
+    if schema_version == "process-ir-v0.7":
+        required_fields.add("ink_check_candidates")
+        required_fields.add("paired_symbol_choice_candidates")
     errors = [f"Missing required field: {field}" for field in sorted(required_fields - set(data))]
-    if schema_version not in {"process-ir-v0.3", "process-ir-v0.4", "process-ir-v0.5", "process-ir-v0.6"}:
+    if schema_version not in {"process-ir-v0.3", "process-ir-v0.4", "process-ir-v0.5", "process-ir-v0.6", "process-ir-v0.7"}:
         errors.append("Unsupported or missing schema_version.")
     for field in (
         "speech_anchors", "canvas_actions", "objects", "spatial_relations",
@@ -55,6 +58,10 @@ def validate_process_ir(data: Any) -> list[str]:
         errors.append("ink_circle_candidates must be a list.")
     if "ink_cross_candidates" in data and not isinstance(data["ink_cross_candidates"], list):
         errors.append("ink_cross_candidates must be a list.")
+    if "ink_check_candidates" in data and not isinstance(data["ink_check_candidates"], list):
+        errors.append("ink_check_candidates must be a list.")
+    if "paired_symbol_choice_candidates" in data and not isinstance(data["paired_symbol_choice_candidates"], list):
+        errors.append("paired_symbol_choice_candidates must be a list.")
     if "quality" in data and not isinstance(data["quality"], dict):
         errors.append("quality must be an object.")
     if "source" in data and not isinstance(data["source"], dict):
@@ -107,14 +114,34 @@ def validate_process_ir(data: Any) -> list[str]:
     for item in data.get("ink_cross_candidates", []):
         if item.get("assertion_level") != "observation" or item.get("resolution_status") != "unresolved":
             errors.append("Hand-drawn cross candidates must be unresolved observations.")
-        if item.get("type") != "unresolved_handdrawn_cross":
-            errors.append("Unsupported hand-drawn cross candidate type.")
+        if item.get("type") != "unresolved_intersecting_stroke_pair":
+            errors.append("Unsupported intersecting-stroke candidate type.")
         stroke_ids = item.get("stroke_ids")
         if not isinstance(stroke_ids, list) or len(stroke_ids) != 2 or stroke_ids[0] == stroke_ids[1]:
             errors.append("Hand-drawn cross candidates require two distinct strokes.")
         object_ids = item.get("candidate_object_ids")
         if not isinstance(object_ids, list) or not object_ids or any(not isinstance(value, str) or not value for value in object_ids):
             errors.append("Hand-drawn cross candidates require candidate object IDs.")
+    for item in data.get("ink_check_candidates", []):
+        if item.get("assertion_level") != "observation" or item.get("resolution_status") != "unresolved":
+            errors.append("Check-like stroke candidates must be unresolved observations.")
+        if item.get("type") != "unresolved_checklike_stroke":
+            errors.append("Unsupported check-like stroke candidate type.")
+        if not isinstance(item.get("stroke_id"), str) or not item["stroke_id"]:
+            errors.append("Check-like stroke candidates require a source stroke.")
+        object_ids = item.get("candidate_object_ids")
+        if not isinstance(object_ids, list) or not object_ids or any(not isinstance(value, str) or not value for value in object_ids):
+            errors.append("Check-like stroke candidates require candidate object IDs.")
+    for item in data.get("paired_symbol_choice_candidates", []):
+        if item.get("assertion_level") != "observation" or item.get("resolution_status") != "unresolved":
+            errors.append("Paired-symbol choices must be unresolved observations.")
+        if item.get("type") != "unresolved_paired_symbol_choice":
+            errors.append("Unsupported paired-symbol choice type.")
+        mapping = item.get("candidate_outcome_mapping")
+        if not isinstance(mapping, dict) or mapping.get("convention") != "x_vs_check":
+            errors.append("Paired-symbol choices require the x_vs_check convention.")
+        elif not mapping.get("negative_object_id") or not mapping.get("positive_object_id") or mapping["negative_object_id"] == mapping["positive_object_id"]:
+            errors.append("Paired-symbol choices require two distinct object candidates.")
     for item in data.get("ink_arrowhead_candidates", []):
         if item.get("assertion_level") != "observation" or item.get("resolution_status") != "unresolved":
             errors.append("Hand-drawn arrowhead candidates must be unresolved observations.")

@@ -24,13 +24,14 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by adapter import mo
 # causal edge or semantic relation.
 # Raw Prompt Packages remain the source of truth, so historical packages are
 # recompiled rather than mutating persisted IR snapshots in place.
-SCHEMA_VERSION = "process-ir-v0.6"
-COMPILER_VERSION = "process-ir-compiler-v0.5"
+SCHEMA_VERSION = "process-ir-v0.7"
+COMPILER_VERSION = "process-ir-compiler-v0.6"
 MAX_SPATIAL_RELATIONS = 300
 MAX_INK_RELATION_CANDIDATES = 100
 MAX_INK_CIRCLE_CANDIDATES = 100
 MAX_INK_ARROWHEAD_CANDIDATES = 100
 MAX_INK_CROSS_CANDIDATES = 100
+MAX_INK_CHECK_CANDIDATES = 100
 MAX_VISUAL_UNIT_MEMBERS = 12
 TRANSFORM_SESSION_GAP_MS = 250
 TRANSFORM_CREATION_GRACE_MS = 1_500
@@ -723,11 +724,11 @@ def _segment_intersection(
 
 
 def _ink_cross_candidates(package: dict[str, Any], objects: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Record two straight hand-drawn strokes crossing over an existing object.
+    """Record intersecting straight strokes without naming their meaning.
 
-    A cross is useful visual evidence for a later resolver, especially beside
-    negating speech. It is deliberately *not* a delete operation by itself:
-    people also use X marks for emphasis, comparison, or a letterform.
+    The visual result may be an X glyph, a crossing of two connections, or a
+    markup symbol. Geometry alone cannot distinguish those readings, so this
+    layer records only the intersection and never calls it a rejection mark.
     """
     traces = []
     for stroke in package.get("strokes") or []:
@@ -772,7 +773,7 @@ def _ink_cross_candidates(package: dict[str, Any], objects: list[dict[str, Any]]
             targets.sort(key=lambda item: (item[0], item[1]))
             candidates.append({
                 "cross_id": f"ink_cross_{len(candidates) + 1:03d}",
-                "type": "unresolved_handdrawn_cross",
+                "type": "unresolved_intersecting_stroke_pair",
                 "stroke_ids": [left_id, right_id],
                 "candidate_object_ids": [object_id for _, object_id in targets[:5]],
                 "geometry": {
@@ -783,10 +784,117 @@ def _ink_cross_candidates(package: dict[str, Any], objects: list[dict[str, Any]]
                 },
                 "resolution_status": "unresolved",
                 "assertion_level": "observation",
-                "constraint": "cross_geometry_does_not_establish_delete_or_rejection_without_other_evidence",
+                "constraint": "intersecting_strokes_do_not_establish_letterform_markup_or_intent_without_other_evidence",
             })
             if len(candidates) >= MAX_INK_CROSS_CANDIDATES:
                 return candidates
+    return candidates
+
+
+def _ink_check_candidates(package: dict[str, Any], objects: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Record a single-stroke check-like bend without interpreting approval.
+
+    A check glyph has a short descending arm followed by a longer ascending
+    arm in screen coordinates. It can still be a V-like letterform or a piece
+    of a sketch; this is only a shape observation for later cross-modal use.
+    """
+    indexed = [(obj, _rect(obj)) for obj in objects]
+    indexed = [(obj, rect) for obj, rect in indexed if obj.get("object_id") and rect]
+    candidates = []
+    for stroke in package.get("strokes") or []:
+        if not isinstance(stroke, dict) or not isinstance(stroke.get("stroke_id"), str):
+            continue
+        points = [point for point in (_point(raw) for raw in stroke.get("points") or []) if point]
+        if len(points) < 3:
+            continue
+        start, end = points[0], points[-1]
+        pivot_index = max(range(1, len(points) - 1), key=lambda index: points[index][1])
+        pivot = points[pivot_index]
+        first = (pivot[0] - start[0], pivot[1] - start[1])
+        second = (end[0] - pivot[0], end[1] - pivot[1])
+        first_length = (first[0] ** 2 + first[1] ** 2) ** 0.5
+        second_length = (second[0] ** 2 + second[1] ** 2) ** 0.5
+        progress = pivot_index / (len(points) - 1)
+        if (
+            first_length < 16 or second_length < 28 or second_length < first_length * 1.25
+            or not (0.08 <= progress <= 0.68)
+            or first[0] < 6 or first[1] < 6 or second[0] < 12 or second[1] > -6
+        ):
+            continue
+        source_id = stroke["stroke_id"]
+        targets = []
+        for obj, rect in indexed:
+            object_id = obj.get("object_id")
+            if object_id == source_id or source_id in (obj.get("source_strokes") or []):
+                continue
+            ox, oy, width, height = rect
+            if ox <= pivot[0] <= ox + width and oy <= pivot[1] <= oy + height:
+                targets.append((width * height, object_id))
+        if not targets:
+            continue
+        targets.sort(key=lambda item: (item[0], item[1]))
+        candidates.append({
+            "check_id": f"ink_check_{len(candidates) + 1:03d}",
+            "type": "unresolved_checklike_stroke",
+            "stroke_id": source_id,
+            "candidate_object_ids": [object_id for _, object_id in targets[:5]],
+            "geometry": {
+                "pivot": {"x": round(pivot[0], 2), "y": round(pivot[1], 2)},
+                "arm_lengths": [round(first_length, 2), round(second_length, 2)],
+                "pivot_progress": round(progress, 3),
+            },
+            "resolution_status": "unresolved",
+            "assertion_level": "observation",
+            "constraint": "checklike_geometry_does_not_establish_approval_or_retention_without_other_evidence",
+        })
+        if len(candidates) >= MAX_INK_CHECK_CANDIDATES:
+            return candidates
+    return candidates
+
+
+def _paired_symbol_choice_candidates(
+    crosses: list[dict[str, Any]], checks: list[dict[str, Any]], objects: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Record the conventional X/✓ contrast when it occurs on peer objects.
+
+    The pair is materially stronger than either symbol in isolation, but it is
+    still a visual-convention candidate, not a command to mutate the canvas or
+    a user's work. A later resolver can combine it with speech or task context.
+    """
+    objects_by_id = {obj.get("object_id"): obj for obj in objects if obj.get("object_id")}
+    candidates = []
+    for cross in crosses:
+        for check in checks:
+            for negative_id in cross.get("candidate_object_ids") or []:
+                negative = objects_by_id.get(negative_id)
+                negative_rect = _rect(negative or {})
+                if not negative_rect:
+                    continue
+                for positive_id in check.get("candidate_object_ids") or []:
+                    if positive_id == negative_id:
+                        continue
+                    positive = objects_by_id.get(positive_id)
+                    positive_rect = _rect(positive or {})
+                    if not positive_rect:
+                        continue
+                    negative_area = negative_rect[2] * negative_rect[3]
+                    positive_area = positive_rect[2] * positive_rect[3]
+                    if min(negative_area, positive_area) <= 0 or max(negative_area, positive_area) / min(negative_area, positive_area) > 3.0:
+                        continue
+                    candidates.append({
+                        "choice_id": f"paired_symbol_choice_{len(candidates) + 1:03d}",
+                        "type": "unresolved_paired_symbol_choice",
+                        "negative_symbol": {"kind": "intersecting_stroke_pair", "object_id": negative_id, "source_id": cross.get("cross_id")},
+                        "positive_symbol": {"kind": "checklike_stroke", "object_id": positive_id, "source_id": check.get("check_id")},
+                        "candidate_outcome_mapping": {
+                            "negative_object_id": negative_id,
+                            "positive_object_id": positive_id,
+                            "convention": "x_vs_check",
+                        },
+                        "resolution_status": "unresolved",
+                        "assertion_level": "observation",
+                        "constraint": "paired_x_and_check_are_a_visual_convention_candidate_not_an_executable_instruction",
+                    })
     return candidates
 
 
@@ -978,6 +1086,8 @@ def compile_process_ir(
     ink_circle_candidates = _ink_circle_candidates(package, objects)
     ink_arrowhead_candidates = _arrowhead_candidates(package, ink_relation_candidates)
     ink_cross_candidates = _ink_cross_candidates(package, objects)
+    ink_check_candidates = _ink_check_candidates(package, objects)
+    paired_symbol_choice_candidates = _paired_symbol_choice_candidates(ink_cross_candidates, ink_check_candidates, objects)
     layout_transform_observations = _layout_transform_observations(package, objects)
     review_mark_candidates = _review_mark_candidates(package, captions)
     view_transform_observations = _view_transform_observations(package)
@@ -1032,6 +1142,8 @@ def compile_process_ir(
         "ink_circle_candidates": ink_circle_candidates,
         "ink_arrowhead_candidates": ink_arrowhead_candidates,
         "ink_cross_candidates": ink_cross_candidates,
+        "ink_check_candidates": ink_check_candidates,
+        "paired_symbol_choice_candidates": paired_symbol_choice_candidates,
         "visual_unit_candidates": visual_unit_candidates,
         "layout_transform_observations": layout_transform_observations,
         "review_mark_candidates": review_mark_candidates,
@@ -1064,6 +1176,8 @@ def compile_process_ir(
             "ink_circle_candidate_count": len(ink_circle_candidates),
             "ink_arrowhead_candidate_count": len(ink_arrowhead_candidates),
             "ink_cross_candidate_count": len(ink_cross_candidates),
+            "ink_check_candidate_count": len(ink_check_candidates),
+            "paired_symbol_choice_candidate_count": len(paired_symbol_choice_candidates),
             "visual_unit_candidate_count": len(visual_unit_candidates),
             "layout_transform_observation_count": len(layout_transform_observations),
             "review_mark_candidate_count": len(review_mark_candidates),
