@@ -11,7 +11,13 @@ set -euo pipefail
 # reload behavior. Those require a second physical/VM environment.
 
 SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SANDBOX_ROOT="$(mktemp -d /tmp/canvas-prompt-clean-room.XXXXXX)"
+# macOS may reject native Node add-ons launched from /tmp under its code-signing
+# policy. Keep the isolated copy beneath the invoking user's cache directory
+# instead: it is still a fresh source/HOME/runtime/model/project environment,
+# but can load Vite's platform binding. Capture this before HOME is replaced.
+SANDBOX_BASE="${CANVAS_PROMPT_CLEAN_ROOM_BASE:-$HOME/Library/Caches/CanvasPrompt/clean-room}"
+mkdir -p "$SANDBOX_BASE"
+SANDBOX_ROOT="$(mktemp -d "$SANDBOX_BASE/canvas-prompt-clean-room.XXXXXX")"
 SANDBOX_HOME="$SANDBOX_ROOT/home"
 SANDBOX_REPO="$SANDBOX_ROOT/repo"
 SANDBOX_PROJECT="$SANDBOX_ROOT/project"
@@ -21,6 +27,7 @@ TRASH_ROOT="${HOME}/.Trash"
 SERVICE_LABEL=""
 ASR_PID=""
 ASR_TIMEOUT_SECONDS="${CANVAS_PROMPT_CLEAN_ROOM_ASR_TIMEOUT_SECONDS:-900}"
+KEEP_SANDBOX="${CANVAS_PROMPT_CLEAN_ROOM_KEEP:-0}"
 
 cleanup() {
   local code="$?"
@@ -36,7 +43,22 @@ cleanup() {
   if [[ -n "$ASR_PID" ]] && kill -0 "$ASR_PID" 2>/dev/null; then
     kill "$ASR_PID" 2>/dev/null || true
   fi
-  if [[ -d "$SANDBOX_ROOT" ]]; then
+  # `launchctl bootout` is the normal macOS path, but it can fail silently
+  # during an isolated shell run. Only as a cleanup fallback, terminate
+  # listeners that prove they were launched from this exact sandbox. Never
+  # touch another Canvas Prompt project that happens to use the same range.
+  for cleanup_port in "$CANVAS_PORT" "$ASR_PORT"; do
+    while IFS= read -r cleanup_pid; do
+      [[ -n "$cleanup_pid" ]] || continue
+      cleanup_command="$(ps -p "$cleanup_pid" -o command= 2>/dev/null || true)"
+      if [[ "$cleanup_command" == *"$SANDBOX_ROOT"* ]]; then
+        kill "$cleanup_pid" 2>/dev/null || true
+      fi
+    done < <(lsof -nP -tiTCP:"$cleanup_port" -sTCP:LISTEN 2>/dev/null || true)
+  done
+  if [[ "$KEEP_SANDBOX" == "1" && -d "$SANDBOX_ROOT" ]]; then
+    echo "[clean-room] preserving sandbox for diagnosis: $SANDBOX_ROOT" >&2
+  elif [[ -d "$SANDBOX_ROOT" ]]; then
     mkdir -p "$TRASH_ROOT"
     mv "$SANDBOX_ROOT" "$TRASH_ROOT/$(basename "$SANDBOX_ROOT")" || true
   fi
@@ -68,10 +90,14 @@ echo "[clean-room] installing fresh Canvas Prompt app and ASR runtime"
 )
 
 echo "[clean-room] starting managed ASR and canvas"
-OPEN_OUTPUT="$(
+if ! OPEN_OUTPUT="$(
   cd "$SANDBOX_REPO"
   node bin/canvas-prompt.mjs open --host local --project "$SANDBOX_PROJECT" 2>&1
-)"
+)"; then
+  printf '%s\n' "$OPEN_OUTPUT" >&2
+  echo "[clean-room] Canvas launch failed; rerun with CANVAS_PROMPT_CLEAN_ROOM_KEEP=1 to preserve this sandbox." >&2
+  exit 1
+fi
 printf '%s\n' "$OPEN_OUTPUT"
 SERVICE_LABEL="$(printf '%s\n' "$OPEN_OUTPUT" | sed -n 's/^Service: //p' | tail -n 1)"
 ASR_PID="$(cat "$CANVAS_PROMPT_RUNTIME_DIR/asr.pid" 2>/dev/null || true)"

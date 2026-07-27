@@ -4,7 +4,7 @@
 
 Canvas Prompt 是一块运行在本地的思考画布，承接那些还没被整理成一句清晰提示词的过程。
 
-**如果你是拿到此 GitHub URL 的 AI agent：** 它不是 Codex-only。先读 [AGENTS.md](./AGENTS.md) 与 [canvas-prompt.json](./canvas-prompt.json)，再判断接入方式。Codex 有自动交付；任何能运行本地命令且支持 stdio MCP 的宿主都可以读取同一份本地上下文包。
+**第一波公开发布以 Codex Desktop 为已验证、推荐的集成。** Canvas Prompt 以项目绑定的本地画布打开，导出一轮不可变上下文后由 Codex 通过 MCP 读取。其他支持 MCP 的终端可以读取本地包，但只是可选兼容路径，不承诺同等的原生界面或交接体验。
 
 你可以在上面画、圈、移动、缩放并同步讲述。Canvas Prompt 会把画布状态、事件时间线、语音对齐和修改过程保存成项目内的 **Prompt Package**。Codex 读取它时，会区分直接观察、推断和仍待确认的部分。
 
@@ -13,14 +13,14 @@ Canvas Prompt 是一块运行在本地的思考画布，承接那些还没被整
 - **推演**：保留一个问题如何展开，包括分支、移动、缩放、删除和改写。
 - **图片批阅**：把图片放到画布上，圈出区域，直接说出修改要求。
 - **项目本地档案**：在当前项目的 `.canvas-prompt/` 中保存 Prompt Package、原始录音、画布快照、Process IR、Compact Package 和交付回执。
-- **交给 Codex**：将某一轮不可变的上下文提交到当前 Codex 任务，并分别呈现“已保存到本地、主任务已接收、已送达、发送失败”。
+- **项目绑定交接**：Canvas Prompt 先保存不可变上下文包，Codex 再通过 MCP 读取当前项目的最新轮次；本地网页或其他宿主绝不根据项目目录、历史任务猜测对话后推送。
 - **证据边界**：保留能直接观察到的画布和语音信息；推断不会伪装成用户已经明确表达的事实。
 
 当前 Alpha 暂不包含画布内 AI 生成、自动教学、BoardScript 回写和 PDF/PPT 批阅。OCR 仍是隔离的研究路径，尚未接入主应用流程。
 
 ## v0.1 发布边界
 
-v0.1 只承诺可靠保存一次白板推演，并把它交给当前 Codex 主对话继续处理。圈选、箭头、鼠标停留和中英文指代目前都只作为观察或候选证据，不会自动写成确定语义。
+v0.1 只对 Codex Desktop 承诺：可靠保存一次白板推演，并在当前任务中继续处理该包。其他 MCP 宿主只能读取本地包，属于待验证的可选兼容路径；不能宣称等价的当前对话交接。圈选、箭头、鼠标停留和中英文指代目前都只作为观察或候选证据，不会自动写成确定语义。
 
 发布前只修会丢数据、串项目、误导推送状态或泄露内容的问题；新增识别能力进入后续校准。完整的冻结条件和三轮人工验收见 [v0.1 Alpha 发布冻结](./docs/v0.1-alpha-freeze.zh-CN.md)。
 
@@ -34,7 +34,7 @@ Canvas Prompt 是本地优先产品，不是“零依赖网页”。干净机器
 | 编译器 | Python `3.11+` | 宿主机器必须提供；当前 Process IR 编译器只使用 Python 标准库。 |
 | 语音转写 | Canvas Prompt 本地 ASR 运行时 | 安装到 `~/.canvas-prompt/runtime/asr-venv`（或 `CANVAS_PROMPT_RUNTIME_DIR`）；首次启动下载并缓存 `faster-whisper` 模型。无需私有项目、全局 Whisper 或手装 `ffmpeg`。 |
 | 录音 | 浏览器麦克风权限 | 仅在需要录音时要求。 |
-| AI 继续对话 | 宿主适配器 + 项目绑定 MCP | Codex 自动交接还要求 Codex Desktop CLI 与当前任务；其他宿主需要已注册 MCP 与对应 Skill/适配器。 |
+| AI 继续对话 | 项目绑定 MCP | Codex 读取当前项目导出的上下文包；其他宿主只能经 MCP 读取上下文包，v0.1 不承诺同等体验。 |
 
 默认 `setup` 会准备本地 ASR，而不是把它藏成可选前提。当前 macOS arm64 实测隔离运行时约 **235 MB**；首次启动还会下载约 **148 MB** 的 base 语音模型到本机缓存，后续复用。实际体积和首次启动时间会随平台与网络变化，冷缓存下模型准备可能需要数分钟；画布会先打开并明确显示“语音准备中”。用户可以等待转写就绪，也可以明确选择“不等语音，开始画”：该轮只保证视觉过程，未就绪的语音不会被伪装成已转写。若只需画布视觉上下文，也可显式使用 `setup --core-only` 或设置 `CANVAS_PROMPT_ASR=disabled`；浏览器语音识别不是默认或静默回退。
 
@@ -74,7 +74,7 @@ codex plugin add canvas-prompt@canvas-prompt
 
 安装或更新插件后，请新建一个 Codex 任务，让最新的 Skill 与 MCP 工具重新载入。
 
-## 其他 AI 终端、CLI 与 agent
+## 其他 AI 终端、CLI 与 agent（兼容路径）
 
 Canvas Prompt 的稳定产物是项目内的 Prompt Package 和本地 MCP 读取器。非 Codex 宿主使用通用 CLI：
 
@@ -84,7 +84,7 @@ node bin/canvas-prompt.mjs setup --project /当前项目的绝对路径
 node bin/canvas-prompt.mjs open --project /当前项目的绝对路径
 ```
 
-`init` 会输出当前项目绑定的 MCP 配置。画布完成本地保存与编译后，宿主即可经 MCP 读取最新 Canvas Prompt Package。Codex 是第一个具备自动交付的宿主；其他宿主通过这条本地上下文包与 MCP 路径接入。
+`init` 会输出当前项目绑定的 MCP 配置。画布完成本地保存与编译后，其他宿主可以经 MCP 读取最新 Canvas Prompt Package。v0.1 不声称任何宿主具有原生侧边栏、自动把内容写入当前对话或自动续接的能力。
 
 ## 隐私
 

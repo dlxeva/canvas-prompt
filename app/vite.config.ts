@@ -27,6 +27,9 @@ const latestPackagePath = resolve(projectDir, '.canvas-prompt', 'latest-prompt-p
 const roundsDir = resolve(projectDir, '.canvas-prompt', 'rounds')
 const runCommand = promisify(execFile)
 const deliveryMode = process.env.CANVAS_PROMPT_DELIVERY_MODE === 'codex' ? 'codex' : 'local'
+// Only a host-attached integration may set this. A project path does not
+// identify the active Desktop conversation.
+const codexMainThreadId = process.env.CANVAS_PROMPT_CODEX_THREAD_ID
 const configuredAsrUrl = process.env.CANVAS_PROMPT_ASR_URL ?? `http://127.0.0.1:${process.env.CANVAS_PROMPT_ASR_PORT ?? '8080'}`
 
 function localAsrUrl() {
@@ -43,7 +46,7 @@ function runtimeIdentity() {
   return realpath(projectDir).catch(() => projectDir).then((canonicalProjectDir) => ({
     project_dir: canonicalProjectDir,
     project_hash: createHash('sha256').update(canonicalProjectDir).digest('hex'),
-    service_version: '0.1.6',
+    service_version: '0.1.7',
     delivery_mode: deliveryMode,
     asr_url: localAsrUrl(),
     asr_enabled: process.env.CANVAS_PROMPT_ASR !== 'disabled',
@@ -358,7 +361,7 @@ function promptPackagePersistence(): Plugin {
                   return { status: 'archived', attempted: false, accepted: false, delivered: false, host: 'local', reason: 'Context is saved locally for the active AI host to read through Canvas Prompt MCP.' } satisfies HandoffResult
                 }
                 const artifacts = archived.artifacts ?? await existingRoundArtifacts(roundPath)
-                return { ...await handoffToMainThread({ projectDir, packagePath: archived.roundPackagePath, roundPath, snapshotPath: artifacts.snapshotPath ?? null, keyframePaths: artifacts.keyframePaths ?? [], engine: archived.engine }) as HandoffResult, host: 'codex' }
+                return { ...await handoffToMainThread({ projectDir, packagePath: archived.roundPackagePath, roundPath, snapshotPath: artifacts.snapshotPath ?? null, keyframePaths: artifacts.keyframePaths ?? [], engine: archived.engine, mainThreadId: codexMainThreadId }) as HandoffResult, host: 'codex' }
               },
             })
             const { roundPackagePath, engine, handoff } = submitted

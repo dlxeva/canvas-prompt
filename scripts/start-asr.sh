@@ -7,15 +7,19 @@ PORT="${CANVAS_PROMPT_ASR_PORT:-8080}"
 ASR_URL="http://127.0.0.1:${PORT}"
 PID_FILE="$RUNTIME_DIR/asr.pid"
 LOG_FILE="$RUNTIME_DIR/asr.log"
+ALLOW_EXTERNAL_ASR="${CANVAS_PROMPT_ALLOW_EXTERNAL_ASR:-0}"
+export CANVAS_PROMPT_ALLOW_EXTERNAL_ASR
 
 healthy_asr() {
   local response compatible
   response="$(curl --silent --show-error --max-time 2 "$ASR_URL/health" 2>/dev/null || true)"
   compatible="$(printf '%s' "$response" | python3 -c '
-import json, sys
+import json, os, sys
 try:
   value = json.load(sys.stdin)
-  supported = value.get("canvas_prompt_asr") is True or value.get("backend") in {"whisper", "faster-whisper"}
+  supported = value.get("canvas_prompt_asr") is True
+  if not supported and os.environ.get("CANVAS_PROMPT_ALLOW_EXTERNAL_ASR") == "1":
+    supported = value.get("backend") in {"whisper", "faster-whisper"}
   print("yes" if value.get("status") == "ok" and value.get("whisper_loaded", True) is not False and supported else "no")
 except Exception:
   print("no")

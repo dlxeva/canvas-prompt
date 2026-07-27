@@ -1,11 +1,14 @@
 ---
 name: canvas-prompt-open-canvas
-description: Open the local Canvas Prompt thinking canvas for the active Codex project. Use when the user asks to open, launch, view, or work in the Canvas Prompt canvas, or wants a thinking-canvas side panel in Codex.
+description: Open the local Canvas Prompt thinking canvas for the active Codex project. Use when the user asks to open, launch, view, or work in the Canvas Prompt canvas.
 ---
 
 # Open Canvas Prompt
 
-Start the local canvas for the active project and open the URL reported by the launcher in Codex's in-app browser.
+Start the local canvas for the active project and open the URL reported by the
+launcher in Codex's in-app browser. This is the supported v0.1 route. The
+canvas exports an immutable project-bound round for the main conversation to
+read through MCP. Do not claim an experimental native host panel.
 
 Before the first launch in a new installation, tell the user that bootstrap
 will install Canvas Prompt-managed Node and local-ASR dependencies into an

@@ -30,21 +30,36 @@ const mcpConfig = (project) => ({
 // cache so an installed ASR environment and model can be reused across plugin
 // versions without touching a user's global Python environment.
 const runtimeDir = () => resolve(process.env.CANVAS_PROMPT_RUNTIME_DIR ?? resolve(homedir(), '.canvas-prompt', 'runtime'))
-const asrUrl = () => process.env.CANVAS_PROMPT_ASR_URL ?? `http://127.0.0.1:${process.env.CANVAS_PROMPT_ASR_PORT ?? '8080'}`
-const runtimeEnvironment = () => ({ ...process.env, CANVAS_PROMPT_RUNTIME_DIR: runtimeDir() })
+const asrUrl = (environment = process.env) => environment.CANVAS_PROMPT_ASR_URL ?? `http://127.0.0.1:${environment.CANVAS_PROMPT_ASR_PORT ?? '8080'}`
+const runtimeEnvironment = (overrides = {}) => ({ ...process.env, ...overrides, CANVAS_PROMPT_RUNTIME_DIR: runtimeDir() })
 const runBootstrap = (mode) => spawnSync('bash', [resolve(rootDir, 'scripts', 'bootstrap-runtime.sh'), mode], { stdio: 'inherit', env: runtimeEnvironment() })
-const probeAsr = async () => {
-  const endpoint = asrUrl()
+const allowsExternalAsr = (environment = process.env) => environment.CANVAS_PROMPT_ALLOW_EXTERNAL_ASR === '1' || Boolean(environment.CANVAS_PROMPT_ASR_URL)
+const probeAsr = async (environment = process.env) => {
+  const endpoint = asrUrl(environment)
   try {
     const response = await fetch(`${endpoint}/health`, { signal: AbortSignal.timeout(1_500) })
     const value = response.ok ? await response.json() : null
     const ready = value?.status === 'ok'
       && value?.whisper_loaded !== false
-      && (value?.canvas_prompt_asr === true || value?.backend === 'whisper' || value?.backend === 'faster-whisper')
+      && (value?.canvas_prompt_asr === true || (allowsExternalAsr(environment) && (value?.backend === 'whisper' || value?.backend === 'faster-whisper')))
     return { endpoint, ready, response: value }
   } catch {
     return { endpoint, ready: false, response: null }
   }
+}
+const portInUse = (port) => spawnSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN'], { stdio: 'ignore' }).status === 0
+const firstOpenAsrPort = () => {
+  for (let port = 18080; port < 18100; port += 1) if (!portInUse(port)) return port
+  throw new Error('Canvas Prompt could not find a free local ASR port between 18080 and 18099.')
+}
+// A generic service on 8080 can be an older, slower ASR with a different
+// lifecycle. Reuse only a Canvas Prompt-managed service by default; an
+// explicit endpoint or opt-in flag remains available for advanced hosts.
+const asrEnvironmentForOpen = async () => {
+  if (process.env.CANVAS_PROMPT_ASR_URL) return {}
+  const current = await probeAsr()
+  if (current.ready || !portInUse(Number(process.env.CANVAS_PROMPT_ASR_PORT ?? '8080'))) return {}
+  return { CANVAS_PROMPT_ASR_PORT: String(firstOpenAsrPort()) }
 }
 const help = () => console.log(`Canvas Prompt host-neutral entrypoint
 
@@ -82,15 +97,17 @@ try {
       }, null, 2))
     } else if (command === 'open') {
       const host = flag('--host') === 'codex' ? 'codex' : 'local'
+      const asrEnvironment = await asrEnvironmentForOpen()
+      const environment = runtimeEnvironment(asrEnvironment)
       if (process.env.CANVAS_PROMPT_ASR !== 'disabled') {
         // Model download can take longer than a canvas launch. Start it in the
         // background; the canvas polls the same loopback endpoint and shows a
         // truthful “speech preparing” state until it is actually ready.
-        const asr = spawn('bash', [resolve(rootDir, 'scripts', 'start-asr.sh')], { detached: true, stdio: 'ignore', env: runtimeEnvironment() })
+        const asr = spawn('bash', [resolve(rootDir, 'scripts', 'start-asr.sh')], { detached: true, stdio: 'ignore', env: environment })
         asr.unref()
-        console.error(`Canvas Prompt is preparing local speech transcription at ${asrUrl()} in the background.`)
+        console.error(`Canvas Prompt is preparing local speech transcription at ${asrUrl(environment)} in the background.`)
       }
-      const result = spawnSync('bash', [resolve(rootDir, 'scripts', 'start-canvas.sh'), project], { stdio: 'inherit', env: { ...runtimeEnvironment(), CANVAS_PROMPT_DELIVERY_MODE: host } })
+      const result = spawnSync('bash', [resolve(rootDir, 'scripts', 'start-canvas.sh'), project], { stdio: 'inherit', env: { ...environment, CANVAS_PROMPT_DELIVERY_MODE: host } })
       process.exitCode = result.status ?? 1
     } else throw new Error(`Unknown command: ${command}`)
   }
