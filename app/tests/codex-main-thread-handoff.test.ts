@@ -139,12 +139,12 @@ describe('main-thread handoff routing', () => {
     expect(selectMainThreadId(undefined, null)).toBeNull()
   })
 
-  it('only falls back to a host-provided binding verified for the exact canonical project path', () => {
+  it('keeps historical bindings inspectable but never uses them to route a new handoff', () => {
     expect(isVerifiedMainThreadBinding({ version: 1, enabled: true, thread_id: 'legacy' }, projectDir)).toBe(false)
     expect(isVerifiedMainThreadBinding({ version: 2, enabled: true, thread_id: 'wrong-project', project_dir: '/archive/canvas-prompt' }, projectDir)).toBe(false)
     expect(isVerifiedMainThreadBinding({ version: 2, enabled: true, thread_id: 'automatic', project_dir: projectDir, source: 'automatic-project-recency' }, projectDir)).toBe(false)
     expect(isVerifiedMainThreadBinding({ version: 3, enabled: true, thread_id: 'correct-project', project_dir: projectDir, source: 'host-provided' }, projectDir)).toBe(true)
-    expect(selectMainThreadId(undefined, { threadId: 'correct-project' })).toEqual({ threadId: 'correct-project', source: 'verified_binding' })
+    expect(selectMainThreadId(undefined, { threadId: 'correct-project' })).toBeNull()
   })
 
   it('archives without starting App Server when host context is unavailable', async () => {

@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
+import { resolveConversationScope, validThreadId } from '../app/conversation-scope.mjs'
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const command = process.argv[2] ?? 'help'
@@ -12,17 +13,26 @@ const flag = (name) => {
   const index = process.argv.indexOf(name)
   return index >= 0 ? process.argv[index + 1] : null
 }
-const projectDir = () => {
+const conversationOnly = () => process.argv.includes('--conversation-only')
+const threadId = () => flag('--thread-id') ?? process.env.CANVAS_PROMPT_CODEX_THREAD_ID ?? process.env.CANVAS_PROMPT_THREAD_ID ?? null
+const projectDir = ({ required = true } = {}) => {
+  if (conversationOnly()) {
+    if (required && !validThreadId(threadId())) throw new Error('A project-less Canvas session requires --thread-id from the active host conversation.')
+    return null
+  }
   const candidate = resolve(flag('--project') ?? process.cwd())
   if (!existsSync(candidate)) throw new Error(`Project directory does not exist: ${candidate}`)
   return realpathSync(candidate)
 }
-const mcpConfig = (project) => ({
+const mcpConfig = (project, boundThreadId = null) => ({
   mcpServers: {
     canvas_prompt: {
       command: 'bash',
       args: [resolve(rootDir, 'scripts', 'start-mcp.sh')],
-      env: { CANVAS_PROMPT_PROJECT_DIR: project },
+      env: {
+        ...(project ? { CANVAS_PROMPT_PROJECT_DIR: project } : {}),
+        ...(boundThreadId ? { CANVAS_PROMPT_THREAD_ID: boundThreadId, CANVAS_PROMPT_REQUIRE_THREAD: '1' } : {}),
+      },
     },
   },
 })
@@ -94,35 +104,40 @@ const help = () => console.log(`Canvas Prompt host-neutral entrypoint
 
 Usage:
   canvas-prompt setup [--core-only]
-  canvas-prompt open [--project <dir>] [--host codex|local]
-  canvas-prompt init [--project <dir>]
-  canvas-prompt doctor [--project <dir>]
+  canvas-prompt open [--project <dir>] [--thread-id <id>] [--conversation-only] [--host codex|local]
+  canvas-prompt init [--project <dir>] [--thread-id <id>] [--conversation-only]
+  canvas-prompt doctor [--project <dir>] [--thread-id <id>] [--conversation-only]
 
 setup installs Canvas Prompt-managed dependencies into its local runtime and
 reuses validated existing dependencies. The local ASR model downloads on first
-start. init prints the MCP configuration for the active project.`)
+start. A supplied thread ID is a host-provided route, never inferred from
+project history. init prints the fixed-scope MCP configuration.`)
 
 try {
   if (command === 'help' || command === '--help' || command === '-h') help()
   else {
     const project = projectDir()
+    const boundThreadId = threadId()
+    if (boundThreadId && !validThreadId(boundThreadId)) throw new Error('Canvas Prompt received an invalid host thread ID.')
+    const scope = resolveConversationScope({ projectDir: project, threadId: boundThreadId })
     if (command === 'setup') {
       const result = runBootstrap(flag('--core-only') ? '--core-only' : '--with-asr')
       process.exitCode = result.status ?? 1
     }
-    else if (command === 'init') console.log(JSON.stringify({ project_dir: project, mcp_config: mcpConfig(project) }, null, 2))
+    else if (command === 'init') console.log(JSON.stringify({ project_dir: project, storage_kind: scope.storageKind, thread_scope_key: scope.threadScopeKey, mcp_config: mcpConfig(project, boundThreadId) }, null, 2))
     else if (command === 'doctor') {
-      const latest = resolve(project, '.canvas-prompt', 'latest-prompt-package.json')
       const asr = await probeAsr()
       console.log(JSON.stringify({
         ok: true,
         project_dir: project,
+        storage_kind: scope.storageKind,
+        thread_scope_key: scope.threadScopeKey,
         node: process.version,
         python_required: '3.11+',
         managed_runtime_dir: runtimeDir(),
-        latest_package_exists: existsSync(latest),
+        latest_package_exists: existsSync(scope.latestPackagePath),
         asr,
-        mcp_config: mcpConfig(project),
+        mcp_config: mcpConfig(project, boundThreadId),
       }, null, 2))
     } else if (command === 'open') {
       const host = flag('--host') === 'codex' ? 'codex' : 'local'
@@ -138,7 +153,15 @@ try {
         const asr = spawnSync('bash', [resolve(rootDir, 'scripts', 'start-asr.sh')], { stdio: 'inherit', env: environment })
         if (asr.status !== 0) throw new Error(`Local speech transcription did not become ready (${asrUrl(environment)}). Set CANVAS_PROMPT_ASR=disabled only for an intentional visual-only session.`)
       }
-      const result = spawnSync('bash', [resolve(rootDir, 'scripts', 'start-canvas.sh'), project], { stdio: 'inherit', env: { ...environment, CANVAS_PROMPT_DELIVERY_MODE: host } })
+      const result = spawnSync('bash', [resolve(rootDir, 'scripts', 'start-canvas.sh'), project ?? process.cwd()], {
+        stdio: 'inherit',
+        env: {
+          ...environment,
+          ...(project ? { CANVAS_PROMPT_PROJECT_DIR: project } : { CANVAS_PROMPT_PROJECT_MODE: 'conversation' }),
+          ...(boundThreadId ? { CANVAS_PROMPT_THREAD_ID: boundThreadId } : {}),
+          CANVAS_PROMPT_DELIVERY_MODE: host,
+        },
+      })
       process.exitCode = result.status ?? 1
     } else throw new Error(`Unknown command: ${command}`)
   }

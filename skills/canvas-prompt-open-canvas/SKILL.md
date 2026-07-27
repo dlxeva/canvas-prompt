@@ -7,8 +7,10 @@ description: Open the local Canvas Prompt thinking canvas for the active Codex p
 
 Start the local canvas for the active project and open the URL reported by the
 launcher in Codex's in-app browser. This is the supported v0.1 route. The
-canvas exports an immutable project-bound round for the main conversation to
-read through MCP. Do not claim an experimental native host panel.
+canvas exports an immutable round. The project decides archive location; only
+an explicit host-provided current conversation ID may decide the conversation
+scope. Never infer that ID from the project, recent tasks, a prior binding, or
+browser state. Do not claim an experimental native host panel.
 
 Before the first launch in a new installation, tell the user that bootstrap
 will install Canvas Prompt-managed Node and local-ASR dependencies into an
@@ -27,12 +29,17 @@ node bin/canvas-prompt.mjs open --host codex --project /absolute/path/to/the/act
 
 The launcher prefers `http://127.0.0.1:43223/`, reuses a healthy instance of the current plugin, removes stale Canvas Prompt servers, and otherwise selects an available local port. Read its output and open the actual reported URL; do not assume the default port.
 
-The canvas writes its latest exported Prompt Package to `<active-project>/.canvas-prompt/latest-prompt-package.json`. After export, use `$canvas-prompt-read-round` to read and continue from that round in the Codex conversation.
+When the host has supplied a current conversation ID, the canvas writes into
+`<active-project>/.canvas-prompt/threads/<opaque-key>/`; otherwise it uses the
+explicit project archive. After export, use `$canvas-prompt-read-round` only
+from the same fixed scope. If Codex has not exposed a current conversation ID
+to the launcher, do not say that the export was automatically routed back to
+the visible conversation.
 
 ## Do not parse a live canvas by screenshot
 
 Opening a canvas is not an export. If the user asks what the AI saw, says they have given feedback, or asks to continue from the whiteboard **before an exported round exists**, do not inspect the browser canvas, take a screenshot, or infer from the visible page. Say that no round has been received yet and ask the user to finish the round and choose **Send to Codex**.
 
-Once an immutable round exists, browser control is not the reading path. `$canvas-prompt-read-round` must use the project-bound MCP tools and the Compact Package first. Screenshots are only a secondary local file check when the compiled package explicitly leaves a material visual ambiguity.
+Once an immutable round exists, browser control is not the reading path. `$canvas-prompt-read-round` must use the fixed-scope MCP tools and the Compact Package first. Screenshots are only a secondary local file check when the compiled package explicitly leaves a material visual ambiguity.
 
 Do not describe the canvas as an AI output or teaching surface. Its current job is to capture human input and make that process understandable to AI.

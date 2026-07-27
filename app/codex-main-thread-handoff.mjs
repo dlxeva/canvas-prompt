@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, realpath, rename, unlink, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { basename, delimiter, dirname, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -18,18 +18,6 @@ export const HANDOFF_COMPLETION_TIMEOUT_MS = 10 * 60_000
 // 20-second handshake budget. This is still pre-acceptance, so wait a bounded
 // minute instead of reporting a false send failure.
 const HANDOFF_STARTUP_TIMEOUT_MS = 60_000
-
-function readMainThreadBinding(projectDir) {
-  const path = resolve(projectDir, '.canvas-prompt', 'main-thread.json')
-  if (!existsSync(path)) return null
-  try {
-    const value = JSON.parse(readFileSync(path, 'utf8'))
-    if (!isVerifiedMainThreadBinding(value, projectDir)) return null
-    return { threadId: value.thread_id, path }
-  } catch {
-    return null
-  }
-}
 
 export function isVerifiedMainThreadBinding(value, projectDir) {
   // Project cwd and recency are not an identity for the conversation that is
@@ -50,7 +38,11 @@ export function isVerifiedMainThreadBinding(value, projectDir) {
  */
 export function selectMainThreadId(explicitThreadId, savedBinding) {
   if (typeof explicitThreadId === 'string' && explicitThreadId.trim()) return { threadId: explicitThreadId.trim(), source: 'explicit_host_context' }
-  if (typeof savedBinding?.threadId === 'string' && savedBinding.threadId.trim()) return { threadId: savedBinding.threadId, source: 'verified_binding' }
+  // A previous project's binding is not evidence that the same conversation
+  // is currently visible. The Canvas service receives a host-provided thread
+  // ID for every scoped launch; without it, archive only rather than routing
+  // a new round to a historical conversation.
+  void savedBinding
   return null
 }
 
@@ -211,9 +203,7 @@ export async function handoffToMainThread({
   handoffAttemptId = randomUUID(),
   mainThreadId,
 }) {
-  const canonicalProjectDir = await realpath(projectDir).catch(() => resolve(projectDir))
-  const savedBinding = readMainThreadBinding(canonicalProjectDir)
-  const selectedThread = selectMainThreadId(mainThreadId, savedBinding)
+  const selectedThread = selectMainThreadId(mainThreadId)
   if (!selectedThread) {
     const receipt = {
       status: 'archived', stage: 'host_context_unavailable', attempted: false, accepted: false, delivered: false,
@@ -384,7 +374,7 @@ export async function handoffToMainThread({
       id: 1,
       method: 'initialize',
       params: {
-        clientInfo: { name: 'canvas-prompt-handoff', version: '0.1.10' },
+        clientInfo: { name: 'canvas-prompt-handoff', version: '0.1.11' },
         capabilities: { experimentalApi: true },
       },
     })
