@@ -13,6 +13,7 @@ PIP_RETRIES="${CANVAS_PROMPT_PIP_RETRIES:-3}"
 PIP_TIMEOUT_SECONDS="${CANVAS_PROMPT_PIP_TIMEOUT_SECONDS:-120}"
 NPM_INSTALL_ATTEMPTS="${CANVAS_PROMPT_NPM_INSTALL_ATTEMPTS:-3}"
 NPM_FETCH_RETRIES="${CANVAS_PROMPT_NPM_FETCH_RETRIES:-3}"
+NPM_FETCH_TIMEOUT_MS="${CANVAS_PROMPT_NPM_FETCH_TIMEOUT_MS:-90000}"
 
 if [[ "$MODE" != "--core-only" && "$MODE" != "--with-asr" ]]; then
   echo "Usage: $0 [--core-only|--with-asr]" >&2
@@ -45,9 +46,11 @@ if [[ ! -x "$ROOT_DIR/app/node_modules/.bin/vite" ]]; then
   # reproducible.
   npm_attempt=1
   until npm --prefix "$ROOT_DIR/app" ci \
+    --no-audit --no-fund \
     --fetch-retries "$NPM_FETCH_RETRIES" \
     --fetch-retry-mintimeout 10000 \
-    --fetch-retry-maxtimeout 120000; do
+    --fetch-retry-maxtimeout 120000 \
+    --fetch-timeout "$NPM_FETCH_TIMEOUT_MS"; do
     if [[ "$npm_attempt" -ge "$NPM_INSTALL_ATTEMPTS" ]]; then
       echo "Canvas Prompt app dependency install failed after ${NPM_INSTALL_ATTEMPTS} attempts." >&2
       exit 1
