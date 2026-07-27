@@ -34,7 +34,7 @@ const tools: Array<{ id: CanvasTool; zh: string; en: string }> = [
 ]
 
 const ui = {
-  zh: { importImage: '导入图片', importing: '正在导入…', more: '更多功能', archive: '本地档案', recording: '录音中', asrPreparing: '语音准备中', asrUnavailable: '语音仅保存', finish: '结束推演', processing: '处理中', export: '发送到当前对话', retryExport: '重新发送到当前对话', sending: '正在发送…', archived: '✓ 已保存到本地', accepted: '✓ 已送入主对话', deliveredReceipt: '✓ 主对话已完成处理', failedReceipt: '已保存 · 推送失败', next: '开始下一轮', start: '开始推演', startVisualOnly: '不等语音，开始画', preparing: '准备中…', canvasTools: '画布工具', expandTools: '展开画布工具', collapseTools: '收起画布工具', undo: '撤销（⌘Z）', redo: '重做（⇧⌘Z）', zoomOut: '缩小', zoomIn: '放大', color: '颜色', weight: '粗细', releaseToImport: '松开以导入图片', archiveDescription: '保存在本项目的', archiveDescriptionEnd: '。不自动上传云端；删除后无法恢复。', closeArchive: '关闭本地档案', loadingArchive: '正在读取本地档案…', noArchive: '还没有已归档的推演。', seconds: '秒', unknownDuration: '时长未知', snapshot: '画布快照', noSnapshot: '无快照', audio: '录音', noAudio: '无录音', delivered: '已送达', sent: '已接收', sendFailed: '发送失败', local: '仅本地', delete: '删除' },
+  zh: { importImage: '导入图片', importing: '正在导入…', more: '更多功能', archive: '本地档案', recording: '录音中', asrPreparing: '语音准备中', asrUnavailable: '语音仅保存', finish: '结束推演', processing: '处理中', export: '发送到当前对话', retryExport: '重新发送到当前对话', sending: '正在发送…', archived: '✓ 已保存到本地', accepted: '✓ 已注入主对话上下文', deliveredReceipt: '✓ 上下文已注入当前对话', failedReceipt: '已保存 · 推送失败', next: '开始下一轮', start: '开始推演', startVisualOnly: '不等语音，开始画', preparing: '准备中…', canvasTools: '画布工具', expandTools: '展开画布工具', collapseTools: '收起画布工具', undo: '撤销（⌘Z）', redo: '重做（⇧⌘Z）', zoomOut: '缩小', zoomIn: '放大', color: '颜色', weight: '粗细', releaseToImport: '松开以导入图片', archiveDescription: '保存在本项目的', archiveDescriptionEnd: '。不自动上传云端；删除后无法恢复。', closeArchive: '关闭本地档案', loadingArchive: '正在读取本地档案…', noArchive: '还没有已归档的推演。', seconds: '秒', unknownDuration: '时长未知', snapshot: '画布快照', noSnapshot: '无快照', audio: '录音', noAudio: '无录音', delivered: '已送达', sent: '已接收', sendFailed: '发送失败', local: '仅本地', delete: '删除' },
   en: { importImage: 'Import image', importing: 'Importing…', more: 'More', archive: 'Local archive', recording: 'Recording', asrPreparing: 'Speech preparing', asrUnavailable: 'Audio saved only', finish: 'Finish session', processing: 'Processing', export: 'Send to Codex', retryExport: 'Retry sending', sending: 'Sending…', archived: '✓ Saved locally', accepted: '✓ Sent to main conversation', deliveredReceipt: '✓ Main conversation completed', failedReceipt: 'Saved · send failed', next: 'Start next round', start: 'Start session', startVisualOnly: 'Start without speech', preparing: 'Preparing…', canvasTools: 'Canvas tools', expandTools: 'Expand tools', collapseTools: 'Collapse tools', undo: 'Undo (⌘Z)', redo: 'Redo (⇧⌘Z)', zoomOut: 'Zoom out', zoomIn: 'Zoom in', color: 'Color', weight: 'Weight', releaseToImport: 'Release to import image', archiveDescription: 'Stored locally in', archiveDescriptionEnd: '. Nothing is uploaded automatically; deleted rounds cannot be recovered.', closeArchive: 'Close local archive', loadingArchive: 'Loading local archive…', noArchive: 'No saved rounds yet.', seconds: 'sec', unknownDuration: 'duration unknown', snapshot: 'canvas snapshot', noSnapshot: 'no snapshot', audio: 'audio', noAudio: 'no audio', delivered: 'delivered', sent: 'received', sendFailed: 'send failed', local: 'local only', delete: 'Delete' },
 } as const
 
@@ -163,6 +163,10 @@ export default function App() {
   const [asrAvailable, setAsrAvailable] = useState(false)
   const [asrPreparing, setAsrPreparing] = useState(true)
   const [asrEndpoint, setAsrEndpoint] = useState('http://127.0.0.1:8080')
+  // Do not probe the default port before runtime identity tells us which
+  // isolated ASR instance this canvas owns. Otherwise a cold start can briefly
+  // look like "audio only" (or accidentally observe another app's ASR).
+  const [asrRuntimeResolved, setAsrRuntimeResolved] = useState(false)
   const [compiledPackage, setCompiledPackage] = useState<PromptPackage | null>(null)
   const [lastRecording, setLastRecording] = useState<RecordingResult | null>(null)
   const [transcription, setTranscription] = useState<TranscriptionResult | null>(null)
@@ -221,17 +225,19 @@ export default function App() {
         setAsrPreparing(identity?.asr_enabled !== false)
       })
       .catch(() => undefined)
+      .finally(() => setAsrRuntimeResolved(true))
   }, [])
 
   const refreshAsrAvailability = useCallback(async () => {
     try {
       asrClient.setBaseUrl(asrEndpoint)
       const health = await asrClient.health()
-      // Reuse a pre-existing local Whisper service only when its health shape
-      // proves it is one of the endpoints Canvas Prompt already supports.
+      // The launcher only reuses a Canvas Prompt-managed endpoint by default.
+      // Mirror that provenance check in the browser instead of treating an
+      // unrelated local Whisper process as this session's transcription.
       const available = health.status === 'ok'
         && health.whisper_loaded !== false
-        && (health.canvas_prompt_asr === true || health.backend === 'whisper' || health.backend === 'faster-whisper')
+        && health.canvas_prompt_asr === true
       asrAvailableRef.current = available
       setAsrAvailable(available)
       if (available) setAsrPreparing(false)
@@ -244,10 +250,11 @@ export default function App() {
   }, [asrEndpoint])
 
   useEffect(() => {
+    if (!asrRuntimeResolved) return
     void refreshAsrAvailability()
     const timer = window.setInterval(() => { void refreshAsrAvailability() }, 5_000)
     return () => window.clearInterval(timer)
-  }, [refreshAsrAvailability])
+  }, [asrRuntimeResolved, refreshAsrAvailability])
 
   // A cold model download can take several minutes. During that time the
   // canvas remains visible, but a session cannot begin and falsely promise
@@ -535,7 +542,7 @@ export default function App() {
         if (receipt) setHandoffReceipt(receipt)
         if (status === 'delivered') {
           setExportStatus('delivered')
-          setWorkflowMessage('本轮已送达当前 Codex 对话。')
+          setWorkflowMessage('本轮上下文已注入当前对话。')
           return
         }
         if (status === 'failed') {
@@ -576,7 +583,7 @@ export default function App() {
         // It is intentionally not retained inside the model-facing package.
         body: JSON.stringify(payload),
       })
-      const result = await response.json().catch(() => null) as { ok?: boolean; error?: string; engine?: { error?: string }; handoff?: HandoffReceipt } | null
+      const result = await response.json().catch(() => null) as { ok?: boolean; error?: string; roundPath?: string; engine?: { error?: string }; handoff?: HandoffReceipt } | null
       if (!response.ok || !result?.ok) throw new Error(result?.error || result?.engine?.error || `本轮上下文未能归档（${response.status}）`)
       const receiptStatus = deriveExportReceiptStatus(result.handoff)
       setHandoffReceipt(result.handoff ?? null)
@@ -584,9 +591,9 @@ export default function App() {
       setWorkflowMessage(deliveryMode === 'local'
         ? '本轮已保存在本地。请在你的 AI 终端中读取 Canvas Prompt 上下文。'
         : receiptStatus === 'delivered'
-        ? '本轮已送达当前 Codex 对话。'
+        ? '本轮上下文已注入当前对话。'
           : receiptStatus === 'accepted'
-            ? '本轮已送入主对话，请在主对话继续。'
+            ? '本轮上下文已注入当前对话。'
           : receiptStatus === 'failed'
             ? `本轮已保存在本地，但主对话没有确认接收：${result.handoff?.reason || '可重新发送'}`
             : '本轮已保存在本地，并已完成核心编译。')
@@ -948,7 +955,7 @@ export default function App() {
   const exportLabel = deliveryMode === 'codex' ? text.export : locale === 'zh' ? '保存上下文' : 'Save context'
   const retryExportLabel = deliveryMode === 'codex' ? text.retryExport : locale === 'zh' ? '重新保存上下文' : 'Save context again'
   const receiptText = exportStatus === 'delivered'
-    ? text.deliveredReceipt
+    ? text.accepted
     : exportStatus === 'accepted'
     ? text.accepted
       : exportStatus === 'failed'

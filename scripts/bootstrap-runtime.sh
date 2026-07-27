@@ -9,6 +9,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="${1:---with-asr}"
 RUNTIME_DIR="${CANVAS_PROMPT_RUNTIME_DIR:-$ROOT_DIR/.canvas-prompt-runtime}"
 PYTHON_BIN="${CANVAS_PROMPT_PYTHON:-python3}"
+PIP_RETRIES="${CANVAS_PROMPT_PIP_RETRIES:-3}"
+PIP_TIMEOUT_SECONDS="${CANVAS_PROMPT_PIP_TIMEOUT_SECONDS:-120}"
+NPM_INSTALL_ATTEMPTS="${CANVAS_PROMPT_NPM_INSTALL_ATTEMPTS:-3}"
+NPM_FETCH_RETRIES="${CANVAS_PROMPT_NPM_FETCH_RETRIES:-3}"
 
 if [[ "$MODE" != "--core-only" && "$MODE" != "--with-asr" ]]; then
   echo "Usage: $0 [--core-only|--with-asr]" >&2
@@ -33,7 +37,25 @@ require_version "$PYTHON_VERSION" "3.11.0" "Python"
 
 if [[ ! -x "$ROOT_DIR/app/node_modules/.bin/vite" ]]; then
   echo "Installing Canvas Prompt app dependencies…" >&2
-  npm --prefix "$ROOT_DIR/app" ci
+  # A clean install is intentionally networked. Retry the whole `npm ci`
+  # command a small, bounded number of times because registry idle timeouts
+  # are transient and a partial node_modules directory is safe for npm to
+  # reconcile on the next attempt. Do not fall back to a global cache or a
+  # different registry: the resulting dependency graph must stay lockfile
+  # reproducible.
+  npm_attempt=1
+  until npm --prefix "$ROOT_DIR/app" ci \
+    --fetch-retries "$NPM_FETCH_RETRIES" \
+    --fetch-retry-mintimeout 10000 \
+    --fetch-retry-maxtimeout 120000; do
+    if [[ "$npm_attempt" -ge "$NPM_INSTALL_ATTEMPTS" ]]; then
+      echo "Canvas Prompt app dependency install failed after ${NPM_INSTALL_ATTEMPTS} attempts." >&2
+      exit 1
+    fi
+    echo "npm install attempt ${npm_attempt} failed; retrying once after a short pause…" >&2
+    sleep $((npm_attempt * 5))
+    npm_attempt=$((npm_attempt + 1))
+  done
 else
   echo "Reusing Canvas Prompt app dependencies." >&2
 fi
@@ -56,7 +78,12 @@ else
   # and changes the first-run dependency graph before we even install Canvas
   # Prompt. The venv's bundled pip is enough for the pinned direct runtime
   # requirements below.
-  "$ASR_PYTHON" -m pip install --disable-pip-version-check -r "$ROOT_DIR/runtime/requirements-asr.txt"
+  # Cold installs fetch several platform wheels. Transient PyPI read timeouts
+  # are recoverable; retry a bounded number of times before surfacing a clear
+  # failure, without silently changing the dependency graph.
+  "$ASR_PYTHON" -m pip install --disable-pip-version-check \
+    --retries "$PIP_RETRIES" --timeout "$PIP_TIMEOUT_SECONDS" \
+    -r "$ROOT_DIR/runtime/requirements-asr.txt"
   "$ASR_PYTHON" -m pip check
 fi
 printf '%s\n' "$ASR_PYTHON"

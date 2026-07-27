@@ -99,6 +99,7 @@ function startHandoff(harness: Awaited<ReturnType<typeof createHarness>>, overri
     roundPath: harness.roundPath,
     engine: { ok: true },
     appServerCommand: harness.commandPath,
+    mainThreadId: `thread_${nameFromRound(harness.roundPath)}`,
     // The fake App Server starts a fresh Node process. Give it the same
     // headroom under the full Vitest suite as it has in isolated execution;
     // two seconds is intermittently too short when the browser bundle tests
@@ -110,6 +111,10 @@ function startHandoff(harness: Awaited<ReturnType<typeof createHarness>>, overri
   })
 }
 
+function nameFromRound(roundPath: string) {
+  return roundPath.split('/').at(-1) ?? ''
+}
+
 describe('main-thread handoff routing', () => {
   const projectDir = '/workspaces/canvas-prompt'
 
@@ -119,30 +124,34 @@ describe('main-thread handoff routing', () => {
 
   it('keeps the public handoff declaration aligned with terminal receipt states', async () => {
     const declaration = await readFile(resolve(import.meta.dirname, '..', 'codex-main-thread-handoff.d.ts'), 'utf8')
+    expect(declaration).toContain("| 'archived'")
     expect(declaration).toContain("'accepted_observer_lost'")
     expect(declaration).toContain("'completed_failed'")
     expect(declaration).toContain("'completed_cancelled'")
     expect(declaration).toContain('handoffAttemptId?: string')
   })
 
-  it('selects an exact project cwd before any saved binding', () => {
-    expect(selectMainThreadId([
-      { id: 'same-name-other-project', cwd: '/archive/canvas-prompt' },
-      { id: 'exact-project', cwd: projectDir },
-    ], projectDir, { threadId: 'saved-thread' })).toEqual({ threadId: 'exact-project', source: 'exact_cwd' })
+  it('uses only an explicit host thread identity, never project cwd or recency', () => {
+    expect(selectMainThreadId('current-host-thread', { threadId: 'saved-thread' })).toEqual({ threadId: 'current-host-thread', source: 'explicit_host_context' })
   })
 
-  it('never routes by matching basename alone', () => {
-    expect(selectMainThreadId([
-      { id: 'same-name-other-project', cwd: '/archive/canvas-prompt' },
-    ], projectDir, null)).toBeNull()
+  it('does not route when the host did not provide a current thread identity', () => {
+    expect(selectMainThreadId(undefined, null)).toBeNull()
   })
 
-  it('only falls back to a binding verified for the exact canonical project path', () => {
+  it('only falls back to a host-provided binding verified for the exact canonical project path', () => {
     expect(isVerifiedMainThreadBinding({ version: 1, enabled: true, thread_id: 'legacy' }, projectDir)).toBe(false)
     expect(isVerifiedMainThreadBinding({ version: 2, enabled: true, thread_id: 'wrong-project', project_dir: '/archive/canvas-prompt' }, projectDir)).toBe(false)
-    expect(isVerifiedMainThreadBinding({ version: 2, enabled: true, thread_id: 'correct-project', project_dir: projectDir }, projectDir)).toBe(true)
-    expect(selectMainThreadId([], projectDir, { threadId: 'correct-project' })).toEqual({ threadId: 'correct-project', source: 'verified_binding' })
+    expect(isVerifiedMainThreadBinding({ version: 2, enabled: true, thread_id: 'automatic', project_dir: projectDir, source: 'automatic-project-recency' }, projectDir)).toBe(false)
+    expect(isVerifiedMainThreadBinding({ version: 3, enabled: true, thread_id: 'correct-project', project_dir: projectDir, source: 'host-provided' }, projectDir)).toBe(true)
+    expect(selectMainThreadId(undefined, { threadId: 'correct-project' })).toEqual({ threadId: 'correct-project', source: 'verified_binding' })
+  })
+
+  it('archives without starting App Server when host context is unavailable', async () => {
+    const harness = await createHarness('no_host_context', '')
+    const result = await handoffToMainThread({ projectDir: harness.project, packagePath: resolve(harness.roundPath, 'prompt-package.json'), roundPath: harness.roundPath, engine: { ok: true }, appServerCommand: harness.commandPath })
+    expect(result).toMatchObject({ status: 'archived', attempted: false, accepted: false, delivered: false })
+    expect((await readReceipt(harness.roundPath)).stage).toBe('host_context_unavailable')
   })
 
   it('accepts completion only for the turn that this handoff started', () => {
@@ -159,7 +168,7 @@ describe('main-thread handoff routing', () => {
     expect(appServerCommandCandidates('/tmp/example', { PATH: '/usr/bin' })).toContain('/Applications/ChatGPT.app/Contents/Resources/codex')
   })
 
-  it('tells the receiving task to read Compact Package before any browser canvas', () => {
+  it('tells the receiving task to read Compact Package, acknowledge its understanding, and continue', () => {
     const message = handoffMessage({
       packagePath: '/project/.canvas-prompt/rounds/r1/prompt-package.json',
       roundPath: '/project/.canvas-prompt/rounds/r1',
@@ -168,10 +177,12 @@ describe('main-thread handoff routing', () => {
     })
     expect(message).toContain('先用 Canvas Prompt MCP 读取 Compact Package')
     expect(message).toContain('不要打开浏览器画布')
+    expect(message).toContain('先用 2–4 句说明“我这样理解你这一轮”')
+    expect(message).toContain('不要把 package ID、事件数量、本地路径或读取步骤当作主要回复')
   })
 
   it('keeps the visible attachment message separate from the internal handoff instructions', async () => {
-    expect(visibleReceiptMessage()).toBe('Canvas Prompt｜本轮画布已送入主对话。')
+    expect(visibleReceiptMessage()).toBe('Canvas Prompt｜本轮画布上下文已注入当前对话。')
     const harness = await createHarness('visible_message', `
       console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_visible_message' } } }))
     `)
@@ -321,10 +332,10 @@ describe('main-thread handoff routing', () => {
       console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_b' } } }))
       setTimeout(() => console.log(JSON.stringify({ method: 'turn/completed', params: { turn: { id: 'turn_b' } } })), 10)
     `)
-    const base = { projectDir: project, engine: { ok: true }, startupTimeoutMs: 2_000, completionTimeoutMs: 500, focusThread: async () => false }
+    const base = { projectDir: project, engine: { ok: true }, startupTimeoutMs: 5_000, completionTimeoutMs: 500, focusThread: async () => false }
     const [acceptedA, acceptedB] = await Promise.all([
-      handoffToMainThread({ ...base, packagePath: resolve(roundA.roundPath, 'prompt-package.json'), roundPath: roundA.roundPath, appServerCommand: serverA.commandPath }),
-      handoffToMainThread({ ...base, packagePath: resolve(roundB.roundPath, 'prompt-package.json'), roundPath: roundB.roundPath, appServerCommand: serverB.commandPath }),
+      handoffToMainThread({ ...base, packagePath: resolve(roundA.roundPath, 'prompt-package.json'), roundPath: roundA.roundPath, appServerCommand: serverA.commandPath, mainThreadId: 'thread_server_a' }),
+      handoffToMainThread({ ...base, packagePath: resolve(roundB.roundPath, 'prompt-package.json'), roundPath: roundB.roundPath, appServerCommand: serverB.commandPath, mainThreadId: 'thread_server_b' }),
     ])
     expect(acceptedA).toMatchObject({ status: 'accepted', expected_turn_id: 'turn_a' })
     expect(acceptedB, JSON.stringify(acceptedB)).toMatchObject({ status: 'accepted', expected_turn_id: 'turn_b' })

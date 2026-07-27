@@ -24,7 +24,11 @@ from faster_whisper import WhisperModel
 app = FastAPI(title="Canvas Prompt local ASR", version="1.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^http://(127\\.0\\.0\\.1|localhost):[0-9]+$",
+    # Raw strings do not need doubled backslashes here.  The previous pattern
+    # matched the literal sequence `\\.` instead of a dot, so a browser canvas
+    # at http://127.0.0.1:<port> could not read this otherwise healthy local
+    # service and remained in the "speech preparing" state forever.
+    allow_origin_regex=r"^http://(127\.0\.0\.1|localhost):[0-9]+$",
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
