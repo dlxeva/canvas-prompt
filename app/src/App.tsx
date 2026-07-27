@@ -14,7 +14,7 @@ import { compactTraceToCognitiveEvents, buildPointerTrack } from './excalidraw-c
 import { compilePromptPackage, validatePromptPackage } from './prompt-package-compiler'
 import type { BaselineContext, CanvasObject, Keyframe, PromptPackage, ViewTransformation } from './prompt-package-compiler'
 import { appendViewTransformation } from './view-transform'
-import { countIncludedBaselineObjects, projectLiveRoundElementIds } from './baseline-projection'
+import { countIncludedBaselineObjects, projectFinalSnapshotElements, projectLiveRoundElementIds } from './baseline-projection'
 import { deriveExportReceiptStatus, isReceiptComplete } from './receipt-state'
 import type { ExportReceiptStatus, HandoffReceipt } from './receipt-state'
 import { protectedLocalApiFetch } from './protected-local-api'
@@ -455,9 +455,16 @@ export default function App() {
           bounds: { x: element.x, y: element.y, width: element.width, height: element.height },
           properties: { base_artifact: true, asset_id: 'fileId' in element ? element.fileId ?? null : null },
         }))
+      // Keep the two projections deliberately separate. The compiler's event
+      // graph is scoped to this round, while the image a person (and an AI)
+      // receives must show the whole canvas they were actually annotating.
       const currentRoundIds = projectLiveRoundElementIds(elements, trace.current, artifactImageIds.current)
+      const finalSnapshotElements = projectFinalSnapshotElements(elements)
       const baselineObjectCount = baselineContext.current?.object_count ?? 0
-      const includedBaselineCount = countIncludedBaselineObjects(baselineObjectIds.current, currentRoundIds)
+      const includedBaselineCount = countIncludedBaselineObjects(
+        baselineObjectIds.current,
+        new Set(finalSnapshotElements.map((element) => element.id)),
+      )
       const roundBaselineContext: BaselineContext | undefined = baselineContext.current
         ? {
             ...baselineContext.current,
@@ -472,9 +479,9 @@ export default function App() {
           }
         : undefined
       const roundElements = elements.filter((element) => currentRoundIds.has(element.id))
-      const screenshotBlob = await exportToBlob({ elements: roundElements, appState: api?.getAppState(), files: api?.getFiles() ?? null, mimeType: 'image/png', exportPadding: 24 })
+      const screenshotBlob = await exportToBlob({ elements: finalSnapshotElements, appState: api?.getAppState(), files: api?.getFiles() ?? null, mimeType: 'image/png', exportPadding: 24 })
       const [screenshot, snapshotSize] = await Promise.all([blobToDataUrl(screenshotBlob), imageDimensions(screenshotBlob)])
-      const exportedSceneBounds = sceneBounds(roundElements)
+      const exportedSceneBounds = sceneBounds(finalSnapshotElements)
       setWorkflowMessage('正在准备本轮上下文…')
       const cognitiveEvents = compactTraceToCognitiveEvents(trace.current)
       const pointerTrack = buildPointerTrack(pointerSamples.current)

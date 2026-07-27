@@ -2,6 +2,20 @@ type ElementLike = { id: string; isDeleted?: boolean }
 type TraceLike = { kind: string; element: { id: string } }
 
 /**
+ * A round has two different projections:
+ *
+ * - the process projection contains only evidence created or changed in this
+ *   round; and
+ * - the final snapshot is the user-visible canvas state at the end of it.
+ *
+ * Never use the process projection to render the final snapshot. Doing so
+ * drops the existing diagram when a person annotates a prior round.
+ */
+export function projectFinalSnapshotElements<T extends ElementLike>(elements: readonly T[]) {
+  return elements.filter((element) => !element.isDeleted)
+}
+
+/**
  * The baseline declaration describes what existed when a round began; its
  * included count must describe what survives in the exported round. Never
  * let a deleted background image remain in evidence merely because it was a
