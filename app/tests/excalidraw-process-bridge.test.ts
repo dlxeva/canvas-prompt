@@ -362,6 +362,22 @@ describe('Excalidraw process bridge', () => {
     })
   })
 
+  it('keeps prior live objects as spatial anchors without turning them into new actions', () => {
+    const priorText: CanvasObject = {
+      object_id: 'obj_prior_text', type: 'text_block', timestamp_ms: 0,
+      bounds: { x: 20, y: 30, width: 240, height: 48 },
+      properties: { baseline_anchor: true, evidence_source: 'round_start_scene' },
+      source_strokes: ['prior_text'], semantic_content: '简介',
+    }
+
+    const pkg = compilePromptPackage([], '', 'data:image/png;base64,AA==', {
+      baselineAnchors: [priorText],
+    })
+
+    expect(pkg.objects).toContainEqual(priorText)
+    expect(pkg.timeline).toEqual([])
+  })
+
   it('keeps pointer gestures but excludes raw cursor samples from normal exports', () => {
     const events = compactTraceToCognitiveEvents([arrow])
     const pointer = buildPointerTrack([

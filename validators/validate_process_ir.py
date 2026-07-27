@@ -36,10 +36,12 @@ def validate_process_ir(data: Any) -> list[str]:
         return ["Process IR must be an object."]
     schema_version = data.get("schema_version")
     required_fields = set(BASE_REQUIRED_FIELDS)
-    if schema_version == "process-ir-v0.5":
+    if schema_version in {"process-ir-v0.5", "process-ir-v0.6"}:
         required_fields.add("ink_circle_candidates")
+    if schema_version == "process-ir-v0.6":
+        required_fields.add("ink_cross_candidates")
     errors = [f"Missing required field: {field}" for field in sorted(required_fields - set(data))]
-    if schema_version not in {"process-ir-v0.3", "process-ir-v0.4", "process-ir-v0.5"}:
+    if schema_version not in {"process-ir-v0.3", "process-ir-v0.4", "process-ir-v0.5", "process-ir-v0.6"}:
         errors.append("Unsupported or missing schema_version.")
     for field in (
         "speech_anchors", "canvas_actions", "objects", "spatial_relations",
@@ -51,6 +53,8 @@ def validate_process_ir(data: Any) -> list[str]:
             errors.append(f"{field} must be a list.")
     if "ink_circle_candidates" in data and not isinstance(data["ink_circle_candidates"], list):
         errors.append("ink_circle_candidates must be a list.")
+    if "ink_cross_candidates" in data and not isinstance(data["ink_cross_candidates"], list):
+        errors.append("ink_cross_candidates must be a list.")
     if "quality" in data and not isinstance(data["quality"], dict):
         errors.append("quality must be an object.")
     if "source" in data and not isinstance(data["source"], dict):
@@ -100,6 +104,17 @@ def validate_process_ir(data: Any) -> list[str]:
             errors.append("Hand-drawn circle candidates require candidate object IDs.")
         elif len(set(object_ids)) != len(object_ids):
             errors.append("Hand-drawn circle candidate object IDs must be unique.")
+    for item in data.get("ink_cross_candidates", []):
+        if item.get("assertion_level") != "observation" or item.get("resolution_status") != "unresolved":
+            errors.append("Hand-drawn cross candidates must be unresolved observations.")
+        if item.get("type") != "unresolved_handdrawn_cross":
+            errors.append("Unsupported hand-drawn cross candidate type.")
+        stroke_ids = item.get("stroke_ids")
+        if not isinstance(stroke_ids, list) or len(stroke_ids) != 2 or stroke_ids[0] == stroke_ids[1]:
+            errors.append("Hand-drawn cross candidates require two distinct strokes.")
+        object_ids = item.get("candidate_object_ids")
+        if not isinstance(object_ids, list) or not object_ids or any(not isinstance(value, str) or not value for value in object_ids):
+            errors.append("Hand-drawn cross candidates require candidate object IDs.")
     for item in data.get("ink_arrowhead_candidates", []):
         if item.get("assertion_level") != "observation" or item.get("resolution_status") != "unresolved":
             errors.append("Hand-drawn arrowhead candidates must be unresolved observations.")

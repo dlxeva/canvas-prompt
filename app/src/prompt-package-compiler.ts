@@ -457,6 +457,8 @@ export interface CompilerOptions {
   mode?: 'fast' | 'full'
   /** Imported visual artifacts present in this round. They are evidence, not a mode switch. */
   baseArtifacts?: CanvasObject[]
+  /** Live objects present when the round began. They are spatial anchors, not new actions. */
+  baselineAnchors?: CanvasObject[]
   /** Coalesced viewport pan/zoom observations, distinct from scene transforms. */
   viewTransformations?: ViewTransformation[]
   /** What this round carries forward from the scene that existed at start. */
@@ -1380,10 +1382,14 @@ export function compilePromptPackage(
   // Final scene geometry and historical evidence serve different jobs. Deleted
   // elements remain in timeline/deletions, but cannot participate in the final
   // object graph, review binding, or spatial reasoning.
-  const initialBaseArtifactIds = (options.baseArtifacts ?? []).map((item) => item.object_id.replace(/^obj_/, ''))
+  const initialBaseArtifactIds = [
+    ...(options.baseArtifacts ?? []),
+    ...(options.baselineAnchors ?? []),
+  ].map((item) => item.object_id.replace(/^obj_/, ''))
   const lifecycle = reduceFinalShapeLifecycle(events, initialBaseArtifactIds)
   const liveEvents = finalLiveProjectionEvents(lifecycle)
   const activeBaseArtifacts = (options.baseArtifacts ?? []).filter((item) => lifecycle.get(item.object_id.replace(/^obj_/, ''))?.alive !== false)
+  const activeBaselineAnchors = (options.baselineAnchors ?? []).filter((item) => lifecycle.get(item.object_id.replace(/^obj_/, ''))?.alive !== false)
   const strokes = extractStrokes(liveEvents)
   const regions = extractRegions(liveEvents)
   const arrows = extractArrows(liveEvents)
@@ -1393,6 +1399,9 @@ export function compilePromptPackage(
   // event and its artifact record. Keep one canonical object, preferring the
   // artifact record because it carries its stable asset identity.
   const objects = [...new Map([
+    // These existed before the round. Keep them as geometry-only targets so
+    // new ink and spatial deixis can refer to them without rewriting history.
+    ...activeBaselineAnchors.map((item) => [item.object_id, item] as const),
     ...extractObjects(liveEvents).map((item) => [item.object_id, item] as const),
     ...activeBaseArtifacts.map((item) => [item.object_id, item] as const),
   ]).values()]
