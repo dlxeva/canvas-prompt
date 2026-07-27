@@ -519,7 +519,10 @@ export default function App() {
         ? '本轮内容已整理完成，正在送入当前对话…'
         : '本轮内容已整理完成，正在送入当前对话；当前没有可用的语音转写。')
       setSessionStage('ready')
-      await exportPromptPackage({ packageToExport: pkg })
+      // `setLastRecording(audio)` does not synchronously update React state.
+      // Pass this round's finished recording explicitly so the durable archive
+      // cannot accidentally omit it while its transcript is retained.
+      await exportPromptPackage({ packageToExport: pkg, recordingToArchive: audio })
     } catch (error) {
       setWorkflowMessage(`整理失败：${error instanceof Error ? error.message : '请重试'}`)
       setSessionStage('error')
@@ -560,22 +563,30 @@ export default function App() {
     }
   }
 
-  const exportPromptPackage = async ({ retryHandoff = false, packageToExport = compiledPackage }: { retryHandoff?: boolean; packageToExport?: PromptPackage | null } = {}) => {
+  const exportPromptPackage = async ({
+    retryHandoff = false,
+    packageToExport = compiledPackage,
+    recordingToArchive = lastRecording,
+  }: {
+    retryHandoff?: boolean
+    packageToExport?: PromptPackage | null
+    recordingToArchive?: RecordingResult | null
+  } = {}) => {
     if (!packageToExport) return
     setExportStatus('exporting')
     setHandoffReceipt(null)
     setWorkflowMessage(deliveryMode === 'codex' ? '正在归档并发送到当前对话…' : '正在归档本轮上下文…')
     const payload = {
       ...packageToExport,
-      source: { canvas: 'excalidraw', trace: trace.current, audio: lastRecording ? { mime_type: lastRecording.blob.type, duration_ms: lastRecording.duration } : null },
+      source: { canvas: 'excalidraw', trace: trace.current, audio: recordingToArchive ? { mime_type: recordingToArchive.blob.type, duration_ms: recordingToArchive.duration } : null },
     }
 
     try {
-      if (lastRecording) {
+      if (recordingToArchive) {
         const audioResponse = await protectedLocalApiFetch(`/api/round-audio/${packageToExport.meta.package_id}`, {
           method: 'POST',
-          headers: { 'content-type': lastRecording.blob.type || 'audio/webm' },
-          body: lastRecording.blob,
+          headers: { 'content-type': recordingToArchive.blob.type || 'audio/webm' },
+          body: recordingToArchive.blob,
         })
         if (!audioResponse.ok) throw new Error('本轮录音未能保存到本地档案')
       }

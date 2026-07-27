@@ -7,7 +7,8 @@ describe('automatic round handoff flow', () => {
     const source = await readFile(resolve(import.meta.dirname, '..', 'src', 'App.tsx'), 'utf8')
     const finishTrace = source.slice(source.indexOf('const finishTrace'), source.indexOf('const pollHandoffReceipt'))
 
-    expect(finishTrace).toContain('await exportPromptPackage({ packageToExport: pkg })')
+    expect(finishTrace).toContain('await exportPromptPackage({ packageToExport: pkg, recordingToArchive: audio })')
+    expect(source).toContain('recordingToArchive = lastRecording')
     expect(finishTrace).not.toContain('导出后会作为主对话的上下文')
   })
 })
