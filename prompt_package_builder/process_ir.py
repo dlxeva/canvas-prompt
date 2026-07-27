@@ -24,12 +24,13 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by adapter import mo
 # causal edge or semantic relation.
 # Raw Prompt Packages remain the source of truth, so historical packages are
 # recompiled rather than mutating persisted IR snapshots in place.
-SCHEMA_VERSION = "process-ir-v0.5"
-COMPILER_VERSION = "process-ir-compiler-v0.4"
+SCHEMA_VERSION = "process-ir-v0.6"
+COMPILER_VERSION = "process-ir-compiler-v0.5"
 MAX_SPATIAL_RELATIONS = 300
 MAX_INK_RELATION_CANDIDATES = 100
 MAX_INK_CIRCLE_CANDIDATES = 100
 MAX_INK_ARROWHEAD_CANDIDATES = 100
+MAX_INK_CROSS_CANDIDATES = 100
 MAX_VISUAL_UNIT_MEMBERS = 12
 TRANSFORM_SESSION_GAP_MS = 250
 TRANSFORM_CREATION_GRACE_MS = 1_500
@@ -699,6 +700,96 @@ def _path_length(points: list[tuple[float, float]]) -> float:
     )
 
 
+def _segment_intersection(
+    start_a: tuple[float, float], end_a: tuple[float, float],
+    start_b: tuple[float, float], end_b: tuple[float, float],
+) -> tuple[float, float, float, float] | None:
+    """Return an interior segment intersection as x, y, t, u when present."""
+    ax, ay = start_a
+    bx, by = end_a
+    cx, cy = start_b
+    dx, dy = end_b
+    rx, ry = bx - ax, by - ay
+    sx, sy = dx - cx, dy - cy
+    denominator = rx * sy - ry * sx
+    if abs(denominator) < 1e-6:
+        return None
+    qpx, qpy = cx - ax, cy - ay
+    t = (qpx * sy - qpy * sx) / denominator
+    u = (qpx * ry - qpy * rx) / denominator
+    if not 0.15 <= t <= 0.85 or not 0.15 <= u <= 0.85:
+        return None
+    return ax + t * rx, ay + t * ry, t, u
+
+
+def _ink_cross_candidates(package: dict[str, Any], objects: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Record two straight hand-drawn strokes crossing over an existing object.
+
+    A cross is useful visual evidence for a later resolver, especially beside
+    negating speech. It is deliberately *not* a delete operation by itself:
+    people also use X marks for emphasis, comparison, or a letterform.
+    """
+    traces = []
+    for stroke in package.get("strokes") or []:
+        if not isinstance(stroke, dict) or not isinstance(stroke.get("stroke_id"), str):
+            continue
+        points = [point for point in (_point(raw) for raw in stroke.get("points") or []) if point]
+        if len(points) < 2:
+            continue
+        start, end = points[0], points[-1]
+        direct = ((end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2) ** 0.5
+        path = _path_length(points)
+        if direct < 24 or path <= 0 or path / direct > 1.35:
+            continue
+        traces.append((stroke["stroke_id"], start, end, direct))
+
+    indexed = [(obj, _rect(obj)) for obj in objects]
+    indexed = [(obj, rect) for obj, rect in indexed if obj.get("object_id") and rect]
+    candidates = []
+    for left_index, (left_id, left_start, left_end, left_length) in enumerate(traces):
+        left_vector = (left_end[0] - left_start[0], left_end[1] - left_start[1])
+        for right_id, right_start, right_end, right_length in traces[left_index + 1:]:
+            intersection = _segment_intersection(left_start, left_end, right_start, right_end)
+            if not intersection:
+                continue
+            right_vector = (right_end[0] - right_start[0], right_end[1] - right_start[1])
+            cosine = (left_vector[0] * right_vector[0] + left_vector[1] * right_vector[1]) / (left_length * right_length)
+            # X arms should visibly diverge. This rejects parallel/doubled ink.
+            if abs(cosine) > 0.75:
+                continue
+            x, y, left_t, right_t = intersection
+            source_ids = {left_id, right_id}
+            targets = []
+            for obj, rect in indexed:
+                object_id = obj.get("object_id")
+                if object_id in source_ids or source_ids.intersection(obj.get("source_strokes") or []):
+                    continue
+                ox, oy, width, height = rect
+                if ox <= x <= ox + width and oy <= y <= oy + height:
+                    targets.append((width * height, object_id))
+            if not targets:
+                continue
+            targets.sort(key=lambda item: (item[0], item[1]))
+            candidates.append({
+                "cross_id": f"ink_cross_{len(candidates) + 1:03d}",
+                "type": "unresolved_handdrawn_cross",
+                "stroke_ids": [left_id, right_id],
+                "candidate_object_ids": [object_id for _, object_id in targets[:5]],
+                "geometry": {
+                    "intersection": {"x": round(x, 2), "y": round(y, 2)},
+                    "arm_lengths": [round(left_length, 2), round(right_length, 2)],
+                    "arm_angle_cosine": round(cosine, 3),
+                    "intersection_progress": [round(left_t, 3), round(right_t, 3)],
+                },
+                "resolution_status": "unresolved",
+                "assertion_level": "observation",
+                "constraint": "cross_geometry_does_not_establish_delete_or_rejection_without_other_evidence",
+            })
+            if len(candidates) >= MAX_INK_CROSS_CANDIDATES:
+                return candidates
+    return candidates
+
+
 def _arrowhead_candidates(
     package: dict[str, Any], relation_candidates: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -886,6 +977,7 @@ def compile_process_ir(
     ink_relation_candidates = _ink_relation_candidates(package, objects, visual_unit_candidates)
     ink_circle_candidates = _ink_circle_candidates(package, objects)
     ink_arrowhead_candidates = _arrowhead_candidates(package, ink_relation_candidates)
+    ink_cross_candidates = _ink_cross_candidates(package, objects)
     layout_transform_observations = _layout_transform_observations(package, objects)
     review_mark_candidates = _review_mark_candidates(package, captions)
     view_transform_observations = _view_transform_observations(package)
@@ -939,6 +1031,7 @@ def compile_process_ir(
         "ink_relation_candidates": ink_relation_candidates,
         "ink_circle_candidates": ink_circle_candidates,
         "ink_arrowhead_candidates": ink_arrowhead_candidates,
+        "ink_cross_candidates": ink_cross_candidates,
         "visual_unit_candidates": visual_unit_candidates,
         "layout_transform_observations": layout_transform_observations,
         "review_mark_candidates": review_mark_candidates,
@@ -970,6 +1063,7 @@ def compile_process_ir(
             "ink_relation_candidate_count": len(ink_relation_candidates),
             "ink_circle_candidate_count": len(ink_circle_candidates),
             "ink_arrowhead_candidate_count": len(ink_arrowhead_candidates),
+            "ink_cross_candidate_count": len(ink_cross_candidates),
             "visual_unit_candidate_count": len(visual_unit_candidates),
             "layout_transform_observation_count": len(layout_transform_observations),
             "review_mark_candidate_count": len(review_mark_candidates),

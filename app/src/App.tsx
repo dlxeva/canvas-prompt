@@ -142,6 +142,33 @@ function sceneBounds(elements: readonly CanvasElement[]) {
   return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) }
 }
 
+function baselineAnchorFromElement(element: CanvasElement): CanvasObject {
+  const semanticContent = element.type === 'text'
+    ? (element.originalText?.trim() || element.text?.trim() || '')
+    : ''
+  const type: CanvasObject['type'] = element.type === 'text'
+    ? 'text_block'
+    : element.type === 'image'
+      ? 'image'
+      : ['rectangle', 'ellipse', 'diamond', 'line', 'arrow'].includes(element.type)
+        ? 'shape'
+        : 'diagram_element'
+  return {
+    object_id: `obj_${element.id}`,
+    type,
+    timestamp_ms: 0,
+    bounds: { x: element.x, y: element.y, width: element.width, height: element.height },
+    properties: {
+      shapeType: element.type,
+      color: element.strokeColor ?? null,
+      baseline_anchor: true,
+      evidence_source: 'round_start_scene',
+    },
+    source_strokes: [element.id],
+    ...(semanticContent ? { semantic_content: semanticContent } : {}),
+  }
+}
+
 export default function App() {
   const [locale, setLocale] = useState<Locale>(() => resolveInitialLocale(window.localStorage, window.navigator.languages, window.navigator.language))
   const text = ui[locale]
@@ -202,6 +229,7 @@ export default function App() {
   // addressable artifact for later spatial candidates.
   const artifactImageIds = useRef(new Set<string>())
   const baselineObjectIds = useRef(new Set<string>())
+  const baselineAnchors = useRef<CanvasObject[]>([])
   const baselineContext = useRef<BaselineContext | null>(null)
   const stateFrames = useRef<Keyframe[]>([])
   const viewTransformations = useRef<ViewTransformation[]>([])
@@ -317,6 +345,7 @@ export default function App() {
     const baseline = startElements
     const liveBaseline = baseline.filter((element) => !element.isDeleted)
     baselineObjectIds.current = new Set(liveBaseline.map((element) => element.id))
+    baselineAnchors.current = liveBaseline.map(baselineAnchorFromElement)
     versions.current = new Map(baseline.map((element) => [element.id, {
       version: element.version,
       isDeleted: element.isDeleted,
@@ -519,6 +548,7 @@ export default function App() {
         language: transcript?.language || (sessionLocale.current === 'zh' ? 'zh-CN' : 'en'),
         tags: ['canvas-prompt', 'excalidraw'],
         baseArtifacts,
+        baselineAnchors: baselineAnchors.current,
         viewTransformations: viewTransformations.current,
         baselineContext: roundBaselineContext,
         keyframes: stateFrames.current,

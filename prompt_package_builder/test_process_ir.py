@@ -10,7 +10,7 @@ VALIDATORS_DIR = MODULE_DIR.parent / "validators"
 if str(VALIDATORS_DIR) not in sys.path:
     sys.path.insert(0, str(VALIDATORS_DIR))
 from build_compact_package import build_structural_observations
-from process_ir import _ink_circle_candidates, _layout_transform_observations, _reference_candidates
+from process_ir import _ink_circle_candidates, _ink_cross_candidates, _layout_transform_observations, _reference_candidates
 from process_ir import compile_process_ir
 from validate_process_ir import validate_process_ir
 
@@ -52,11 +52,31 @@ class LayoutTransformObservationTests(unittest.TestCase):
         self.assertEqual("unresolved", candidates[0]["resolution_status"])
         self.assertEqual("observation", candidates[0]["assertion_level"])
 
+    def test_records_two_intersecting_strokes_over_a_baseline_anchor_as_cross_evidence(self):
+        package = {
+            "strokes": [
+                {"stroke_id": "slash_a", "points": [{"x": 20, "y": 20}, {"x": 100, "y": 100}]},
+                {"stroke_id": "slash_b", "points": [{"x": 100, "y": 20}, {"x": 20, "y": 100}]},
+            ],
+        }
+        objects = [
+            {"object_id": "obj_text", "timestamp_ms": 0, "bounds": {"x": 10, "y": 10, "width": 100, "height": 100}, "properties": {"baseline_anchor": True}},
+            {"object_id": "obj_slash_a", "timestamp_ms": 1, "bounds": {"x": 20, "y": 20, "width": 80, "height": 80}, "source_strokes": ["slash_a"]},
+            {"object_id": "obj_slash_b", "timestamp_ms": 2, "bounds": {"x": 20, "y": 20, "width": 80, "height": 80}, "source_strokes": ["slash_b"]},
+        ]
+
+        candidates = _ink_cross_candidates(package, objects)
+
+        self.assertEqual(1, len(candidates))
+        self.assertEqual("unresolved_handdrawn_cross", candidates[0]["type"])
+        self.assertEqual(["obj_text"], candidates[0]["candidate_object_ids"])
+        self.assertEqual("unresolved", candidates[0]["resolution_status"])
+
     def test_circle_contract_is_versioned_without_rejecting_legacy_v04(self):
         package = {"meta": {"package_id": "pp_circle"}, "strokes": []}
         current = compile_process_ir(package, [], [], [])
-        self.assertEqual("process-ir-v0.5", current["schema_version"])
-        self.assertEqual("process-ir-compiler-v0.4", current["source"]["compiler_version"])
+        self.assertEqual("process-ir-v0.6", current["schema_version"])
+        self.assertEqual("process-ir-compiler-v0.5", current["source"]["compiler_version"])
         self.assertEqual([], validate_process_ir(current))
 
         legacy = deepcopy(current)
