@@ -27,18 +27,6 @@ node bin/canvas-prompt.mjs setup --project /absolute/path/to/the/active/project
 node bin/canvas-prompt.mjs open --host codex --project /absolute/path/to/the/active/project
 ```
 
-When the current turn contains the developer context
-`CANVAS_PROMPT_HOST_SESSION_ID=<id>`, the host has supplied the active Codex
-session identity. The `open` command **must** include that exact value:
-
-```bash
-node bin/canvas-prompt.mjs open --host codex --project /absolute/path/to/the/active/project --thread-id <id>
-```
-
-Never replace it with a task title, project path, browser URL, recent session,
-or invented ID. This binding is what lets the next ordinary user message receive
-the just-finished round without asking them to say “read the canvas”.
-
 The launcher prefers `http://127.0.0.1:43223/`, reuses a healthy instance of the current plugin, removes stale Canvas Prompt servers, and otherwise selects an available local port. Read its output and open the actual reported URL; do not assume the default port.
 
 When the host has supplied a current conversation ID, the canvas writes into
