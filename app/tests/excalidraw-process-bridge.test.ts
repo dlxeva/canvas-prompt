@@ -510,6 +510,21 @@ describe('Excalidraw process bridge', () => {
     })])
   })
 
+  it('keeps an editable original only while its matching image artifact remains live', () => {
+    const image: CanvasObject = { object_id: 'obj_image', type: 'image', timestamp_ms: 0, bounds: { x: 0, y: 0, width: 100, height: 100 }, properties: {} }
+    const sourceImage = {
+      artifact_object_id: 'obj_image', asset_id: 'asset_image', mime_type: 'image/png', width: 1200, height: 800,
+      archive_relative_path: 'source-images/image.png', availability: 'available' as const,
+    }
+    const live = compilePromptPackage([], '', 'data:image/png;base64,AA==', { baseArtifacts: [image], sourceImages: [sourceImage] })
+    expect(live.source_images).toEqual([sourceImage])
+
+    const deleted = compilePromptPackage([{ id: 'delete_image', timestamp: 10, type: 'deletion', shapeId: 'image', shapeType: 'image', data: {} }], '', 'data:image/png;base64,AA==', {
+      baseArtifacts: [image], sourceImages: [sourceImage],
+    })
+    expect(deleted.source_images).toBeUndefined()
+  })
+
   it('keeps a material imported mid-round with its timestamp and an unresolved mark candidate', () => {
     const importedImage: TraceEvent = {
       at_ms: 400, kind: 'create',

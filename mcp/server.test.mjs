@@ -3,13 +3,28 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
-import { threadScopeKey } from '../app/conversation-scope.mjs';
+import { sessionScopeKey, threadScopeKey } from '../app/conversation-scope.mjs';
 
 process.env.CANVAS_PROMPT_MCP_TEST = '1';
-const { latestPackageResponse, readTrustedCanvasArtifact, TOOLS, PROJECT_SCOPE_ERROR } = await import('./server.mjs');
+const { encodeResponse, negotiateProtocolVersion, latestPackageResponse, readTrustedCanvasArtifact, TOOLS, PROJECT_SCOPE_ERROR } = await import('./server.mjs');
 
-test('MCP refuses to silently bind its artifact reads to the plugin directory', () => {
-  assert.match(PROJECT_SCOPE_ERROR, /CANVAS_PROMPT_PROJECT_DIR/);
+test('MCP emits newline-delimited JSON for modern stdio hosts and preserves Content-Length compatibility', () => {
+  const message = { jsonrpc: '2.0', id: 1, result: {} };
+  assert.equal(encodeResponse(message, 'newline'), `${JSON.stringify(message)}\n`);
+  assert.equal(
+    encodeResponse(message, 'content-length'),
+    `Content-Length: ${Buffer.byteLength(JSON.stringify(message), 'utf-8')}\r\n\r\n${JSON.stringify(message)}`,
+  );
+});
+
+test('MCP negotiates a protocol version compatible with the requesting host', () => {
+  assert.equal(negotiateProtocolVersion('2025-06-18'), '2025-06-18');
+  assert.equal(negotiateProtocolVersion('2024-11-05'), '2024-11-05');
+  assert.equal(negotiateProtocolVersion('future-protocol'), '2025-11-25');
+});
+
+test('MCP binds to the private single-board archive, never the plugin directory', () => {
+  assert.equal(PROJECT_SCOPE_ERROR, null);
 });
 
 test('latest package response excludes inline image data while retaining image metadata and engine paths', () => {
@@ -31,6 +46,27 @@ test('latest package response excludes inline image data while retaining image m
   assert.equal(response.package.transcript.full_text, '保留语音内容');
   assert.equal(response.source.raw_package_path, '/tmp/project/.canvas-prompt/latest-prompt-package.json');
   assert.equal(response.source.compact_package_path, '/tmp/project/.canvas-prompt/rounds/pp_fixture/engine/compact-package.json');
+});
+
+test('latest package response exposes an archived editable original only from its own round', async (t) => {
+  const root = await mkdtemp(resolve(tmpdir(), 'canvas-mcp-source-image-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const roundDir = resolve(root, '.canvas-prompt', 'rounds', 'pp_source');
+  await mkdir(resolve(roundDir, 'source-images'), { recursive: true });
+  const originalPath = resolve(roundDir, 'source-images', 'img_logo.png');
+  await writeFile(originalPath, 'not-a-real-png');
+
+  const response = JSON.parse(latestPackageResponse({
+    meta: { package_id: 'pp_source' },
+    source_images: [{
+      artifact_object_id: 'obj_img_logo', asset_id: 'file_logo', mime_type: 'image/png', width: 1200, height: 800,
+      archive_relative_path: 'source-images/img_logo.png', availability: 'available',
+    }],
+  }, resolve(roundDir, 'prompt-package.json')));
+
+  assert.deepEqual(response.source.editable_source_images, [{
+    artifact_object_id: 'obj_img_logo', asset_id: 'file_logo', path: originalPath, mime_type: 'image/png', width: 1200, height: 800,
+  }]);
 });
 
 test('public MCP schema exposes only fixed-scope round reads, never caller paths', () => {
@@ -63,17 +99,20 @@ test('a legal large raw package is readable before image data is stripped for MC
   );
 });
 
-test('round artifact reads resolve the published Process IR path for the active project', async (t) => {
+test('round artifact reads resolve the published Process IR path from the single board', async (t) => {
   const root = await mkdtemp(resolve(tmpdir(), 'canvas-mcp-round-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const roundDir = resolve(root, '.canvas-prompt', 'rounds', 'pp_round', 'engine');
+  const home = await mkdtemp(resolve(tmpdir(), 'canvas-mcp-round-home-'));
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(home, { recursive: true, force: true })]));
+  const roundDir = resolve(home, '.canvas-prompt', 'board', 'rounds', 'pp_round', 'engine');
   await mkdir(roundDir, { recursive: true });
-  await writeFile(resolve(root, '.canvas-prompt', 'rounds', 'pp_round', 'prompt-package.json'), JSON.stringify({ meta: { package_id: 'pp_round' } }));
+  await writeFile(resolve(home, '.canvas-prompt', 'board', 'rounds', 'pp_round', 'prompt-package.json'), JSON.stringify({ meta: { package_id: 'pp_round' } }));
   await writeFile(resolve(roundDir, 'process-ir.json'), JSON.stringify({ schema_version: 'process-ir-v0.4', source: { package_id: 'pp_round' } }));
   await writeFile(resolve(roundDir, 'compact-package.json'), JSON.stringify({ schema_version: 'compact-package-v2.2', source_provenance: { package_id: 'pp_round' } }));
 
   const previousProject = process.env.CANVAS_PROMPT_PROJECT_DIR;
+  const previousHome = process.env.HOME;
   process.env.CANVAS_PROMPT_PROJECT_DIR = root;
+  process.env.HOME = home;
   const scoped = await import(`./server.mjs?round-artifact-test=${Date.now()}`);
   try {
     const processIr = await scoped.handleGetRoundArtifact({ package_id: 'pp_round', artifact: 'process_ir' });
@@ -85,22 +124,27 @@ test('round artifact reads resolve the published Process IR path for the active 
   } finally {
     if (previousProject === undefined) delete process.env.CANVAS_PROMPT_PROJECT_DIR;
     else process.env.CANVAS_PROMPT_PROJECT_DIR = previousProject;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
   }
 });
 
-test('MCP reads a conversation-scoped latest package instead of another conversation in the same project', async (t) => {
+test('MCP reads the single board latest package regardless of configured project/thread', async (t) => {
   const root = await mkdtemp(resolve(tmpdir(), 'canvas-mcp-thread-scope-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  const home = await mkdtemp(resolve(tmpdir(), 'canvas-mcp-thread-home-'));
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(home, { recursive: true, force: true })]));
   const threadId = '019fa-mcp-thread-12345678';
-  const scopedDir = resolve(root, '.canvas-prompt', 'threads', threadScopeKey(threadId));
+  const scopedDir = resolve(home, '.canvas-prompt', 'board');
   await mkdir(scopedDir, { recursive: true });
   await writeFile(resolve(scopedDir, 'latest-prompt-package.json'), JSON.stringify({ meta: { package_id: 'pp_scoped' } }));
   const previousProject = process.env.CANVAS_PROMPT_PROJECT_DIR;
   const previousThread = process.env.CANVAS_PROMPT_THREAD_ID;
   const previousRequired = process.env.CANVAS_PROMPT_REQUIRE_THREAD;
+  const previousHome = process.env.HOME;
   process.env.CANVAS_PROMPT_PROJECT_DIR = root;
   process.env.CANVAS_PROMPT_THREAD_ID = threadId;
   process.env.CANVAS_PROMPT_REQUIRE_THREAD = '1';
+  process.env.HOME = home;
   const scoped = await import(`./server.mjs?thread-scope-test=${Date.now()}`);
   try {
     const result = await scoped.handleGetLatestPromptPackage();
@@ -113,23 +157,55 @@ test('MCP reads a conversation-scoped latest package instead of another conversa
     else process.env.CANVAS_PROMPT_THREAD_ID = previousThread;
     if (previousRequired === undefined) delete process.env.CANVAS_PROMPT_REQUIRE_THREAD;
     else process.env.CANVAS_PROMPT_REQUIRE_THREAD = previousRequired;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
   }
 });
 
-test('MCP fails closed when a host requires conversation routing but supplies no thread ID', async (t) => {
+test('MCP reads only the round selected by this conversation launch capability', async (t) => {
+  const project = await mkdtemp(resolve(tmpdir(), 'canvas-mcp-session-project-'));
+  const home = await mkdtemp(resolve(tmpdir(), 'canvas-mcp-session-home-'));
+  t.after(() => Promise.all([rm(project, { recursive: true, force: true }), rm(home, { recursive: true, force: true })]));
+  const sessionId = 'cpsessionmcp1234567890';
+  const otherSessionId = 'cpsessionother12345678';
+  const key = sessionScopeKey(sessionId);
+  const otherKey = sessionScopeKey(otherSessionId);
+  await mkdir(resolve(project, '.canvas-prompt', 'sessions', key), { recursive: true });
+  await mkdir(resolve(project, '.canvas-prompt', 'sessions', otherKey), { recursive: true });
+  await writeFile(resolve(project, '.canvas-prompt', 'sessions', key, 'latest-prompt-package.json'), JSON.stringify({ meta: { package_id: 'pp_this_task' } }));
+  await writeFile(resolve(project, '.canvas-prompt', 'sessions', otherKey, 'latest-prompt-package.json'), JSON.stringify({ meta: { package_id: 'pp_other_task' } }));
+  await mkdir(resolve(home, '.canvas-prompt', 'session-index'), { recursive: true });
+  await writeFile(resolve(home, '.canvas-prompt', 'session-index', `${key}.json`), JSON.stringify({ version: 1, session_id: sessionId, project_dir: project }));
+  const previousHome = process.env.HOME;
+  delete process.env.CANVAS_PROMPT_PROJECT_DIR;
+  process.env.HOME = home;
+  const scoped = await import(`./server.mjs?session-capability-test=${Date.now()}`);
+  try {
+    const result = await scoped.handleGetLatestPromptPackage({ session_id: sessionId });
+    assert.equal(result.isError, undefined);
+    assert.equal(JSON.parse(result.content[0].text).package.meta.package_id, 'pp_this_task');
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
+});
+
+test('MCP needs no host thread ID for the single board', async (t) => {
   const previousProject = process.env.CANVAS_PROMPT_PROJECT_DIR;
   const previousThread = process.env.CANVAS_PROMPT_THREAD_ID;
   const previousRequired = process.env.CANVAS_PROMPT_REQUIRE_THREAD;
+  const previousHome = process.env.HOME;
   const root = await mkdtemp(resolve(tmpdir(), 'canvas-mcp-required-thread-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   process.env.CANVAS_PROMPT_PROJECT_DIR = root;
+  process.env.HOME = root;
   delete process.env.CANVAS_PROMPT_THREAD_ID;
   process.env.CANVAS_PROMPT_REQUIRE_THREAD = '1';
   const scoped = await import(`./server.mjs?required-thread-test=${Date.now()}`);
   try {
     const result = await scoped.handleGetLatestPromptPackage();
     assert.equal(result.isError, true);
-    assert.match(JSON.parse(result.content[0].text).error, /explicit host-provided conversation thread ID/);
+    assert.match(JSON.parse(result.content[0].text).error, /Prompt Package not found/);
   } finally {
     if (previousProject === undefined) delete process.env.CANVAS_PROMPT_PROJECT_DIR;
     else process.env.CANVAS_PROMPT_PROJECT_DIR = previousProject;
@@ -137,5 +213,7 @@ test('MCP fails closed when a host requires conversation routing but supplies no
     else process.env.CANVAS_PROMPT_THREAD_ID = previousThread;
     if (previousRequired === undefined) delete process.env.CANVAS_PROMPT_REQUIRE_THREAD;
     else process.env.CANVAS_PROMPT_REQUIRE_THREAD = previousRequired;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
   }
 });

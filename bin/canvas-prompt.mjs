@@ -6,7 +6,8 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
-import { resolveConversationScope, validThreadId } from '../app/conversation-scope.mjs'
+import { resolveConversationScope, threadScopeKey, validSessionId, validThreadId } from '../app/conversation-scope.mjs'
+import { migrateLegacyArchive } from '../app/legacy-archive-migration.mjs'
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const command = process.argv[2] ?? 'help'
@@ -16,23 +17,22 @@ const flag = (name) => {
 }
 const conversationOnly = () => process.argv.includes('--conversation-only')
 const threadId = () => flag('--thread-id') ?? process.env.CANVAS_PROMPT_CODEX_THREAD_ID ?? process.env.CANVAS_PROMPT_THREAD_ID ?? null
+const sessionId = () => flag('--session-id') ?? process.env.CANVAS_PROMPT_SESSION_ID ?? null
 const projectDir = ({ required = true } = {}) => {
   if (conversationOnly()) {
-    if (required && !validThreadId(threadId())) throw new Error('A project-less Canvas session requires --thread-id from the active host conversation.')
     return null
   }
   const candidate = resolve(flag('--project') ?? process.cwd())
   if (!existsSync(candidate)) throw new Error(`Project directory does not exist: ${candidate}`)
   return realpathSync(candidate)
 }
-const mcpConfig = (project, boundThreadId = null) => ({
+const mcpConfig = (project) => ({
   mcpServers: {
     canvas_prompt: {
       command: 'bash',
       args: [resolve(rootDir, 'scripts', 'start-mcp.sh')],
       env: {
         ...(project ? { CANVAS_PROMPT_PROJECT_DIR: project } : {}),
-        ...(boundThreadId ? { CANVAS_PROMPT_THREAD_ID: boundThreadId, CANVAS_PROMPT_REQUIRE_THREAD: '1' } : {}),
       },
     },
   },
@@ -45,6 +45,13 @@ const runtimeDir = () => resolve(process.env.CANVAS_PROMPT_RUNTIME_DIR ?? resolv
 // Keep it outside project archives so "do not show this again" means the same
 // thing when a person opens Canvas Prompt from another project.
 const preferencesPath = () => resolve(process.env.CANVAS_PROMPT_PREFERENCES_PATH ?? resolve(homedir(), '.canvas-prompt', 'preferences.json'))
+const sessionIndexPath = (id) => resolve(homedir(), '.canvas-prompt', 'session-index', `${threadScopeKey(id)}.json`)
+const registerSession = async ({ id, project }) => {
+  if (!validSessionId(id)) throw new Error('Canvas Prompt received an invalid session capability.')
+  const path = sessionIndexPath(id)
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, `${JSON.stringify({ version: 1, session_id: id, project_dir: project, created_at: new Date().toISOString() }, null, 2)}\n`, 'utf8')
+}
 const defaultPreferences = () => ({ schema_version: 1, show_launch_guidance: true })
 const readPreferences = async () => {
   try {
@@ -89,7 +96,7 @@ const existingCanvasRuntime = async (project) => {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/runtime-identity`, { signal: AbortSignal.timeout(500) })
       const identity = response.ok ? await response.json() : null
-      if (identity?.project_dir === project) return { ...identity, port }
+      if (identity?.storage_kind === 'single_board' || identity?.project_dir === project) return { ...identity, port }
     } catch {
       // An occupied port is common. Only a matching Canvas runtime identity
       // may influence this project's ASR choice.
@@ -126,15 +133,17 @@ const help = () => console.log(`Canvas Prompt host-neutral entrypoint
 
 Usage:
   canvas-prompt setup [--core-only]
-  canvas-prompt open [--project <dir>] [--thread-id <id>] [--conversation-only] [--host codex|local]
+  canvas-prompt open [--project <dir>] [--conversation-only] [--host codex|local]
   canvas-prompt init [--project <dir>] [--thread-id <id>] [--conversation-only]
   canvas-prompt doctor [--project <dir>] [--thread-id <id>] [--conversation-only]
+  canvas-prompt migrate --from <legacy-project-or-.canvas-prompt-dir>
   canvas-prompt preferences [--guidance on|off]
 
 setup installs Canvas Prompt-managed dependencies into its local runtime and
 reuses validated existing dependencies. The local ASR model downloads on first
-start. A supplied thread ID is a host-provided route, never inferred from
-project history. init prints the fixed-scope MCP configuration.`)
+start. A supplied thread ID is provenance only, never inferred from project
+history. init prints the single-board MCP configuration. migrate copies complete
+legacy archives without deleting or scanning any source.`)
 
 try {
   if (command === 'help' || command === '--help' || command === '-h') help()
@@ -148,11 +157,20 @@ try {
     }
     console.log(JSON.stringify(preferences, null, 2))
   }
+  else if (command === 'migrate') {
+    const from = flag('--from')
+    if (!from) throw new Error('migrate requires --from <legacy-project-or-.canvas-prompt-dir>.')
+    const scope = resolveConversationScope({ singleBoard: true })
+    const result = await migrateLegacyArchive({ from, boardDir: scope.canvasDir })
+    console.log(JSON.stringify({ ok: true, ...result }, null, 2))
+  }
   else {
     const project = projectDir()
     const boundThreadId = threadId()
+    const suppliedSessionId = sessionId()
     if (boundThreadId && !validThreadId(boundThreadId)) throw new Error('Canvas Prompt received an invalid host thread ID.')
-    const scope = resolveConversationScope({ projectDir: project, threadId: boundThreadId })
+    if (suppliedSessionId && !validSessionId(suppliedSessionId)) throw new Error('Canvas Prompt received an invalid session capability.')
+    const scope = resolveConversationScope({ projectDir: project, threadId: boundThreadId, sessionId: suppliedSessionId, singleBoard: true })
     if (command === 'setup') {
       const result = runBootstrap(flag('--core-only') ? '--core-only' : '--with-asr')
       process.exitCode = result.status ?? 1
@@ -191,7 +209,6 @@ try {
         env: {
           ...environment,
           ...(project ? { CANVAS_PROMPT_PROJECT_DIR: project } : { CANVAS_PROMPT_PROJECT_MODE: 'conversation' }),
-          ...(boundThreadId ? { CANVAS_PROMPT_THREAD_ID: boundThreadId } : {}),
           CANVAS_PROMPT_DELIVERY_MODE: host,
         },
       })
