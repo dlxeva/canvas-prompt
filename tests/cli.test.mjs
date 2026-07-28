@@ -7,6 +7,10 @@ import { spawnSync } from 'node:child_process'
 
 const cli = resolve('bin/canvas-prompt.mjs')
 const run = (...args) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' })
+const runWithPreferences = (preferencesPath, ...args) => spawnSync(process.execPath, [cli, ...args], {
+  encoding: 'utf8',
+  env: { ...process.env, CANVAS_PROMPT_PREFERENCES_PATH: preferencesPath },
+})
 
 test('init emits project-bound MCP configuration', () => {
   const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
@@ -57,4 +61,19 @@ test('setup can prepare only the core runtime without changing a global environm
   const result = run('setup', '--core-only', '--project', project)
   assert.equal(result.status, 0, result.stderr)
   assert.match(result.stderr, /Canvas Prompt app dependencies|Reusing Canvas Prompt app dependencies/)
+})
+
+test('launch guidance preference defaults on and can be changed without a project', () => {
+  const preferencesPath = join(mkdtempSync(join(tmpdir(), 'canvas-prompt-preferences-')), 'preferences.json')
+  const initial = runWithPreferences(preferencesPath, 'preferences')
+  assert.equal(initial.status, 0, initial.stderr)
+  assert.equal(JSON.parse(initial.stdout).show_launch_guidance, true)
+
+  const disabled = runWithPreferences(preferencesPath, 'preferences', '--guidance', 'off')
+  assert.equal(disabled.status, 0, disabled.stderr)
+  assert.equal(JSON.parse(disabled.stdout).show_launch_guidance, false)
+
+  const persisted = runWithPreferences(preferencesPath, 'preferences')
+  assert.equal(persisted.status, 0, persisted.stderr)
+  assert.equal(JSON.parse(persisted.stdout).show_launch_guidance, false)
 })
