@@ -28,6 +28,13 @@ provide a conversation ID, the reader is project-scoped, not task-scoped; only
 use this natural-follow-up path when the task's own history establishes the
 just-completed round. Say so briefly if that scope limitation is material.
 
+If the current developer context already contains **“Canvas Prompt continuation
+context”**, that context was attached by the Codex `UserPromptSubmit` lifecycle
+hook from the just-finished, session-bound round. Use it before answering and do
+not ask the user for a Canvas-specific phrase. It is intentionally a one-turn
+receipt: later prompts should use normal task context unless the user exports a
+new round or explicitly asks to revisit the prior one.
+
 ## Workflow
 
 1. Use the `canvas_prompt` MCP server's `get_latest_prompt_package` tool. The MCP server is bound to one canonical active project when it starts; never supply or invent another project path. If it reports no round, stop: say that no exported Canvas Prompt round has reached this task and do not inspect a live browser canvas as a substitute. Prefer the returned Compact Package path, then Process IR; the raw package is for evidence checks. Inline screenshots and keyframes are intentionally excluded from normal MCP text to protect context budget. If visual inspection is necessary, open one returned local PNG path rather than requesting Base64.
