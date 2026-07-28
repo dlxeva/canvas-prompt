@@ -35,13 +35,16 @@ shown as the primary product wording.
 2. Check whether the package includes a final canvas snapshot, timestamped actions, speech/transcription, and compiler outputs. Do not imply that a missing modality was observed.
 3. Read local compiler outputs under the referenced round's `engine/` directory when available. Prefer the Compact Package for a short response and Process IR for evidence checks.
 4. Route by the user's actual objective, without exposing a mode choice:
-   - **Change path.** When an imported image, existing work, or a prior canvas structure is being marked with circles, crosses, arrows, replacements, or explicit change language, turn the evidence into concrete change requests. If the target and requested action are available in the active task, carry out the change; otherwise state the actionable edits and the one missing target only if it blocks action.
+   - **Change path.** When an imported image, existing work, or a prior canvas structure is being marked with circles, crosses, arrows, replacements, or explicit change language, compile the final snapshot, marks, spatial relations, and linked speech into a visual edit brief.
+     - If the snapshot is clear enough to preserve the relevant visual details, use it as the reference and generate or edit a clean revised asset. Return the revised asset in the current conversation. Do not block on locating an original project file.
+     - If the snapshot is too small, blurred, cropped, or otherwise insufficient to preserve important details, ask the user to attach the original image in the current conversation. Then combine that original with the already-compiled visual edit brief; do not ask the user to repeat the annotations.
+     - Only search for and modify a project source file when the user explicitly asks to change that source. Never claim that a newly generated asset modified an unknown original file.
    - **Reasoning path.** When the round expresses a structure, trade-off, hypothesis, dependency, priority, or derivation, help the user advance it: surface assumptions, test the logic, identify omissions and risks, and propose the next decision or experiment. A request such as “还有哪里没考虑周全” belongs here.
    - **Context-and-collaboration path.** When the canvas primarily supplies background for an ongoing task, use it as context for the user's current request instead of narrating it back or asking the user to label the use case.
    - **Mixed path.** A marked design can also contain strategic reasoning. Preserve both when supported; do not force the round into one label.
    - Ask one minimal clarification only when neither the evidence nor the current request reveals the desired outcome. For example: “你希望我把这些落实成修改，还是先帮你推演和查漏？”
 5. Respond in this order: what was received; concrete source-backed observations; current understanding labelled as an inference when needed; and the useful next work. Do not lead with an internal route label.
-6. Continue the user's actual work when the desired outcome is clear: test the decision, find an omission, turn review marks into change requests, or execute the requested project action. Do not stop at a transcript-style “here is what I understood” response.
+6. Continue the user's actual work when the desired outcome is clear: test the decision, find an omission, turn a visual brief into a revised asset, or execute an explicitly requested project-source change. Do not stop at a transcript-style “here is what I understood” response or at “the original file path is unknown.”
 
 ## Latency budget
 

@@ -11,7 +11,7 @@ Draw, circle, move, and explain. Canvas Prompt preserves the canvas state, event
 ## Alpha scope
 
 - **Reasoning rounds**: preserve how a question took shape, including branches, movement, resizing, deletion, and revision.
-- **Image review rounds**: place an image on the canvas, mark regions, and explain requested changes aloud.
+- **Image review rounds**: place an image on the canvas, mark regions, and explain requested changes aloud. The final snapshot, marks, and speech form a visual brief; use a clear snapshot directly, or attach the original image in chat when more fidelity is needed.
 - **Conversation-scoped archive**: when the host supplies a conversation ID, each round is stored in that conversation's isolated scope. With a project, it lives under `.canvas-prompt/threads/<opaque-key>/`; without one, it lives in a private user archive. The raw ID is never used as a path.
 - **Explicit handoff only**: Canvas Prompt saves the immutable package first. It never chooses a chat by project recency, workspace history, or a previous binding. A host that cannot provide the current conversation ID can still archive and read a package, but cannot claim automatic routing to the visible chat.
 - **Evidence boundary**: retain observable canvas and speech evidence without presenting inferred intent as a direct fact.

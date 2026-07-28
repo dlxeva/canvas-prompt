@@ -1,7 +1,7 @@
 {
   "name": "canvas-prompt",
   "private": true,
-  "version": "0.1.16",
+  "version": "0.1.17",
   "type": "module",
   "bin": {
     "canvas-prompt": "./bin/canvas-prompt.mjs"
