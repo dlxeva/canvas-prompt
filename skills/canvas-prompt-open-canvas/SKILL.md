@@ -52,8 +52,17 @@ Keep the guidance short and include copyable examples in the user's locale:
 
 Explain that the first command is enough for normal use: Codex should infer
 whether to continue reasoning, fill gaps, or act on annotations. The longer
-examples are optional ways to make the desired outcome explicit. On later
-launches, do not repeat the guide unless the user asks how to use the product.
+examples are optional ways to make the desired outcome explicit.
+
+When image review is relevant, include one optional iteration tip in the same
+conversation guidance:
+
+- Chinese: `如果 Codex 在主对话生成了新版图片，复制图片，回到画布按 ⌘V 粘贴，再继续圈改并开始下一轮。`
+- English: `If Codex generates a revised image in chat, copy it, return to the canvas, press ⌘V to paste it, and continue annotating in a new round.`
+
+This is a continuation of the image-review workflow, not a separate mode the
+user must select. On later launches, do not repeat the guide unless the user
+asks how to use the product.
 
 When the host has supplied a current conversation ID, the canvas writes into
 `<active-project>/.canvas-prompt/threads/<opaque-key>/`; otherwise it uses the
