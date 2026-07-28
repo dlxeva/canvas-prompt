@@ -150,8 +150,8 @@ def validate_process_ir(data: Any) -> list[str]:
         if item.get("candidate_visual_direction") not in {"path_start_to_path_end", "path_end_to_path_start"}:
             errors.append("Hand-drawn arrowhead candidates require a visual direction candidate.")
         supports = item.get("support_stroke_ids")
-        if not isinstance(supports, list) or len(supports) != 2 or supports[0] == supports[1]:
-            errors.append("Hand-drawn arrowhead candidates require two distinct support strokes.")
+        if not isinstance(supports, list) or len(supports) not in {1, 2} or len(set(supports)) != len(supports):
+            errors.append("Hand-drawn arrowhead candidates require one continuous V or two distinct support strokes.")
     for item in data.get("visual_unit_candidates", []):
         if item.get("assertion_level") != "observation" or item.get("resolution_status") != "unresolved":
             errors.append("Visual-unit candidates must be unresolved observations.")

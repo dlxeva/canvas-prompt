@@ -986,6 +986,58 @@ def _arrowhead_candidates(
                     )
                     if len(candidates) >= MAX_INK_ARROWHEAD_CANDIDATES:
                         return candidates
+            # A common natural drawing is shaft + one continuous V stroke,
+            # rather than two separately lifted arrowhead arms. Its middle
+            # point is the tip; both outer endpoints point back into the
+            # shaft. Preserve that construction detail as geometry evidence.
+            for support_id, support in traces.items():
+                if support_id == shaft_id or len(support) < 3:
+                    continue
+                pivot_index = min(
+                    range(1, len(support) - 1),
+                    key=lambda index: (support[index][0] - tip[0]) ** 2 + (support[index][1] - tip[1]) ** 2,
+                )
+                pivot = support[pivot_index]
+                pivot_distance = ((pivot[0] - tip[0]) ** 2 + (pivot[1] - tip[1]) ** 2) ** 0.5
+                if pivot_distance > 18:
+                    continue
+                left_vector = (support[0][0] - pivot[0], support[0][1] - pivot[1])
+                right_vector = (support[-1][0] - pivot[0], support[-1][1] - pivot[1])
+                left_length = (left_vector[0] ** 2 + left_vector[1] ** 2) ** 0.5
+                right_length = (right_vector[0] ** 2 + right_vector[1] ** 2) ** 0.5
+                if min(left_length, right_length) < 6:
+                    continue
+                left_alignment = (left_vector[0] * interior[0] + left_vector[1] * interior[1]) / left_length
+                right_alignment = (right_vector[0] * interior[0] + right_vector[1] * interior[1]) / right_length
+                if min(left_alignment, right_alignment) < 0.2:
+                    continue
+                cosine = (left_vector[0] * right_vector[0] + left_vector[1] * right_vector[1]) / (left_length * right_length)
+                if not -0.82 <= cosine <= 0.966:
+                    continue
+                endpoints = relation.get("endpoint_candidates", {})
+                tip_object_id = endpoints.get("start_object_id" if endpoint_name == "path_start" else "end_object_id")
+                candidates.append(
+                    {
+                        "arrowhead_id": f"ink_arrow_{len(candidates) + 1:03d}",
+                        "type": "unresolved_handdrawn_arrowhead",
+                        "shaft_relation_id": relation.get("relation_id"),
+                        "shaft_stroke_id": shaft_id,
+                        "support_stroke_ids": [support_id],
+                        "tip": {"shaft_endpoint": endpoint_name, "object_id": tip_object_id},
+                        "candidate_visual_direction": direction,
+                        "geometry": {
+                            "shaft_direct_distance": round(shaft_length, 2),
+                            "support_lengths": [round(left_length, 2), round(right_length, 2)],
+                            "arm_angle_cosine": round(cosine, 3),
+                            "construction": "continuous_v",
+                        },
+                        "resolution_status": "unresolved",
+                        "assertion_level": "observation",
+                        "constraint": "arrowhead_like_geometry_does_not_establish_causal_or_semantic_relation",
+                    }
+                )
+                if len(candidates) >= MAX_INK_ARROWHEAD_CANDIDATES:
+                    return candidates
     return candidates
 
 

@@ -10,7 +10,7 @@ VALIDATORS_DIR = MODULE_DIR.parent / "validators"
 if str(VALIDATORS_DIR) not in sys.path:
     sys.path.insert(0, str(VALIDATORS_DIR))
 from build_compact_package import build_structural_observations
-from process_ir import _ink_check_candidates, _ink_circle_candidates, _ink_cross_candidates, _layout_transform_observations, _paired_symbol_choice_candidates, _reference_candidates
+from process_ir import _arrowhead_candidates, _ink_check_candidates, _ink_circle_candidates, _ink_cross_candidates, _layout_transform_observations, _paired_symbol_choice_candidates, _reference_candidates
 from process_ir import compile_process_ir
 from validate_process_ir import validate_process_ir
 
@@ -113,6 +113,23 @@ class LayoutTransformObservationTests(unittest.TestCase):
         self.assertEqual("obj_left", pairs[0]["candidate_outcome_mapping"]["negative_object_id"])
         self.assertEqual("obj_right", pairs[0]["candidate_outcome_mapping"]["positive_object_id"])
         self.assertEqual("unresolved", pairs[0]["resolution_status"])
+
+    def test_recognizes_a_continuous_v_arrowhead_attached_to_a_shaft(self):
+        package = {"strokes": [
+            {"stroke_id": "shaft", "points": [{"x": 0, "y": 50}, {"x": 100, "y": 50}]},
+            {"stroke_id": "tip", "points": [{"x": 80, "y": 30}, {"x": 100, "y": 50}, {"x": 80, "y": 70}]},
+        ]}
+        relations = [{
+            "relation_id": "ink_rel_001", "stroke_id": "shaft",
+            "endpoint_candidates": {"start_object_id": "obj_a", "end_object_id": "obj_b"},
+        }]
+
+        candidates = _arrowhead_candidates(package, relations)
+
+        self.assertEqual(1, len(candidates))
+        self.assertEqual(["tip"], candidates[0]["support_stroke_ids"])
+        self.assertEqual("path_start_to_path_end", candidates[0]["candidate_visual_direction"])
+        self.assertEqual("continuous_v", candidates[0]["geometry"]["construction"])
 
     def test_reference_candidates_keep_ordered_pointer_dwell_evidence(self):
         captions = [{"caption_id": "seg_001", "start_ms": 1_000, "end_ms": 4_000, "text": "这里和这里只能留一个"}]
