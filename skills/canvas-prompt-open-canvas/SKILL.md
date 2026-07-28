@@ -7,10 +7,11 @@ description: Open the local Canvas Prompt thinking canvas for the active Codex p
 
 Start the local canvas for the active project and open the URL reported by the
 launcher in Codex's in-app browser. This is the supported v0.1 route. The
-canvas exports an immutable round. The project decides archive location; only
-an explicit host-provided current conversation ID may decide the conversation
-scope. Never infer that ID from the project, recent tasks, a prior binding, or
-browser state. Do not claim an experimental native host panel.
+canvas exports an immutable round. Canvas Prompt deliberately supports one
+active user board: all rounds live in its private archive, and an explicit
+continuation command in any conversation reads that board's latest round. Do
+not make the user copy a path, choose an archive, or manage a conversation
+binding. Do not claim an experimental native host panel.
 
 Before the first launch in a new installation, tell the user that bootstrap
 will install Canvas Prompt-managed Node and local-ASR dependencies into an
@@ -92,12 +93,12 @@ the user asks to restore or resume the guidance, run the same command with
 `--guidance on`. If the preference is off, do not show the workflow guide on
 later launches unless the user asks how to use the product.
 
-When the host has supplied a current conversation ID, the canvas writes into
-`<active-project>/.canvas-prompt/threads/<opaque-key>/`; otherwise it uses the
-explicit project archive. After export, use `$canvas-prompt-read-round` only
-from the same fixed scope. If Codex has not exposed a current conversation ID
-to the launcher, do not say that the export was automatically routed back to
-the visible conversation.
+All completed rounds live under the plugin-private local archive
+`~/.canvas-prompt/board/`; the active project is retained as package
+provenance, not as a routing key. Opening Canvas Prompt again reuses the one
+healthy board rather than creating another service. The user can intentionally
+continue from a different conversation by entering the standard continuation
+command there.
 
 ## Do not parse a live canvas by screenshot
 

@@ -14,10 +14,11 @@
 
 import { existsSync } from 'node:fs';
 import { readFile, realpath, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { resolve, dirname, basename, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveConversationScope, validThreadId } from '../app/conversation-scope.mjs';
+import { resolveConversationScope, threadScopeKey, validSessionId, validThreadId } from '../app/conversation-scope.mjs';
 
 // ============================================================
 // Constants
@@ -36,17 +37,13 @@ const CONFIGURED_PROJECT_DIR = process.env.CANVAS_PROMPT_PROJECT_DIR;
 const CONFIGURED_THREAD_ID = process.env.CANVAS_PROMPT_THREAD_ID;
 const REQUIRE_THREAD = process.env.CANVAS_PROMPT_REQUIRE_THREAD === '1';
 const ACTIVE_PROJECT_DIR = CONFIGURED_PROJECT_DIR ? resolve(CONFIGURED_PROJECT_DIR) : null;
-const conversationScope = (ACTIVE_PROJECT_DIR || validThreadId(CONFIGURED_THREAD_ID))
-  ? resolveConversationScope({ projectDir: ACTIVE_PROJECT_DIR, threadId: CONFIGURED_THREAD_ID })
-  : null;
-const PROJECT_SCOPE_ERROR = REQUIRE_THREAD && !validThreadId(CONFIGURED_THREAD_ID)
-  ? 'Canvas Prompt MCP requires an explicit host-provided conversation thread ID; refusing to guess a current conversation.'
-  : !conversationScope
-    ? 'Canvas Prompt MCP was not given CANVAS_PROMPT_PROJECT_DIR or an explicit conversation thread ID; refusing to read the plugin installation directory.'
-  : ACTIVE_PROJECT_DIR === PROJECT_ROOT
-    ? 'Canvas Prompt MCP project directory resolves to the plugin installation directory; refusing to read it.'
-    : null;
-const CANVAS_PROMPT_DIR = conversationScope?.canvasDir ?? null;
+// One user has one active Canvas Prompt board. The MCP reader is intentionally
+// global to that private board, so an explicit continuation command in any
+// conversation reads the latest completed round without routing by project or
+// guessed chat history. Project/thread values remain package provenance only.
+const configuredConversationScope = resolveConversationScope({ projectDir: ACTIVE_PROJECT_DIR, singleBoard: true });
+const PROJECT_SCOPE_ERROR = null;
+const CANVAS_PROMPT_DIR = configuredConversationScope?.canvasDir ?? null;
 const MAX_LATEST_PACKAGE_TEXT_BYTES = 1_500_000;
 const MAX_ARTIFACT_BYTES = 4 * 1024 * 1024;
 const MAX_RAW_PACKAGE_BYTES = 32 * 1024 * 1024;
@@ -58,8 +55,31 @@ const ROUND_ARTIFACTS = {
   handoff: ['handoff.json'],
 };
 
-function latestPromptPackagePath() {
-  return resolve(CANVAS_PROMPT_DIR, 'latest-prompt-package.json');
+function latestPromptPackagePath(canvasPromptDir = CANVAS_PROMPT_DIR) {
+  return resolve(canvasPromptDir, 'latest-prompt-package.json');
+}
+
+const sessionIndexPath = (sessionId) => resolve(homedir(), '.canvas-prompt', 'session-index', `${threadScopeKey(sessionId)}.json`);
+
+async function sessionScopeFromCapability(sessionId) {
+  if (!validSessionId(sessionId)) throw new Error('Canvas Prompt session capability is missing or invalid.');
+  let registration;
+  try {
+    registration = JSON.parse(await readFile(sessionIndexPath(sessionId), 'utf8'));
+  } catch {
+    throw new Error('Canvas Prompt session capability was not found on this device. Reopen the canvas in this conversation.');
+  }
+  if (registration?.session_id !== sessionId || typeof registration?.project_dir !== 'string') {
+    throw new Error('Canvas Prompt session capability is invalid.');
+  }
+  return resolveConversationScope({ projectDir: registration.project_dir, sessionId });
+}
+
+async function resolveReadScope(args = {}) {
+  // Legacy launch capabilities are accepted for old archives, but must not
+  // divert the normal single-board continuation path.
+  if (typeof args.session_id === 'string') return sessionScopeFromCapability(args.session_id);
+  return configuredConversationScope;
 }
 
 function safePackageId(packageId) {
@@ -68,7 +88,7 @@ function safePackageId(packageId) {
 
 function pathIsInside(root, candidate) {
   const value = relative(root, candidate);
-  return value !== '' && !value.startsWith('..') && !value.includes(`..${process.platform === 'win32' ? '\\' : '/'}`);
+  return value !== '' && !value.startsWith('..') && !value.includes(process.platform === 'win32' ? '..\\' : '../');
 }
 
 async function readTrustedCanvasArtifact(candidatePath, allowedNames, { canvasPromptDir = CANVAS_PROMPT_DIR, maxBytes = MAX_ARTIFACT_BYTES } = {}) {
@@ -82,12 +102,12 @@ async function readTrustedCanvasArtifact(candidatePath, allowedNames, { canvasPr
   return { path: candidate, contents: await readFile(candidate, 'utf8') };
 }
 
-async function resolveRoundArtifact(packageId, artifact) {
+async function resolveRoundArtifact(packageId, artifact, canvasPromptDir) {
   if (!safePackageId(packageId) || !Object.hasOwn(ROUND_ARTIFACTS, artifact)) {
     throw new Error('Invalid round artifact request.');
   }
   const parts = ROUND_ARTIFACTS[artifact];
-  const candidate = resolve(CANVAS_PROMPT_DIR, 'rounds', packageId, ...parts);
+  const candidate = resolve(canvasPromptDir, 'rounds', packageId, ...parts);
   return readTrustedCanvasArtifact(candidate, [parts.at(-1)], {
     maxBytes: artifact === 'prompt_package' ? MAX_RAW_PACKAGE_BYTES : MAX_ARTIFACT_BYTES,
   });
@@ -110,7 +130,27 @@ function stripInlineImageData(value) {
   return result;
 }
 
-function packageEnginePaths(filePath, packageId) {
+function editableSourceImagePaths(filePath, packageId, rawPackage) {
+  if (!packageId || !Array.isArray(rawPackage?.source_images)) return [];
+  const roundDir = basename(filePath) === 'prompt-package.json'
+    ? dirname(filePath)
+    : resolve(dirname(filePath), 'rounds', packageId);
+  return rawPackage.source_images.flatMap((image) => {
+    if (!image || image.availability !== 'available' || typeof image.archive_relative_path !== 'string') return [];
+    const candidate = resolve(roundDir, image.archive_relative_path);
+    if (!pathIsInside(roundDir, candidate) || !existsSync(candidate)) return [];
+    return [{
+      artifact_object_id: image.artifact_object_id,
+      asset_id: image.asset_id,
+      path: candidate,
+      mime_type: image.mime_type,
+      width: image.width,
+      height: image.height,
+    }];
+  });
+}
+
+function packageEnginePaths(filePath, packageId, rawPackage) {
   const fileName = basename(filePath);
   const canvasPromptDir = dirname(filePath);
   const roundDir = fileName === 'prompt-package.json'
@@ -124,6 +164,7 @@ function packageEnginePaths(filePath, packageId) {
       compact_package_path: resolve(roundDir, 'engine', 'compact-package.json'),
       process_ir_path: resolve(roundDir, 'engine', 'process-ir.json'),
       canvas_snapshot_path: resolve(roundDir, 'canvas-snapshot.png'),
+      editable_source_images: editableSourceImagePaths(filePath, packageId, rawPackage),
     } : {}),
   };
 }
@@ -132,7 +173,7 @@ function latestPackageResponse(rawPackage, filePath) {
   const packageWithoutInlineImages = stripInlineImageData(rawPackage);
   const response = {
     package: packageWithoutInlineImages,
-    source: packageEnginePaths(filePath, rawPackage?.meta?.package_id),
+    source: packageEnginePaths(filePath, rawPackage?.meta?.package_id, rawPackage),
     delivery: {
       inline_image_data: 'excluded',
       max_text_bytes: MAX_LATEST_PACKAGE_TEXT_BYTES,
@@ -156,7 +197,7 @@ function latestPackageResponse(rawPackage, filePath) {
       transform_bindings: packageWithoutInlineImages.transform_bindings,
       intent_summary: packageWithoutInlineImages.intent_summary,
     },
-    source: packageEnginePaths(filePath, rawPackage?.meta?.package_id),
+    source: packageEnginePaths(filePath, rawPackage?.meta?.package_id, rawPackage),
     delivery: {
       inline_image_data: 'excluded',
       max_text_bytes: MAX_LATEST_PACKAGE_TEXT_BYTES,
@@ -168,24 +209,22 @@ function latestPackageResponse(rawPackage, filePath) {
 }
 
 async function handleGetLatestPromptPackage(args = {}) {
-  if (PROJECT_SCOPE_ERROR) {
-    return { content: [{ type: 'text', text: JSON.stringify({ error: PROJECT_SCOPE_ERROR, project_scope: 'unbound' }) }], isError: true };
-  }
-  const filePath = latestPromptPackagePath();
-  if (!existsSync(filePath)) {
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          error: `Prompt Package not found: ${filePath}`,
-          hint: 'Open Canvas Prompt for this project and export a session first.',
-        }),
-      }],
-      isError: true,
-    };
-  }
   try {
-    const trusted = await readTrustedCanvasArtifact(filePath, ['latest-prompt-package.json'], { maxBytes: MAX_RAW_PACKAGE_BYTES });
+    const scope = await resolveReadScope(args);
+    const filePath = latestPromptPackagePath(scope.canvasDir);
+    if (!existsSync(filePath)) {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            error: 'Prompt Package not found for this Canvas Prompt session.',
+            hint: 'Finish and export a Canvas Prompt round in this conversation first.',
+          }),
+        }],
+        isError: true,
+      };
+    }
+    const trusted = await readTrustedCanvasArtifact(filePath, ['latest-prompt-package.json'], { canvasPromptDir: scope.canvasDir, maxBytes: MAX_RAW_PACKAGE_BYTES });
     const rawPackage = JSON.parse(trusted.contents);
     return { content: [{ type: 'text', text: latestPackageResponse(rawPackage, trusted.path) }] };
   } catch (err) {
@@ -194,11 +233,9 @@ async function handleGetLatestPromptPackage(args = {}) {
 }
 
 async function handleGetRoundArtifact(args = {}) {
-  if (PROJECT_SCOPE_ERROR) {
-    return { content: [{ type: 'text', text: JSON.stringify({ error: PROJECT_SCOPE_ERROR, project_scope: 'unbound' }) }], isError: true };
-  }
   try {
-    const trusted = await resolveRoundArtifact(args.package_id, args.artifact);
+    const scope = await resolveReadScope(args);
+    const trusted = await resolveRoundArtifact(args.package_id, args.artifact, scope.canvasDir);
     if (args.artifact === 'prompt_package') {
       return { content: [{ type: 'text', text: latestPackageResponse(JSON.parse(trusted.contents), trusted.path) }] };
     }
@@ -210,10 +247,25 @@ async function handleGetRoundArtifact(args = {}) {
 
 const SERVER_INFO = {
   name: 'ai-thinking-whiteboard-mcp',
-  version: '0.1.21',
+  version: '0.1.29',
 };
 
-const PROTOCOL_VERSION = '2024-11-05';
+// Mirror the official MCP SDK negotiation policy. Codex Desktop now starts
+// clients with a post-2024 protocol version; responding with 2024-11-05
+// unconditionally makes the host reject the server before its tools appear.
+const LATEST_PROTOCOL_VERSION = '2025-11-25';
+const SUPPORTED_PROTOCOL_VERSIONS = [
+  LATEST_PROTOCOL_VERSION,
+  '2025-06-18',
+  '2025-03-26',
+  '2024-11-05',
+  '2024-10-07',
+];
+const negotiateProtocolVersion = (requestedVersion) => (
+  SUPPORTED_PROTOCOL_VERSIONS.includes(requestedVersion)
+    ? requestedVersion
+    : LATEST_PROTOCOL_VERSION
+);
 
 // ============================================================
 // JSON-RPC Helpers
@@ -222,9 +274,21 @@ const PROTOCOL_VERSION = '2024-11-05';
 /**
  * 写一条 JSON-RPC 消息到 stdout
  */
-function send(obj) {
+// Modern MCP stdio uses one JSON-RPC message per line. Earlier local hosts in
+// our compatibility matrix used LSP-style Content-Length framing. Learn the
+// host framing from its first request and reply in kind: this keeps Codex
+// Desktop interoperable without breaking those older local hosts.
+let responseFraming = 'newline';
+
+function encodeResponse(obj, framing = responseFraming) {
   const json = JSON.stringify(obj);
-  process.stdout.write(`Content-Length: ${Buffer.byteLength(json, 'utf-8')}\r\n\r\n${json}`);
+  return framing === 'content-length'
+    ? `Content-Length: ${Buffer.byteLength(json, 'utf-8')}\r\n\r\n${json}`
+    : `${json}\n`;
+}
+
+function send(obj) {
+  process.stdout.write(encodeResponse(obj));
 }
 
 /**
@@ -252,7 +316,7 @@ function error(id, code, message, data) {
 const TOOLS = [
   {
     name: 'get_latest_prompt_package',
-    description: 'Read the latest Prompt Package inside this fixed Canvas Prompt project/conversation scope. The server never guesses a current conversation.',
+    description: 'Read the latest completed Prompt Package from the user\'s single active Canvas Prompt board.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -260,7 +324,7 @@ const TOOLS = [
   },
   {
     name: 'get_round_artifact',
-    description: 'Read one bounded artifact from an immutable Canvas Prompt round in this fixed project/conversation scope.',
+    description: 'Read one bounded artifact from an immutable round in the user\'s single active Canvas Prompt board.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -272,6 +336,10 @@ const TOOLS = [
           type: 'string',
           enum: ['prompt_package', 'compact_package', 'process_ir', 'manifest', 'handoff'],
           description: 'One approved immutable-round artifact kind.',
+        },
+        session_id: {
+          type: 'string',
+          description: 'Opaque Canvas Prompt launch capability from this conversation.',
         },
       },
       required: ['package_id', 'artifact'],
@@ -285,7 +353,7 @@ async function handleRequest(req) {
   switch (method) {
     case 'initialize': {
       result(id, {
-        protocolVersion: PROTOCOL_VERSION,
+        protocolVersion: negotiateProtocolVersion(params?.protocolVersion),
         capabilities: {
           tools: {},
         },
@@ -357,6 +425,7 @@ function startServer() {
         const header = buffer.substring(0, headerEnd);
         const match = header.match(/Content-Length:\s*(\d+)/i);
         if (match) {
+          responseFraming = 'content-length';
           const contentLength = parseInt(match[1], 10);
           const bodyStart = headerEnd + 4;
 
@@ -394,6 +463,7 @@ function startServer() {
 
       if (line) {
         try {
+          responseFraming = 'newline';
           const req = JSON.parse(line);
           handleRequest(req).catch((err) => {
             if (req.id !== undefined) {
@@ -429,6 +499,8 @@ export {
   readTrustedCanvasArtifact,
   resolveRoundArtifact,
   stripInlineImageData,
+  encodeResponse,
+  negotiateProtocolVersion,
   TOOLS,
   PROJECT_SCOPE_ERROR,
 };

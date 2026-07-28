@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CALLER_DIR="$PWD"
 PROJECT_MODE="${CANVAS_PROMPT_PROJECT_MODE:-project}"
 THREAD_ID="${CANVAS_PROMPT_THREAD_ID:-${CANVAS_PROMPT_CODEX_THREAD_ID:-}}"
+SESSION_ID="${CANVAS_PROMPT_SESSION_ID:-}"
 PROJECT_DIR=""
 WORKING_DIR="${1:-$CALLER_DIR}"
 if [[ "$PROJECT_MODE" == "project" ]]; then
@@ -29,13 +30,22 @@ else
   unset CANVAS_PROMPT_PROJECT_DIR
 fi
 if [[ -n "$THREAD_ID" ]]; then export CANVAS_PROMPT_THREAD_ID="$THREAD_ID"; fi
+if [[ -n "$SESSION_ID" ]]; then export CANVAS_PROMPT_SESSION_ID="$SESSION_ID"; fi
 THREAD_SCOPE_KEY=""
-if [[ -n "$THREAD_ID" ]]; then
-  [[ "$THREAD_ID" =~ ^[A-Za-z0-9_-]{8,200}$ ]] || { echo "Canvas Prompt received an invalid host thread ID." >&2; exit 1; }
-  THREAD_SCOPE_KEY="$(printf '%s' "$THREAD_ID" | shasum -a 256 | cut -c1-24)"
+SCOPE_DIRECTORY="threads"
+SCOPE_ID="$THREAD_ID"
+if [[ -z "$SCOPE_ID" ]]; then
+  SCOPE_ID="$SESSION_ID"
+  SCOPE_DIRECTORY="sessions"
 fi
-if [[ -n "$PROJECT_DIR" && -n "$THREAD_SCOPE_KEY" ]]; then
-  PROMPT_PACKAGE_PATH="${PROJECT_DIR}/.canvas-prompt/threads/${THREAD_SCOPE_KEY}/latest-prompt-package.json"
+if [[ -n "$SCOPE_ID" ]]; then
+  [[ "$SCOPE_ID" =~ ^[A-Za-z0-9_-]{8,200}$ ]] || { echo "Canvas Prompt received an invalid conversation session." >&2; exit 1; }
+  THREAD_SCOPE_KEY="$(printf '%s' "$SCOPE_ID" | shasum -a 256 | cut -c1-24)"
+fi
+if [[ "${CANVAS_PROMPT_SINGLE_BOARD:-1}" == "1" ]]; then
+  PROMPT_PACKAGE_PATH="${HOME}/.canvas-prompt/board/latest-prompt-package.json"
+elif [[ -n "$PROJECT_DIR" && -n "$THREAD_SCOPE_KEY" ]]; then
+  PROMPT_PACKAGE_PATH="${PROJECT_DIR}/.canvas-prompt/${SCOPE_DIRECTORY}/${THREAD_SCOPE_KEY}/latest-prompt-package.json"
 elif [[ -n "$PROJECT_DIR" ]]; then
   PROMPT_PACKAGE_PATH="${PROJECT_DIR}/.canvas-prompt/latest-prompt-package.json"
 else
@@ -72,6 +82,9 @@ is_healthy_current_canvas() {
   local candidate="$1" identity running_project running_scope
   is_healthy_canvas "$candidate" || return 1
   identity="$(runtime_identity "$candidate")"
+  if [[ "$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("storage_kind") or "")' 2>/dev/null)" == "single_board" ]]; then
+    return 0
+  fi
   running_project="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("project_dir") or "")' 2>/dev/null)"
   running_scope="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("thread_scope_key") or "")' 2>/dev/null)"
   [[ "$running_project" == "$PROJECT_DIR" && "$running_scope" == "$THREAD_SCOPE_KEY" ]]
@@ -156,7 +169,7 @@ SERVICE_LOG="${TMPDIR:-/tmp}/${SERVICE_LABEL}.log"
 # A prior crashed job can survive without a listener. Remove it before submit.
 launchctl bootout "gui/$(id -u)/${SERVICE_LABEL}" >/dev/null 2>&1 || true
 launchctl submit -l "$SERVICE_LABEL" -o "$SERVICE_LOG" -e "$SERVICE_LOG" -- \
-  "$RUNNER" "$CORE_APP_DIR" "$WORKING_DIR" "$PROJECT_DIR" "$PORT" "$NODE_BIN" "$ASR_URL" "$ASR_ENABLED" "$DELIVERY_MODE" "$THREAD_ID"
+  "$RUNNER" "$CORE_APP_DIR" "$WORKING_DIR" "$PROJECT_DIR" "$PORT" "$NODE_BIN" "$ASR_URL" "$ASR_ENABLED" "$DELIVERY_MODE" "$THREAD_ID" "$SESSION_ID"
 
 for _ in {1..20}; do
   if curl --silent --show-error --max-time 1 "http://127.0.0.1:${PORT}/" 2>/dev/null | grep -q '<title>Canvas Prompt</title>'; then

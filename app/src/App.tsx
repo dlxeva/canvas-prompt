@@ -12,7 +12,7 @@ import { WindowedAsrSession } from './windowed-asr'
 import type { AsrWindowProgress } from './windowed-asr'
 import { compactTraceToCognitiveEvents, buildPointerTrack } from './excalidraw-cognitive-events'
 import { compilePromptPackage, validatePromptPackage } from './prompt-package-compiler'
-import type { BaselineContext, CanvasObject, Keyframe, PromptPackage, ViewTransformation } from './prompt-package-compiler'
+import type { BaselineContext, CanvasObject, EditableSourceImage, Keyframe, PromptPackage, ViewTransformation } from './prompt-package-compiler'
 import { appendViewTransformation } from './view-transform'
 import { countIncludedBaselineObjects, projectFinalSnapshotElements, projectLiveRoundElementIds } from './baseline-projection'
 import { deriveExportReceiptStatus, isReceiptComplete } from './receipt-state'
@@ -35,8 +35,8 @@ const tools: Array<{ id: CanvasTool; zh: string; en: string }> = [
 const CANONICAL_CONTINUATION_COMMAND = '根据画布内容推进'
 
 const ui = {
-  zh: { importImage: '导入图片', importing: '正在导入…', more: '更多功能', archive: '本地档案', recording: '录音中', asrPreparing: '语音准备中', asrUnavailable: '语音不转写', finish: '结束推演', processing: '处理中', export: '整理本轮', retryExport: '重新整理本轮', sending: '正在整理…', archived: '✓ 本轮已整理', accepted: '✓ 本轮已整理', deliveredReceipt: '✓ 本轮已整理', failedReceipt: '✓ 本轮已整理', next: '开始下一轮', start: '开始推演', startVisualOnly: '不等语音，开始画', preparing: '准备中…', canvasTools: '画布工具', expandTools: '展开画布工具', collapseTools: '收起画布工具', undo: '撤销（⌘Z）', redo: '重做（⇧⌘Z）', zoomOut: '缩小', zoomIn: '放大', color: '颜色', weight: '粗细', releaseToImport: '松开以导入图片', archiveDescription: '保存在本项目的', archiveDescriptionEnd: '。不自动上传云端；删除后无法恢复。', closeArchive: '关闭本地档案', loadingArchive: '正在读取本地档案…', noArchive: '还没有已归档的推演。', seconds: '秒', unknownDuration: '时长未知', snapshot: '画布快照', noSnapshot: '无快照', audio: '录音', noAudio: '无录音', delivered: '已整理', sent: '已整理', sendFailed: '已整理', local: '已整理', delete: '删除' },
-  en: { importImage: 'Import image', importing: 'Importing…', more: 'More', archive: 'Local archive', recording: 'Recording', asrPreparing: 'Speech preparing', asrUnavailable: 'Speech not transcribed', finish: 'Finish session', processing: 'Processing', export: 'Finish this round', retryExport: 'Try again', sending: 'Finishing…', archived: '✓ Round ready · Continue in this conversation', accepted: '✓ Round ready · Continue in this conversation', deliveredReceipt: '✓ Round ready · Continue in this conversation', failedReceipt: '✓ Round ready · Continue in this conversation', next: 'Start next round', start: 'Start session', startVisualOnly: 'Start without speech', preparing: 'Preparing…', canvasTools: 'Canvas tools', expandTools: 'Expand tools', collapseTools: 'Collapse tools', undo: 'Undo (⌘Z)', redo: 'Redo (⇧⌘Z)', zoomOut: 'Zoom out', zoomIn: 'Zoom in', color: 'Color', weight: 'Weight', releaseToImport: 'Release to import image', archiveDescription: 'Stored locally in', archiveDescriptionEnd: '. Nothing is uploaded automatically; deleted rounds cannot be recovered.', closeArchive: 'Close local archive', loadingArchive: 'Loading local archive…', noArchive: 'No saved rounds yet.', seconds: 'sec', unknownDuration: 'duration unknown', snapshot: 'canvas snapshot', noSnapshot: 'no snapshot', audio: 'audio', noAudio: 'no audio', delivered: 'ready', sent: 'ready', sendFailed: 'ready', local: 'ready', delete: 'Delete' },
+  zh: { importImage: '导入图片', importing: '正在导入…', more: '更多功能', archive: '本地档案', recording: '录音中', asrPreparing: '语音准备中', asrUnavailable: '语音不转写', finish: '结束推演', processing: '处理中', export: '整理本轮', retryExport: '重新整理本轮', sending: '正在整理…', archived: '✓ 本轮已整理', accepted: '✓ 本轮已整理', deliveredReceipt: '✓ 本轮已整理', failedReceipt: '✓ 本轮已整理', next: '开始下一轮', start: '开始推演', startVisualOnly: '不等语音，开始画', preparing: '准备中…', canvasTools: '画布工具', expandTools: '展开画布工具', collapseTools: '收起画布工具', undo: '撤销（⌘Z）', redo: '重做（⇧⌘Z）', zoomOut: '缩小', zoomIn: '放大', color: '颜色', weight: '粗细', releaseToImport: '松开以导入图片', archiveDescription: '保存在这台设备上。', archiveDescriptionEnd: '不自动上传云端；删除后无法恢复。', closeArchive: '关闭本地档案', loadingArchive: '正在读取本地档案…', noArchive: '还没有已归档的推演。', seconds: '秒', unknownDuration: '时长未知', snapshot: '画布快照', noSnapshot: '无快照', audio: '录音', noAudio: '无录音', delivered: '已整理', sent: '已整理', sendFailed: '已整理', local: '已整理', delete: '删除' },
+  en: { importImage: 'Import image', importing: 'Importing…', more: 'More', archive: 'Local archive', recording: 'Recording', asrPreparing: 'Speech preparing', asrUnavailable: 'Speech not transcribed', finish: 'Finish session', processing: 'Processing', export: 'Finish this round', retryExport: 'Try again', sending: 'Finishing…', archived: '✓ Round ready · Continue in this conversation', accepted: '✓ Round ready · Continue in this conversation', deliveredReceipt: '✓ Round ready · Continue in this conversation', failedReceipt: '✓ Round ready · Continue in this conversation', next: 'Start next round', start: 'Start session', startVisualOnly: 'Start without speech', preparing: 'Preparing…', canvasTools: 'Canvas tools', expandTools: 'Expand tools', collapseTools: 'Collapse tools', undo: 'Undo (⌘Z)', redo: 'Redo (⇧⌘Z)', zoomOut: 'Zoom out', zoomIn: 'Zoom in', color: 'Color', weight: 'Weight', releaseToImport: 'Release to import image', archiveDescription: 'Stored on this device. ', archiveDescriptionEnd: 'Nothing is uploaded automatically; deleted rounds cannot be recovered.', closeArchive: 'Close local archive', loadingArchive: 'Loading local archive…', noArchive: 'No saved rounds yet.', seconds: 'sec', unknownDuration: 'duration unknown', snapshot: 'canvas snapshot', noSnapshot: 'no snapshot', audio: 'audio', noAudio: 'no audio', delivered: 'ready', sent: 'ready', sendFailed: 'ready', local: 'ready', delete: 'Delete' },
 } as const
 
 function visibleWorkflowMessage(message: string, locale: Locale) {
@@ -108,6 +108,11 @@ type StoredRound = {
   handoff?: HandoffReceipt
 }
 
+type EditableSourceUpload = {
+  metadata: EditableSourceImage
+  blob: Blob
+}
+
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -131,6 +136,56 @@ function imageDimensions(blob: Blob): Promise<{ width: number; height: number }>
     }
     image.src = url
   })
+}
+
+function imageExtension(mimeType: string) {
+  const subtype = mimeType.split('/')[1]?.toLowerCase()
+  if (subtype === 'jpeg' || subtype === 'jpg' || subtype === 'jfif') return 'jpg'
+  if (subtype === 'svg+xml') return 'svg'
+  if (subtype && /^[a-z0-9]+$/.test(subtype)) return subtype
+  return 'png'
+}
+
+/**
+ * Preserve the imported image separately from the annotated canvas snapshot.
+ * The snapshot is evidence of the user's marks; this is the only material an
+ * image-editing turn may use as its visual source.
+ */
+async function collectEditableSourceImages(
+  elements: readonly CanvasElement[],
+  files: Record<string, { dataURL?: string; mimeType?: string }> | null | undefined,
+): Promise<EditableSourceUpload[]> {
+  if (!files) return []
+  const uploads: EditableSourceUpload[] = []
+  for (const element of elements) {
+    if (element.type !== 'image' || element.isDeleted || !('fileId' in element) || !element.fileId) continue
+    const file = files[element.fileId]
+    if (!file?.dataURL?.startsWith('data:image/')) continue
+    try {
+      const response = await fetch(file.dataURL)
+      const blob = await response.blob()
+      const mimeType = file.mimeType || blob.type || 'image/png'
+      if (!mimeType.startsWith('image/') || blob.size === 0) continue
+      const dimensions = await imageDimensions(blob).catch(() => ({ width: Math.max(1, Math.round(element.width)), height: Math.max(1, Math.round(element.height)) }))
+      const artifactObjectId = `obj_${element.id}`
+      uploads.push({
+        metadata: {
+          artifact_object_id: artifactObjectId,
+          asset_id: element.fileId,
+          mime_type: mimeType,
+          width: dimensions.width,
+          height: dimensions.height,
+          archive_relative_path: `source-images/${element.id}.${imageExtension(mimeType)}`,
+          availability: 'available',
+        },
+        blob,
+      })
+    } catch {
+      // The final snapshot remains available even if one browser-managed image
+      // cannot be re-read. Do not claim an editable original for that asset.
+    }
+  }
+  return uploads
 }
 
 function sceneBounds(elements: readonly CanvasElement[]) {
@@ -491,6 +546,10 @@ export default function App() {
       setTranscription(transcript)
       setWorkflowMessage('正在整理画布和标记…')
       const elements = api?.getSceneElements() ?? []
+      const editableSourceImages = await collectEditableSourceImages(
+        elements,
+        (api?.getFiles() ?? null) as Record<string, { dataURL?: string; mimeType?: string }> | null,
+      )
       const baseArtifacts: CanvasObject[] = elements
         .filter((element) => artifactImageIds.current.has(element.id) && element.type === 'image' && !element.isDeleted)
         .map((element) => ({
@@ -549,6 +608,7 @@ export default function App() {
         language: transcript?.language || (sessionLocale.current === 'zh' ? 'zh-CN' : 'en'),
         tags: ['canvas-prompt', 'excalidraw'],
         baseArtifacts,
+        sourceImages: editableSourceImages.map((item) => item.metadata),
         baselineAnchors: baselineAnchors.current,
         viewTransformations: viewTransformations.current,
         baselineContext: roundBaselineContext,
@@ -575,7 +635,7 @@ export default function App() {
       // `setLastRecording(audio)` does not synchronously update React state.
       // Pass this round's finished recording explicitly so the durable archive
       // cannot accidentally omit it while its transcript is retained.
-      await exportPromptPackage({ packageToExport: pkg, recordingToArchive: audio })
+      await exportPromptPackage({ packageToExport: pkg, recordingToArchive: audio, editableSourceImages })
     } catch (error) {
       setWorkflowMessage(`整理失败：${error instanceof Error ? error.message : '请重试'}`)
       setSessionStage('error')
@@ -615,10 +675,12 @@ export default function App() {
     retryHandoff = false,
     packageToExport = compiledPackage,
     recordingToArchive = lastRecording,
+    editableSourceImages = [],
   }: {
     retryHandoff?: boolean
     packageToExport?: PromptPackage | null
     recordingToArchive?: RecordingResult | null
+    editableSourceImages?: EditableSourceUpload[]
   } = {}) => {
     if (!packageToExport) return
     setExportStatus('exporting')
@@ -630,6 +692,14 @@ export default function App() {
     }
 
     try {
+      for (const sourceImage of editableSourceImages) {
+        const response = await protectedLocalApiFetch(`/api/round-source-image/${packageToExport.meta.package_id}/${encodeURIComponent(sourceImage.metadata.artifact_object_id)}`, {
+          method: 'POST',
+          headers: { 'content-type': sourceImage.metadata.mime_type },
+          body: sourceImage.blob,
+        })
+        if (!response.ok) throw new Error('原图未能保存到本轮档案')
+      }
       if (recordingToArchive) {
         const audioResponse = await protectedLocalApiFetch(`/api/round-audio/${packageToExport.meta.package_id}`, {
           method: 'POST',
@@ -1217,7 +1287,7 @@ export default function App() {
       {storageOpen && <div className="storage-backdrop" role="presentation" onClick={() => setStorageOpen(false)}>
         <section className="storage-dialog" role="dialog" aria-modal="true" aria-label={text.archive} onClick={(event) => event.stopPropagation()}>
           <div className="storage-dialog-head">
-            <div><h2>{text.archive}</h2><p>{text.archiveDescription} <code>.canvas-prompt/rounds</code>{text.archiveDescriptionEnd}</p></div>
+            <div><h2>{text.archive}</h2><p>{text.archiveDescription}{text.archiveDescriptionEnd}</p></div>
             <button className="dialog-close" type="button" onClick={() => setStorageOpen(false)} aria-label={text.closeArchive}>×</button>
           </div>
           <div className="storage-list">

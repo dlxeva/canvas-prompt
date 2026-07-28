@@ -2,14 +2,14 @@
 
 [简体中文](./PRIVACY.zh-CN.md) · English
 
-Canvas Prompt is designed around project-local storage. Ending a round compiles and saves its context locally; a compatible host can then read that immutable round through the local MCP reader. This does not by itself place a message into a visible chat or make the host reply.
+Canvas Prompt is designed around one device-local active board. Ending a round compiles and saves its context locally; a compatible host can then read the latest immutable round through the local MCP reader when the user explicitly asks it to continue. This does not by itself place a message into a visible chat or make the host reply.
 
 ## What a round stores
 
 When a round is exported, Canvas Prompt writes local data under:
 
 ```text
-<active-project>/.canvas-prompt/
+~/.canvas-prompt/board/
 ```
 
 Depending on the session, this can include:
@@ -19,7 +19,7 @@ Depending on the session, this can include:
 - the original audio recording;
 - Process IR and Compact Package artifacts;
 - round metadata, local artifact paths, and a host handoff receipt when the host supports one;
-- an explicit host conversation identifier only when the host provides one for scoped reading.
+- the originating project path when one exists, as provenance rather than a routing key.
 
 The in-app archive can inspect and permanently delete a local round. A deleted round cannot be restored from Canvas Prompt.
 
@@ -33,10 +33,10 @@ If you configure a remote or third-party ASR backend, that provider's privacy, r
 
 ## Host reading and handoff
 
-For Codex Desktop, the supported path is to let the current task read the immutable project-local round through Canvas Prompt's local MCP reader. A host that explicitly provides a conversation ID can use it to scope that read. Without such an ID, Canvas Prompt provides only explicit project-local reading; it does not claim automatic visible-chat injection, delivery to a particular task, or an automatic reply.
+For Codex Desktop, the supported path is to enter the explicit continuation command in the task that should use the board. Canvas Prompt's local MCP reader then reads the latest completed immutable round from the single-board archive. It does not claim automatic visible-chat injection, delivery to a particular task, or an automatic reply.
 
 If a host records a handoff receipt, deleting the local round later removes the local archive only; it cannot retract content that the user or host has already shared with a model provider or remove it from that provider's history.
 
 ## Public examples
 
-Never commit real recordings, transcripts, screenshots, whiteboards, project-local `.canvas-prompt/` folders, or exported task bindings. Public examples must be synthetic or explicitly consented and de-identified.
+Never commit real recordings, transcripts, screenshots, whiteboards, `.canvas-prompt/` archives, or exported task bindings. Public examples must be synthetic or explicitly consented and de-identified.

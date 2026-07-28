@@ -168,7 +168,7 @@ describe('main-thread handoff routing', () => {
     expect(appServerCommandCandidates('/tmp/example', { PATH: '/usr/bin' })).toContain('/Applications/ChatGPT.app/Contents/Resources/codex')
   })
 
-  it('tells the receiving task to read Compact Package, acknowledge its understanding, and continue', () => {
+  it('tells the receiving task to read Compact Package, acknowledge its understanding, and gate material execution behind a plan', () => {
     const message = handoffMessage({
       packagePath: '/project/.canvas-prompt/rounds/r1/prompt-package.json',
       roundPath: '/project/.canvas-prompt/rounds/r1',
@@ -178,7 +178,24 @@ describe('main-thread handoff routing', () => {
     expect(message).toContain('先用 Canvas Prompt MCP 读取 Compact Package')
     expect(message).toContain('不要打开浏览器画布')
     expect(message).toContain('先用 2–4 句说明“我这样理解你这一轮”')
+    expect(message).toContain('画布交接只授权理解，不授权产生实质改动')
+    expect(message).toContain('若当前宿主是 Codex 且原生计划模式可用，转入计划模式')
+    expect(message).toContain('等待用户明确确认')
     expect(message).toContain('不要把 package ID、事件数量、本地路径或读取步骤当作主要回复')
+    expect(message).toContain('视图缩放、平移和浏览器窗口变化只是在调整观察视角')
+    expect(message).toContain('不得把它们复述为修改请求')
+  })
+
+  it('requires image edits to use an archived original and fails closed when none is available', () => {
+    const withOriginal = handoffMessage({
+      packagePath: '/project/.canvas-prompt/rounds/r1/prompt-package.json', roundPath: '/project/.canvas-prompt/rounds/r1', engine: {},
+      sourceImagePaths: ['/project/.canvas-prompt/rounds/r1/source-images/original.png'],
+    })
+    expect(withOriginal).toContain('可编辑原图：/project/.canvas-prompt/rounds/r1/source-images/original.png')
+    expect(withOriginal).toContain('不得仅据文字重画')
+
+    const withoutOriginal = handoffMessage({ packagePath: '/project/.canvas-prompt/rounds/r2/prompt-package.json', roundPath: '/project/.canvas-prompt/rounds/r2', engine: {} })
+    expect(withoutOriginal).toContain('不得声称在原图上修改')
   })
 
   it('keeps the visible attachment message separate from the internal handoff instructions', async () => {

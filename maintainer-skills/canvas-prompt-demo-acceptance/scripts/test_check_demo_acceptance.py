@@ -13,7 +13,7 @@ SPEC.loader.exec_module(MODULE)
 
 
 def write_round(project: Path, package_id: str, image_count: int, review_marks: bool = False) -> None:
-    root = project / ".canvas-prompt" / "rounds" / package_id
+    root = project / "rounds" / package_id
     (root / "engine").mkdir(parents=True)
     (root / "prompt-package.json").write_text(json.dumps({
         "meta": {"package_id": package_id},
@@ -40,11 +40,17 @@ class DemoAcceptanceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             project = Path(temp)
             write_round(project, "blank", 0)
-            receipt = project / ".canvas-prompt" / "rounds" / "blank" / "handoff.json"
+            receipt = project / "rounds" / "blank" / "handoff.json"
             receipt.write_text(json.dumps({"status": "failed"}), encoding="utf-8")
             result = MODULE.check_round(project, "blank", "blank")
             self.assertFalse(result["passed"])
             self.assertIn("handoff is not accepted or delivered: 'failed'", result["errors"])
+
+    def test_records_an_explicit_continuation_waiver_without_claiming_it_was_run(self):
+        result = MODULE.waived_continuation("release owner waived this non-essential scenario")
+        self.assertTrue(result["passed"])
+        self.assertTrue(result["waived"])
+        self.assertEqual(result["status"], "waived")
 
 
 if __name__ == "__main__":

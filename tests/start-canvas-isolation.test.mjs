@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { createHash } from 'node:crypto'
 import test from 'node:test'
 
 const run = promisify(execFile)
@@ -17,7 +16,7 @@ async function fakeCommand(directory, name, contents) {
   await chmod(path, 0o755)
 }
 
-async function selectPort({ requestedProject, runningProject, requestedThreadScope = '', runningThreadScope = '', runningCommand = `${root}/app node vite` }) {
+async function selectPort({ requestedProject, runningProject, requestedThreadScope = '', runningThreadScope = '', runningStorageKind = 'single_board', runningCommand = `${root}/app node vite` }) {
   const temp = await mkdtemp(resolve(tmpdir(), 'canvas-port-isolation-'))
   try {
     await mkdir(requestedProject, { recursive: true })
@@ -25,7 +24,7 @@ async function selectPort({ requestedProject, runningProject, requestedThreadSco
     await (await import('node:fs/promises')).mkdir(bin)
     await fakeCommand(bin, 'lsof', '[[ "$*" == *"43223"* ]] && echo 4242')
     await fakeCommand(bin, 'ps', `echo ${JSON.stringify(runningCommand)}`)
-    await fakeCommand(bin, 'curl', `if [[ "$*" == *"runtime-identity"* ]]; then echo ${JSON.stringify(JSON.stringify({ project_dir: runningProject, thread_scope_key: runningThreadScope }))}; else echo '<title>Canvas Prompt</title>'; fi`)
+    await fakeCommand(bin, 'curl', `if [[ "$*" == *"runtime-identity"* ]]; then echo ${JSON.stringify(JSON.stringify({ project_dir: runningProject, thread_scope_key: runningThreadScope, storage_kind: runningStorageKind }))}; else echo '<title>Canvas Prompt</title>'; fi`)
     const { stdout, stderr } = await run('bash', ['-c', `source ${JSON.stringify(script)}; select_port`], {
       env: {
         ...process.env,
@@ -41,7 +40,7 @@ async function selectPort({ requestedProject, runningProject, requestedThreadSco
   }
 }
 
-test('a healthy Canvas service is reused only by the exact same project', async () => {
+test('a healthy single-board Canvas service is reused from another project', async () => {
   const projects = await mkdtemp(resolve(tmpdir(), 'canvas-port-projects-'))
   try {
     const projectA = resolve(projects, 'a')
@@ -51,13 +50,13 @@ test('a healthy Canvas service is reused only by the exact same project', async 
     const same = await selectPort({ requestedProject: projectA, runningProject: canonicalA })
     assert.equal(same.stdout, 'reuse:43223', same.stderr)
     const other = await selectPort({ requestedProject: projectB, runningProject: canonicalA })
-    assert.equal(other.stdout, '43224', other.stderr)
+    assert.equal(other.stdout, 'reuse:43223', other.stderr)
   } finally {
     await rm(projects, { recursive: true, force: true })
   }
 })
 
-test('a healthy Canvas service is not reused by another conversation in the same project', async () => {
+test('a healthy single-board Canvas service is reused from another conversation', async () => {
   const projects = await mkdtemp(resolve(tmpdir(), 'canvas-port-thread-projects-'))
   try {
     const project = resolve(projects, 'shared')
@@ -65,11 +64,10 @@ test('a healthy Canvas service is not reused by another conversation in the same
     const canonical = await realpath(project)
     const threadA = '019fa-thread-a-12345678'
     const threadB = '019fa-thread-b-12345678'
-    const runtimeScope = createHash('sha256').update(threadA).digest('hex').slice(0, 24)
-    const same = await selectPort({ requestedProject: project, runningProject: canonical, requestedThreadScope: threadA, runningThreadScope: runtimeScope })
+    const same = await selectPort({ requestedProject: project, runningProject: canonical, requestedThreadScope: threadA })
     assert.equal(same.stdout, 'reuse:43223', same.stderr)
-    const other = await selectPort({ requestedProject: project, runningProject: canonical, requestedThreadScope: threadB, runningThreadScope: runtimeScope })
-    assert.equal(other.stdout, '43224', other.stderr)
+    const other = await selectPort({ requestedProject: project, runningProject: canonical, requestedThreadScope: threadB })
+    assert.equal(other.stdout, 'reuse:43223', other.stderr)
   } finally {
     await rm(projects, { recursive: true, force: true })
   }
@@ -85,6 +83,7 @@ test('a healthy Canvas service from an earlier cache is not mistaken for stale',
     const result = await selectPort({
       requestedProject: projectB,
       runningProject: canonicalA,
+      runningStorageKind: '',
       runningCommand: '/tmp/canvas-prompt-cache/older/app/node_modules/vite/bin/vite.js --port 43223',
     })
     assert.equal(result.stdout, '43224', result.stderr)

@@ -94,6 +94,21 @@ export interface CanvasSnapshot {
   keyframes?: Keyframe[]
 }
 
+/**
+ * A locally archived original image that can be used for image editing.
+ * It is deliberately distinct from the rendered canvas snapshot: the latter
+ * shows annotations, while this preserves the editable source material.
+ */
+export interface EditableSourceImage {
+  artifact_object_id: string
+  asset_id: string
+  mime_type: string
+  width: number
+  height: number
+  archive_relative_path: string
+  availability: 'available'
+}
+
 // --- Stroke ---
 
 export interface Point {
@@ -406,6 +421,8 @@ export interface PromptPackage {
   /** Explicit boundary for objects that existed before this round began. */
   baseline_context?: BaselineContext
   base_artifacts?: CanvasObject[]
+  /** Original image material retained for edit-capable review rounds. */
+  source_images?: EditableSourceImage[]
   review_items?: ReviewItem[]
   /** Viewport changes are observation-only and never object coordinates. */
   view_transformations?: ViewTransformation[]
@@ -457,6 +474,8 @@ export interface CompilerOptions {
   mode?: 'fast' | 'full'
   /** Imported visual artifacts present in this round. They are evidence, not a mode switch. */
   baseArtifacts?: CanvasObject[]
+  /** Locally archived originals corresponding to imported image artifacts. */
+  sourceImages?: EditableSourceImage[]
   /** Live objects present when the round began. They are spatial anchors, not new actions. */
   baselineAnchors?: CanvasObject[]
   /** Coalesced viewport pan/zoom observations, distinct from scene transforms. */
@@ -1390,6 +1409,9 @@ export function compilePromptPackage(
   const liveEvents = finalLiveProjectionEvents(lifecycle)
   const activeBaseArtifacts = (options.baseArtifacts ?? []).filter((item) => lifecycle.get(item.object_id.replace(/^obj_/, ''))?.alive !== false)
   const activeBaselineAnchors = (options.baselineAnchors ?? []).filter((item) => lifecycle.get(item.object_id.replace(/^obj_/, ''))?.alive !== false)
+  const activeSourceImages = (options.sourceImages ?? []).filter((item) =>
+    [...activeBaseArtifacts, ...activeBaselineAnchors].some((artifact) => artifact.object_id === item.artifact_object_id),
+  )
   const strokes = extractStrokes(liveEvents)
   const regions = extractRegions(liveEvents)
   const arrows = extractArrows(liveEvents)
@@ -1460,6 +1482,7 @@ export function compilePromptPackage(
     timeline,
     objects,
     ...(activeBaseArtifacts.length ? { base_artifacts: activeBaseArtifacts } : {}),
+    ...(activeSourceImages.length ? { source_images: activeSourceImages } : {}),
     ...(options.baselineContext ? { baseline_context: options.baselineContext } : {}),
     ...(reviewItems.length > 0 ? { review_items: reviewItems } : {}),
     ...(options.viewTransformations?.length ? { view_transformations: options.viewTransformations } : {}),

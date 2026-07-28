@@ -1,7 +1,7 @@
 # Contributing to Canvas Prompt
 
 Canvas Prompt is an early local-first alpha. Small, evidence-backed fixes are
-the most useful contributions: correctness, project isolation, privacy,
+the most useful contributions: correctness, single-board integrity, privacy,
 installation reliability, accessibility, and documentation clarity.
 
 ## Before opening a pull request
@@ -11,8 +11,8 @@ installation reliability, accessibility, and documentation clarity.
 2. Keep an intentional distinction between direct observations, inferences,
    and unresolved candidates. Do not turn a visual cue into a claimed user
    intent without evidence.
-3. Keep the canvas project-local. A change must not silently read another
-   project or a user's arbitrary local files.
+3. Keep the single-board archive private and explicit. A change must not scan
+   arbitrary project archives or a user's arbitrary local files.
 4. Add or update a focused test for behavioral changes.
 
 ## Local checks
@@ -37,6 +37,6 @@ acceptance test.
 ## Pull request notes
 
 State what changed, how it was verified, and what remains unproven. If the
-change affects a host integration, say whether it changes only project-bound
-package reading or a user-visible host behavior; do not imply the latter
+ change affects a host integration, say whether it changes only local
+ package reading or a user-visible host behavior; do not imply the latter
 without a real host acceptance result.

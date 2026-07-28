@@ -160,7 +160,7 @@ export function appServerEnvironment(base = process.env) {
   return { ...base, PATH: pathEntries.join(delimiter) }
 }
 
-export function handoffMessage({ packagePath, roundPath, engine, snapshotPath, keyframePaths = [] }) {
+export function handoffMessage({ packagePath, roundPath, engine, snapshotPath, keyframePaths = [], sourceImagePaths = [] }) {
   const enginePaths = [engine?.process_ir_path, engine?.compact_package_path].filter(Boolean)
   return [
     '[Canvas Prompt｜本轮推演上下文]',
@@ -169,14 +169,20 @@ export function handoffMessage({ packagePath, roundPath, engine, snapshotPath, k
     `Prompt Package：${packagePath}`,
     `本轮目录：${roundPath}`,
     ...(keyframePaths.length ? [`状态帧（仅在需要理解沉默的空间重组时查看）：${keyframePaths.join('；')}`] : []),
+    ...(sourceImagePaths.length ? [`可编辑原图：${sourceImagePaths.join('；')}`] : []),
     ...(enginePaths.length ? [`核心编译产物：${enginePaths.join('；')}`] : []),
     [
       '快速读取规则：先用 Canvas Prompt MCP 读取 Compact Package；不要打开浏览器画布、索取 Base64 截图，或回放原始笔迹作为第一步。只有 Compact Package 明确留下重要视觉歧义时，才查看一个本地快照。',
       '交接规则：这是一轮已经结束、不可变的富输入，不是要求用户继续操作画布。先读取 Prompt Package 与核心编译产物。',
-      '回复规则：先用 2–4 句说明“我这样理解你这一轮”的目标、结构或修改请求；明确区分观察、合理推断和待确认。随后直接继续讨论或执行用户已经表达的下一步。',
+      '回复规则：先用 2–4 句说明“我这样理解你这一轮”的目标、结构或修改请求；明确区分观察、合理推断和待确认。纯分析、讨论、查漏可以直接继续。',
+      '执行门禁：画布交接只授权理解，不授权产生实质改动。若下一步会改网站或代码、修改文件、生成或替换交付物、发送/发布，先把理解整理成可确认计划；不得在同一回复中直接执行。若当前宿主是 Codex 且原生计划模式可用，转入计划模式；否则以“我理解的修改／准备怎么做／待确认”三段简短计划复述。等待用户明确确认（如“对，按这个做”“开始改”）后才执行。',
       '不要把 package ID、事件数量、本地路径或读取步骤当作主要回复；不要要求用户手动调用 Skill、重新上传截图或回到画布来解释已经导出的内容。',
-      '若语义不足但有空间重组：报告可直接观察到的创建、移动、缩放、删除与状态帧变化；不要给对象杜撰名称或优先级。只提出一个最小澄清问题，并说明回答后你能继续做什么。',
-      '把“观察”“合理推断”“待确认”明确分开。位置、颜色、缩放、停顿只能作为弱线索，不能单独证明意图。',
+      '若语义不足但有空间重组：只报告可直接观察到的对象创建、对象移动、对象尺寸变化、删除与状态帧变化；不要给对象杜撰名称或优先级。只提出一个最小澄清问题，并说明回答后你能继续做什么。',
+      '视图缩放、平移和浏览器窗口变化只是在调整观察视角，绝不是要求放大、缩小、移动或重排画布内容；不得把它们复述为修改请求。若用户说“放大”但唯一证据是视图缩放，应先询问他要放大画布视图还是某个具体对象。',
+      '把“观察”“合理推断”“待确认”明确分开。位置、颜色、对象尺寸变化、停顿只能作为弱线索，不能单独证明意图。',
+      sourceImagePaths.length
+        ? '改图规则：本轮含有用户导入的原图。若用户要求改图，必须把“可编辑原图”作为图片编辑的参考输入，并将画布快照与标注用作修改说明；不得仅据文字重画。'
+        : '改图规则：本轮没有可编辑原图。不得声称在原图上修改；如需保持人物、构图、Logo 或细节一致，请在主对话请用户补原图。',
     ].join('\n'),
   ].join('\n')
 }
@@ -196,6 +202,7 @@ export async function handoffToMainThread({
   roundPath,
   snapshotPath,
   keyframePaths,
+  sourceImagePaths,
   engine,
   appServerCommand = undefined,
   startupTimeoutMs = HANDOFF_STARTUP_TIMEOUT_MS,
@@ -291,7 +298,7 @@ export async function handoffToMainThread({
                 // context for the receiving main conversation.
                 'canvas-prompt-handoff': {
                   kind: 'application',
-                  value: handoffMessage({ packagePath, roundPath, snapshotPath, keyframePaths, engine }),
+                  value: handoffMessage({ packagePath, roundPath, snapshotPath, keyframePaths, sourceImagePaths, engine }),
                 },
               },
             },
@@ -374,7 +381,7 @@ export async function handoffToMainThread({
       id: 1,
       method: 'initialize',
       params: {
-        clientInfo: { name: 'canvas-prompt-handoff', version: '0.1.21' },
+        clientInfo: { name: 'canvas-prompt-handoff', version: '0.1.29' },
         capabilities: { experimentalApi: true },
       },
     })
