@@ -310,6 +310,19 @@ def build_structural_observations(process_ir: dict, max_per_type: int = 6) -> di
             "assertion_level": "observation",
             "resolution_status": "unresolved",
         })
+    annotations = []
+    for item in process_ir.get("ink_annotation_candidates", [])[:max_per_type]:
+        annotations.append({
+            "mark_id": item.get("mark_id"),
+            "kind": item.get("kind"),
+            "candidate_objects": [
+                _object_locator(objects_by_id, object_id)
+                for object_id in item.get("candidate_object_ids", [])[:5]
+            ],
+            "geometry": item.get("geometry", {}),
+            "assertion_level": "observation",
+            "resolution_status": "unresolved",
+        })
     visual_units = []
     for item in process_ir.get("visual_unit_candidates", [])[:max_per_type]:
         visual_units.append({
@@ -365,6 +378,7 @@ def build_structural_observations(process_ir: dict, max_per_type: int = 6) -> di
         "handdrawn_cross_candidates": crosses,
         "handdrawn_check_candidates": checks,
         "paired_symbol_choice_candidates": paired_choices,
+        "handdrawn_annotation_candidates": annotations,
         "visual_unit_candidates": visual_units,
         "individual_layout_transforms": individual_layout_transforms,
         "batch_layout_transforms": batch_layout_transforms,
@@ -498,7 +512,7 @@ def build_compact_package(fixture_dir: Path) -> dict:
     package = {
         "meta": {
             "package_id": f"pp_compact_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
-            "version": "2.5",
+            "version": "2.6",
             "created_at": datetime.now(timezone.utc).isoformat(),
             "format": "compact_timeline_aware",
             "source_fixture": str(fixture_dir.name),
@@ -534,6 +548,7 @@ def build_compact_package(fixture_dir: Path) -> dict:
             "ink_cross_candidate_count": len(process_ir.get("ink_cross_candidates", [])),
             "ink_check_candidate_count": len(process_ir.get("ink_check_candidates", [])),
             "paired_symbol_choice_candidate_count": len(process_ir.get("paired_symbol_choice_candidates", [])),
+            "ink_annotation_candidate_count": len(process_ir.get("ink_annotation_candidates", [])),
             "visual_unit_candidate_count": len(process_ir.get("visual_unit_candidates", [])),
             "layout_transform_observation_count": len(process_ir.get("layout_transform_observations", [])),
             "review_mark_candidate_count": len(review_marks),
