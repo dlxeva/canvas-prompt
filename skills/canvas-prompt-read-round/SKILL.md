@@ -1,11 +1,32 @@
 ---
 name: canvas-prompt-read-round
-description: Read and continue from the latest exported Canvas Prompt round in the active project. Use when the user has exported a canvas session, asks what Codex saw or understood from the whiteboard, asks to continue a reasoning or image-review round, or asks to read the latest Canvas Prompt Package.
+description: Read and continue from the latest exported Canvas Prompt round in the active scope. Use when the user has exported or just ended a canvas session; asks what Codex saw or understood from the whiteboard; asks to continue a reasoning or image-review round; or, after opening or ending Canvas Prompt in this same task, asks a natural follow-up such as “你怎么看？”, “如何理解？”, “下一步呢？”, “这样行吗？” or “what do you think?”. Do not activate from an unrelated vague prompt or merely because an old project archive exists.
 ---
 
 # Canvas Prompt Read Round
 
 Read the round as project-local context, then state clearly what is observed, what is inferred, and what remains unresolved. Do not create AI content on the canvas or claim that a thought has been understood more precisely than the package supports.
+
+## Natural-follow-up trigger gate
+
+Treat a vague evaluative or continuation prompt as a request to read the canvas
+**only** when this same task already establishes both of the following:
+
+1. Canvas Prompt was opened for the task; and
+2. the user has since ended, exported, or said they completed a round.
+
+Examples include “你怎么看？”, “如何理解？”, “下一步呢？”, “这样行吗？” and
+“what do you think?”. In that state, read the latest package before answering;
+do not require the user to say “read the canvas”. After a successful read,
+treat that exported round as consumed in the current conversation: do not read
+it again for later vague prompts unless the user exports another round or
+explicitly asks to revisit it.
+
+If either condition is absent, answer the user's prompt normally. Never search
+the project's old archive to manufacture canvas context. If the host did not
+provide a conversation ID, the reader is project-scoped, not task-scoped; only
+use this natural-follow-up path when the task's own history establishes the
+just-completed round. Say so briefly if that scope limitation is material.
 
 ## Workflow
 
