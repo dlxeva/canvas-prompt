@@ -1,6 +1,6 @@
 {
   "name": "canvas-prompt",
-  "version": "0.1.13+codex.20260728093000",
+  "version": "0.1.14+codex.20260728094500",
   "description": "A local thinking canvas for Codex: draw, circle, move, and export the context behind your prompt.",
   "author": {
     "name": "Canvas Prompt",
@@ -40,6 +40,5 @@
       "Read the latest Canvas Prompt Package for this project."
     ]
   },
-  "mcpServers": "./.mcp.json",
-  "hooks": "./hooks/hooks.json"
+  "mcpServers": "./.mcp.json"
 }

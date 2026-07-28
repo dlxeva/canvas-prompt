@@ -1,39 +1,24 @@
 ---
 name: canvas-prompt-read-round
-description: Read and continue from the latest exported Canvas Prompt round in the active scope. Use when the user has exported or just ended a canvas session; asks what Codex saw or understood from the whiteboard; asks to continue a reasoning or image-review round; or, after opening or ending Canvas Prompt in this same task, asks a natural follow-up such as “你怎么看？”, “如何理解？”, “下一步呢？”, “这样行吗？” or “what do you think?”. Do not activate from an unrelated vague prompt or merely because an old project archive exists.
+description: Read and continue from the latest exported Canvas Prompt round in the active scope. The canonical continuation command is “根据画布（白板）内容推进”; invoke this skill whenever the user uses that exact command (or “根据画布内容推进” / “根据白板内容推进”), then read the latest package before responding. Also use when the user explicitly asks Codex to read, understand, or continue from an exported Canvas Prompt round. Do not activate from an unrelated vague prompt or merely because an old project archive exists.
 ---
 
 # Canvas Prompt Read Round
 
 Read the round as project-local context, then state clearly what is observed, what is inferred, and what remains unresolved. Do not create AI content on the canvas or claim that a thought has been understood more precisely than the package supports.
 
-## Natural-follow-up trigger gate
+## Canonical continuation command
 
-Treat a vague evaluative or continuation prompt as a request to read the canvas
-**only** when this same task already establishes both of the following:
+Treat **“根据画布（白板）内容推进”** as the stable handoff command. It means:
 
-1. Canvas Prompt was opened for the task; and
-2. the user has since ended, exported, or said they completed a round.
+1. Read the latest immutable Canvas Prompt package in the fixed active scope.
+2. Use the Compact Package first, then continue the user's actual work directly.
+3. Do not ask the user to repeat “读取画布”, supply a Package ID, or describe the command as merely a suggestion.
 
-Examples include “你怎么看？”, “如何理解？”, “下一步呢？”, “这样行吗？” and
-“what do you think?”. In that state, read the latest package before answering;
-do not require the user to say “read the canvas”. After a successful read,
-treat that exported round as consumed in the current conversation: do not read
-it again for later vague prompts unless the user exports another round or
-explicitly asks to revisit it.
-
-If either condition is absent, answer the user's prompt normally. Never search
-the project's old archive to manufacture canvas context. If the host did not
-provide a conversation ID, the reader is project-scoped, not task-scoped; only
-use this natural-follow-up path when the task's own history establishes the
-just-completed round. Say so briefly if that scope limitation is material.
-
-If the current developer context already contains **“Canvas Prompt continuation
-context”**, that context was attached by the Codex `UserPromptSubmit` lifecycle
-hook from the just-finished, session-bound round. Use it before answering and do
-not ask the user for a Canvas-specific phrase. It is intentionally a one-turn
-receipt: later prompts should use normal task context unless the user exports a
-new round or explicitly asks to revisit the prior one.
+Vague prompts such as “你怎么看？” remain ordinary conversation. Do not pretend
+that the local canvas can reliably bind itself to the visible Codex task without
+an explicit host-provided bridge. Never search an old project archive to
+manufacture context.
 
 ## Workflow
 

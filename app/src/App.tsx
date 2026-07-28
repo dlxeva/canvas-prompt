@@ -32,9 +32,10 @@ const tools: Array<{ id: CanvasTool; zh: string; en: string }> = [
   { id: 'ellipse', zh: '圆形', en: 'Ellipse' },
   { id: 'eraser', zh: '擦除', en: 'Erase' },
 ]
+const CANONICAL_CONTINUATION_COMMAND = '根据画布（白板）内容推进'
 
 const ui = {
-  zh: { importImage: '导入图片', importing: '正在导入…', more: '更多功能', archive: '本地档案', recording: '录音中', asrPreparing: '语音准备中', asrUnavailable: '语音不转写', finish: '结束推演', processing: '处理中', export: '整理本轮', retryExport: '重新整理本轮', sending: '正在整理…', archived: '✓ 本轮已整理，可在当前对话继续', accepted: '✓ 本轮已整理，可在当前对话继续', deliveredReceipt: '✓ 本轮已整理，可在当前对话继续', failedReceipt: '✓ 本轮已整理，可在当前对话继续', next: '开始下一轮', start: '开始推演', startVisualOnly: '不等语音，开始画', preparing: '准备中…', canvasTools: '画布工具', expandTools: '展开画布工具', collapseTools: '收起画布工具', undo: '撤销（⌘Z）', redo: '重做（⇧⌘Z）', zoomOut: '缩小', zoomIn: '放大', color: '颜色', weight: '粗细', releaseToImport: '松开以导入图片', archiveDescription: '保存在本项目的', archiveDescriptionEnd: '。不自动上传云端；删除后无法恢复。', closeArchive: '关闭本地档案', loadingArchive: '正在读取本地档案…', noArchive: '还没有已归档的推演。', seconds: '秒', unknownDuration: '时长未知', snapshot: '画布快照', noSnapshot: '无快照', audio: '录音', noAudio: '无录音', delivered: '已整理', sent: '已整理', sendFailed: '已整理', local: '已整理', delete: '删除' },
+  zh: { importImage: '导入图片', importing: '正在导入…', more: '更多功能', archive: '本地档案', recording: '录音中', asrPreparing: '语音准备中', asrUnavailable: '语音不转写', finish: '结束推演', processing: '处理中', export: '整理本轮', retryExport: '重新整理本轮', sending: '正在整理…', archived: '✓ 本轮已整理', accepted: '✓ 本轮已整理', deliveredReceipt: '✓ 本轮已整理', failedReceipt: '✓ 本轮已整理', next: '开始下一轮', start: '开始推演', startVisualOnly: '不等语音，开始画', preparing: '准备中…', canvasTools: '画布工具', expandTools: '展开画布工具', collapseTools: '收起画布工具', undo: '撤销（⌘Z）', redo: '重做（⇧⌘Z）', zoomOut: '缩小', zoomIn: '放大', color: '颜色', weight: '粗细', releaseToImport: '松开以导入图片', archiveDescription: '保存在本项目的', archiveDescriptionEnd: '。不自动上传云端；删除后无法恢复。', closeArchive: '关闭本地档案', loadingArchive: '正在读取本地档案…', noArchive: '还没有已归档的推演。', seconds: '秒', unknownDuration: '时长未知', snapshot: '画布快照', noSnapshot: '无快照', audio: '录音', noAudio: '无录音', delivered: '已整理', sent: '已整理', sendFailed: '已整理', local: '已整理', delete: '删除' },
   en: { importImage: 'Import image', importing: 'Importing…', more: 'More', archive: 'Local archive', recording: 'Recording', asrPreparing: 'Speech preparing', asrUnavailable: 'Speech not transcribed', finish: 'Finish session', processing: 'Processing', export: 'Finish this round', retryExport: 'Try again', sending: 'Finishing…', archived: '✓ Round ready · Continue in this conversation', accepted: '✓ Round ready · Continue in this conversation', deliveredReceipt: '✓ Round ready · Continue in this conversation', failedReceipt: '✓ Round ready · Continue in this conversation', next: 'Start next round', start: 'Start session', startVisualOnly: 'Start without speech', preparing: 'Preparing…', canvasTools: 'Canvas tools', expandTools: 'Expand tools', collapseTools: 'Collapse tools', undo: 'Undo (⌘Z)', redo: 'Redo (⇧⌘Z)', zoomOut: 'Zoom out', zoomIn: 'Zoom in', color: 'Color', weight: 'Weight', releaseToImport: 'Release to import image', archiveDescription: 'Stored locally in', archiveDescriptionEnd: '. Nothing is uploaded automatically; deleted rounds cannot be recovered.', closeArchive: 'Close local archive', loadingArchive: 'Loading local archive…', noArchive: 'No saved rounds yet.', seconds: 'sec', unknownDuration: 'duration unknown', snapshot: 'canvas snapshot', noSnapshot: 'no snapshot', audio: 'audio', noAudio: 'no audio', delivered: 'ready', sent: 'ready', sendFailed: 'ready', local: 'ready', delete: 'Delete' },
 } as const
 
@@ -52,7 +53,7 @@ function visibleWorkflowMessage(message: string, locale: Locale) {
     '少量语音片段需要回退补齐…': 'A few audio segments need recovery…',
     '正在整理画布和标记…': 'Compiling canvas marks…',
     '正在准备本轮上下文…': 'Preparing this round’s context…',
-    '本轮内容已整理完成。回到当前对话继续。': 'This round is ready. Continue in the current conversation.',
+    [`本轮内容已整理完成。在当前对话输入「${CANONICAL_CONTINUATION_COMMAND}」。`]: 'This round is ready. In the current conversation, enter: Continue using the canvas (whiteboard) content.',
     '本轮内容已整理完成；当前没有可用的语音转写。': 'This round is ready; no usable voice transcript is available.',
     '正在归档本轮上下文…': 'Preparing this round…',
     '本轮已整理完成。回到当前对话继续说、提问或下达下一步。': 'This round is ready. Continue in the current conversation—say, ask, or direct the next step.',
@@ -600,7 +601,7 @@ export default function App() {
         if (receipt) setHandoffReceipt(receipt)
         if (status === 'delivered' || status === 'failed') {
           setExportStatus(status)
-          setWorkflowMessage('本轮已整理完成。回到当前对话继续。')
+          setWorkflowMessage(`本轮内容已整理完成。在当前对话输入「${CANONICAL_CONTINUATION_COMMAND}」。`)
           return
         }
       } catch {
@@ -649,7 +650,7 @@ export default function App() {
       const receiptStatus = deriveExportReceiptStatus(result.handoff)
       setHandoffReceipt(result.handoff ?? null)
       setExportStatus(receiptStatus)
-      setWorkflowMessage('本轮已整理完成。回到当前对话继续。')
+      setWorkflowMessage(`本轮内容已整理完成。在当前对话输入「${CANONICAL_CONTINUATION_COMMAND}」。`)
       if (storageOpen) void loadStoredRounds()
       window.dispatchEvent(new Event('canvas-prompt-exported'))
     } catch (error) {

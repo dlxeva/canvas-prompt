@@ -4,7 +4,7 @@
 
 Canvas Prompt is a local thinking canvas for the work that happens before a clean chat prompt exists.
 
-**First public release: Codex Desktop is the supported and recommended integration.** Canvas Prompt opens a local canvas and exports an immutable round. After the one-time Codex Hook trust step, the next ordinary message in that same task receives a bounded continuation context from that exact round; MCP remains available for explicit and later reads. A project is the archive location; an explicit host-provided conversation ID is the routing key. Other MCP-capable terminals may read the portable archive, but are compatibility paths rather than promised equivalent UI or handoff experiences.
+**First public release: Codex Desktop is the supported and recommended integration.** Canvas Prompt opens a local canvas and exports an immutable round. In the current Codex Desktop integration, continue with the explicit command **“根据画布（白板）内容推进”**; Codex then reads the latest package through MCP. A project is the archive location; an explicit host-provided conversation ID is the routing key. Other MCP-capable terminals may read the portable archive, but are compatibility paths rather than promised equivalent UI or handoff experiences.
 
 Draw, circle, move, and explain. Canvas Prompt preserves the canvas state, event timeline, voice alignment, and revisions as a project-local **Prompt Package** that Codex can inspect while keeping observations, inferences, and unresolved points separate.
 
@@ -85,7 +85,7 @@ codex plugin marketplace add https://github.com/dlxeva/canvas-prompt
 codex plugin add canvas-prompt@canvas-prompt
 ```
 
-After installing or updating the plugin, open a new Codex task so the current skills and MCP tools are loaded. Codex will list the bundled `UserPromptSubmit` Hook for review; trust the Canvas Prompt Hook once. It only receives the current prompt/session metadata and, after a completed Canvas round in that same session, attaches a bounded local continuation summary to the next user turn. It does not upload the canvas or choose a different conversation.
+After installing or updating the plugin, open a new Codex task so the current skills and MCP tools are loaded. After ending a round, use the explicit continuation command **“根据画布（白板）内容推进”** in the same task. This avoids claiming an automatic thread bridge that Codex Desktop has not exposed to the plugin.
 
 ## Other AI terminals, CLI tools, and agents (compatibility path)
 
