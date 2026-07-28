@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { homedir } from 'node:os'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import test from 'node:test'
 import { resolveConversationScope, threadScopeKey } from '../app/conversation-scope.mjs'
 
@@ -16,10 +16,11 @@ test('a project conversation is stored beneath that project but isolated by a no
 
 test('a project-less conversation receives a user-private conversation archive', () => {
   const threadId = '019fa-temporary-chat-12345678'
-  const scope = resolveConversationScope({ threadId, homeDir: '/private/home' })
+  const isolatedHome = join('/private', 'home')
+  const scope = resolveConversationScope({ threadId, homeDir: isolatedHome })
   assert.equal(scope.storageKind, 'conversation')
   assert.equal(scope.projectDir, null)
-  assert.equal(scope.canvasDir, resolve('/private/home/.canvas-prompt/conversations', threadScopeKey(threadId)))
+  assert.equal(scope.canvasDir, resolve(isolatedHome, '.canvas-prompt/conversations', threadScopeKey(threadId)))
 })
 
 test('a project can keep legacy project-only storage but an anonymous conversation cannot be invented', () => {
