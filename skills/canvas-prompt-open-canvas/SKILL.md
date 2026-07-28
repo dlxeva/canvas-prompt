@@ -29,6 +29,32 @@ node bin/canvas-prompt.mjs open --host codex --project /absolute/path/to/the/act
 
 The launcher prefers `http://127.0.0.1:43223/`, reuses a healthy instance of the current plugin, removes stale Canvas Prompt servers, and otherwise selects an available local port. Read its output and open the actual reported URL; do not assume the default port.
 
+## First-launch guidance belongs in the conversation
+
+Never place onboarding text, a tutorial overlay, or a first-run modal on the
+canvas. After the first successful launch for a new installation, explain the
+basic workflow once in the main conversation:
+
+1. Click **Start session**, then draw, circle, connect, move, or speak naturally.
+2. Click **Finish session** and wait until the canvas says the round is ready.
+3. Return to the same conversation and enter the canonical continuation command.
+
+Keep the guidance short and include copyable examples in the user's locale:
+
+- Chinese:
+  - `根据画布内容推进`
+  - `根据画布内容推进，帮我看看还有哪里没考虑周全`
+  - `根据画布内容推进，把标注整理成修改方案`
+- English:
+  - `Continue with the canvas context`
+  - `Continue with the canvas context and point out what I may have missed`
+  - `Continue with the canvas context and turn the annotations into revisions`
+
+Explain that the first command is enough for normal use: Codex should infer
+whether to continue reasoning, fill gaps, or act on annotations. The longer
+examples are optional ways to make the desired outcome explicit. On later
+launches, do not repeat the guide unless the user asks how to use the product.
+
 When the host has supplied a current conversation ID, the canvas writes into
 `<active-project>/.canvas-prompt/threads/<opaque-key>/`; otherwise it uses the
 explicit project archive. After export, use `$canvas-prompt-read-round` only
