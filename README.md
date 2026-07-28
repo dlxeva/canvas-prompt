@@ -24,6 +24,33 @@ Canvas Prompt compiles the visible result **and the path that produced it**
 into a device-local Prompt Package. An AI can then distinguish what was drawn,
 what changed, what was said, and what still needs confirmation.
 
+## Try it in Codex Desktop
+
+```bash
+codex plugin marketplace add https://github.com/dlxeva/canvas-prompt
+codex plugin add canvas-prompt@canvas-prompt
+```
+
+Open a new Codex task, then:
+
+1. Ask Codex to open Canvas Prompt and start a session.
+2. Draw, paste an image, mark a region, or explain your idea aloud. Finish the
+   session when the round is complete.
+3. Back in the conversation, type **“Continue with the canvas context”**.
+
+## How one round travels
+
+```text
+your marks + material + speech
+              ↓
+       local Prompt Package
+              ↓
+the conversation you choose to continue
+```
+
+The board stays available after a round. The package is saved locally first;
+the conversation reads it only when you explicitly ask it to continue.
+
 ## What it feels like
 
 1. **Put the work on the canvas.** Sketch a structure, paste an image, circle a
@@ -182,6 +209,13 @@ node bin/canvas-prompt.mjs open --project /absolute/path/to/active-project
 ## Privacy
 
 See [PRIVACY.md](./PRIVACY.md) or [隐私说明](./PRIVACY.zh-CN.md). Do not publish `.canvas-prompt/` data or real recordings, screenshots, transcripts, or whiteboards without explicit permission.
+
+## Project resources
+
+- [Contributing](./CONTRIBUTING.md)
+- [Security policy](./SECURITY.md)
+- [Privacy](./PRIVACY.md)
+- [Third-party notices](./THIRD_PARTY_NOTICES.md)
 
 ## License
 

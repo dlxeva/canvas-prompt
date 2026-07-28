@@ -19,6 +19,31 @@
 
 你可以自然地画、圈、移动、粘贴和讲述。一轮结束时，Canvas Prompt 会把**最后的画面，以及它如何形成的过程**编译成保存在设备上的 Prompt Package。AI 读到的不只是截图；它还能区分画了什么、改了什么、说了什么，以及哪些地方仍待确认。
 
+## 在 Codex Desktop 试一次
+
+```bash
+codex plugin marketplace add https://github.com/dlxeva/canvas-prompt
+codex plugin add canvas-prompt@canvas-prompt
+```
+
+新建一个 Codex 任务，然后：
+
+1. 请 Codex 打开 Canvas Prompt，并开始一轮。
+2. 画、粘贴图片、圈出区域，或边操作边讲。完成后结束这一轮。
+3. 回到主对话，输入 **“根据画布内容推进”**。
+
+## 一轮内容如何进入对话
+
+```text
+你的笔迹 + 素材 + 讲述
+             ↓
+      本地 Prompt Package
+             ↓
+你选择继续的主对话
+```
+
+一轮结束后，画布仍保留在原处。上下文包会先保存在本机；只有你明确要求继续时，主对话才会读取它。
+
 ## 用起来是什么感觉
 
 1. **把手头的东西放进画布。** 画一个结构、粘贴图片、圈出区域、拉箭头、移动模块，或者边操作边说。
@@ -131,6 +156,13 @@ node bin/canvas-prompt.mjs open --project /当前项目的绝对路径
 ## 隐私
 
 请阅读 [隐私说明](./PRIVACY.zh-CN.md) 或 [Privacy](./PRIVACY.md)。未经明确许可，请勿公开 `.canvas-prompt/` 数据、真实录音、截图、转写或白板内容。
+
+## 项目资源
+
+- [参与贡献](./CONTRIBUTING.md)
+- [安全政策](./SECURITY.md)
+- [隐私说明](./PRIVACY.zh-CN.md)
+- [第三方声明](./THIRD_PARTY_NOTICES.md)
 
 ## 开源协议
 
