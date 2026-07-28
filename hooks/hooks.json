@@ -1,0 +1,17 @@
+{
+  "description": "Bind Canvas Prompt rounds to the current Codex session and attach one just-finished round to the next user turn.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$PLUGIN_ROOT/hooks/canvas-prompt-user-prompt.mjs\"",
+            "timeout": 3,
+            "statusMessage": "Checking Canvas Prompt continuation"
+          }
+        ]
+      }
+    ]
+  }
+}
