@@ -1,23 +1,91 @@
-# Canvas Prompt — visual context for AI workflows
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/logo-dark.svg">
+    <img src="./assets/logo.svg" width="88" alt="Canvas Prompt">
+  </picture>
+</p>
 
-[简体中文](./README.zh-CN.md) · English
+<h1 align="center">Canvas Prompt</h1>
 
-Canvas Prompt is a local thinking canvas for the work that happens before a clean chat prompt exists.
+<p align="center"><strong>Show AI what to change.</strong></p>
 
-**First public release: Codex Desktop is the supported and recommended integration.** Canvas Prompt opens one local canvas and exports immutable rounds. Continue with the explicit command **“Continue with the canvas context”**; Codex then reads the single board's latest completed package through MCP. The active project is retained as package provenance, not as a routing key. Other MCP-capable terminals may read the portable archive, but are compatibility paths rather than promised equivalent UI or handoff experiences.
+<p align="center">Say it where you mean it.</p>
 
-Draw, circle, move, and explain. Canvas Prompt preserves the canvas state, event timeline, voice alignment, and revisions as a device-local **Prompt Package** that Codex can inspect while keeping observations, inferences, and unresolved points separate.
+<p align="center">Mark · Speak · Continue</p>
 
-## Alpha scope
+<p align="center"><a href="./README.zh-CN.md">简体中文</a> · English</p>
 
-- **Reasoning rounds**: preserve how a question took shape, including branches, movement, resizing, deletion, and revision.
-- **Image review rounds**: paste or place the original image on the canvas, mark regions, and explain requested changes aloud. The annotated snapshot is the visual brief, while the unmarked original is archived separately and supplied as the edit reference. If no original was placed on the canvas, Canvas Prompt will not pretend a screenshot is an exact edit source; it asks for the original in chat when fidelity matters. When Codex produces a revised image, copy it from the conversation and press `⌘V` on the canvas to use it as the substrate for the next review round.
-- **Single-board archive**: each user has one active board. Its completed rounds live under `~/.canvas-prompt/board/`, while the original project remains package provenance. Reopening reuses the existing healthy board rather than creating another.
-- **Explicit handoff only**: Canvas Prompt saves the immutable package first. It reads the latest round only after the user explicitly enters the continuation command; the command can be used from any conversation.
-- **Plan before material action**: the continuation command authorizes an AI to understand the canvas, not to immediately change a website or file, generate or replace a deliverable, send, or publish. Analysis can continue directly; material work first enters Codex Plan mode when available, or presents an equivalent chat plan for confirmation.
-- **Evidence boundary**: retain observable canvas and speech evidence without presenting inferred intent as a direct fact.
+Some work happens before a clean chat prompt exists: a rough sketch, an image
+with two circled details, a sentence that changes halfway through, a cursor
+resting on the thing you mean. Canvas Prompt gives that work a local canvas.
 
-This alpha does not include in-canvas AI generation, automated teaching, BoardScript write-back, or PDF/PPT review. OCR exists as an isolated research path and is not enabled in the main app flow.
+Draw, circle, move, paste, and explain naturally. At the end of a round,
+Canvas Prompt compiles the visible result **and the path that produced it**
+into a device-local Prompt Package. An AI can then distinguish what was drawn,
+what changed, what was said, and what still needs confirmation.
+
+## What it feels like
+
+1. **Put the work on the canvas.** Sketch a structure, paste an image, circle a
+   region, draw an arrow, move a block, or just talk while you work.
+2. **Finish the round.** The canvas keeps your work in place and saves an
+   immutable record of that round. It never silently clears the board.
+3. **Continue in the conversation you choose.** In Codex Desktop, type
+   **“Continue with the canvas context”**. Codex reads the latest completed
+   round from your single local board, then responds to the work rather than a
+   hand-written summary of it.
+
+## Two useful starting points
+
+### Think through a problem before you can phrase it
+
+Make a rough structure, branch an idea, cross something out, move a part, and
+say what changed your mind. The package carries the final canvas together with
+the time-ordered evidence behind it, so the conversation can start with a
+grounded reading instead of asking you to reconstruct the whole thought.
+
+### Review an image without translating every mark into prose
+
+Paste the original image, circle the parts that matter, and explain only what
+you want changed. The annotated snapshot becomes the visual brief; the
+unmarked original is retained separately as the edit reference. If no original
+was placed on the canvas, Canvas Prompt asks for it in chat when exact visual
+fidelity matters instead of treating a small screenshot as the source file.
+
+When Codex produces a revised image, copy it from the conversation and press
+`⌘V` on the canvas to make it the substrate for the next review round.
+
+## What the AI receives
+
+- the final canvas snapshot and the objects still on it;
+- the process timeline: drawing, moving, resizing, deletion, and revision;
+- speech aligned with the relevant moment when local transcription is ready;
+- visual references such as circles, arrows, crossings, and pointer dwell;
+- a separation between direct observations, inferred intent, and unresolved
+  points.
+
+Canvas Prompt preserves evidence. It does not turn an ambiguous mark or a
+single pronoun into a fake certainty.
+
+## Continue safely
+
+The continuation command authorizes an AI to **understand** the canvas. It does
+not authorize it to immediately change a website or file, generate or replace
+a deliverable, send, delete, or publish. Discussion can continue directly. For
+material work, Codex enters Plan mode when available, or presents an equivalent
+chat plan with its reading, proposed actions, and open questions for your
+confirmation.
+
+## v0.1 focus and boundary
+
+**Codex Desktop is the supported, recommended integration for the first public
+release.** It opens one local canvas and reads the latest completed package
+through MCP after the explicit continuation command. Project and conversation
+metadata are retained as provenance; they are not routing keys.
+
+Other MCP-capable terminals can read the portable local archive, but they are
+compatibility paths. v0.1 does not promise their native side panel, automatic
+chat injection, or equivalent handoff experience.
 
 Existing users can explicitly copy a legacy project archive into the active
 board. This command never scans or deletes a source archive, and stops if a
