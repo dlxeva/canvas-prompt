@@ -10,7 +10,7 @@ VALIDATORS_DIR = MODULE_DIR.parent / "validators"
 if str(VALIDATORS_DIR) not in sys.path:
     sys.path.insert(0, str(VALIDATORS_DIR))
 from build_compact_package import build_structural_observations
-from process_ir import _arrowhead_candidates, _ink_check_candidates, _ink_circle_candidates, _ink_cross_candidates, _layout_transform_observations, _paired_symbol_choice_candidates, _reference_candidates
+from process_ir import _arrowhead_candidates, _ink_annotation_candidates, _ink_check_candidates, _ink_circle_candidates, _ink_cross_candidates, _layout_transform_observations, _paired_symbol_choice_candidates, _reference_candidates
 from process_ir import compile_process_ir
 from validate_process_ir import validate_process_ir
 
@@ -75,8 +75,8 @@ class LayoutTransformObservationTests(unittest.TestCase):
     def test_circle_contract_is_versioned_without_rejecting_legacy_v04(self):
         package = {"meta": {"package_id": "pp_circle"}, "strokes": []}
         current = compile_process_ir(package, [], [], [])
-        self.assertEqual("process-ir-v0.7", current["schema_version"])
-        self.assertEqual("process-ir-compiler-v0.6", current["source"]["compiler_version"])
+        self.assertEqual("process-ir-v0.8", current["schema_version"])
+        self.assertEqual("process-ir-compiler-v0.7", current["source"]["compiler_version"])
         self.assertEqual([], validate_process_ir(current))
 
         legacy = deepcopy(current)
@@ -85,6 +85,7 @@ class LayoutTransformObservationTests(unittest.TestCase):
         legacy.pop("ink_cross_candidates")
         legacy.pop("ink_check_candidates")
         legacy.pop("paired_symbol_choice_candidates")
+        legacy.pop("ink_annotation_candidates")
         self.assertEqual([], validate_process_ir(legacy))
 
     def test_pairs_x_and_checklike_strokes_on_peer_objects_without_executing_them(self):
@@ -130,6 +131,32 @@ class LayoutTransformObservationTests(unittest.TestCase):
         self.assertEqual(["tip"], candidates[0]["support_stroke_ids"])
         self.assertEqual("path_start_to_path_end", candidates[0]["candidate_visual_direction"])
         self.assertEqual("continuous_v", candidates[0]["geometry"]["construction"])
+
+    def test_records_target_bound_strike_underline_plus_caret_and_scribble_shapes(self):
+        package = {"strokes": [
+            {"stroke_id": "strike", "points": [{"x": 0, "y": 50}, {"x": 100, "y": 50}]},
+            {"stroke_id": "underline", "points": [{"x": 140, "y": 104}, {"x": 240, "y": 104}]},
+            {"stroke_id": "plus_h", "points": [{"x": 270, "y": 50}, {"x": 350, "y": 50}]},
+            {"stroke_id": "plus_v", "points": [{"x": 310, "y": 10}, {"x": 310, "y": 90}]},
+            {"stroke_id": "caret", "points": [{"x": 390, "y": 80}, {"x": 420, "y": 35}, {"x": 450, "y": 80}]},
+            {"stroke_id": "scribble", "points": [{"x": 500, "y": 20}, {"x": 560, "y": 80}, {"x": 500, "y": 80}, {"x": 560, "y": 20}, {"x": 500, "y": 50}, {"x": 560, "y": 50}, {"x": 550, "y": 40}]},
+        ]}
+        objects = [
+            {"object_id": "obj_strike", "bounds": {"x": 0, "y": 20, "width": 100, "height": 60}},
+            {"object_id": "obj_underline", "bounds": {"x": 140, "y": 40, "width": 100, "height": 60}},
+            {"object_id": "obj_plus", "bounds": {"x": 270, "y": 10, "width": 80, "height": 80}},
+            {"object_id": "obj_caret", "bounds": {"x": 390, "y": 35, "width": 60, "height": 60}},
+            {"object_id": "obj_scribble", "bounds": {"x": 500, "y": 20, "width": 60, "height": 60}},
+        ]
+
+        candidates = _ink_annotation_candidates(package, objects, [])
+        observed = {(item["kind"], tuple(item["candidate_object_ids"])) for item in candidates}
+
+        self.assertIn(("strikethrough_like", ("obj_strike",)), observed)
+        self.assertIn(("underline_like", ("obj_underline",)), observed)
+        self.assertIn(("plus_like", ("obj_plus",)), observed)
+        self.assertIn(("caret_like", ("obj_caret",)), observed)
+        self.assertIn(("scribble_like", ("obj_scribble",)), observed)
 
     def test_reference_candidates_keep_ordered_pointer_dwell_evidence(self):
         captions = [{"caption_id": "seg_001", "start_ms": 1_000, "end_ms": 4_000, "text": "这里和这里只能留一个"}]

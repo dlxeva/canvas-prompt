@@ -40,11 +40,13 @@ def validate_process_ir(data: Any) -> list[str]:
         required_fields.add("ink_circle_candidates")
     if schema_version in {"process-ir-v0.6", "process-ir-v0.7"}:
         required_fields.add("ink_cross_candidates")
-    if schema_version == "process-ir-v0.7":
+    if schema_version in {"process-ir-v0.7", "process-ir-v0.8"}:
         required_fields.add("ink_check_candidates")
         required_fields.add("paired_symbol_choice_candidates")
+    if schema_version == "process-ir-v0.8":
+        required_fields.add("ink_annotation_candidates")
     errors = [f"Missing required field: {field}" for field in sorted(required_fields - set(data))]
-    if schema_version not in {"process-ir-v0.3", "process-ir-v0.4", "process-ir-v0.5", "process-ir-v0.6", "process-ir-v0.7"}:
+    if schema_version not in {"process-ir-v0.3", "process-ir-v0.4", "process-ir-v0.5", "process-ir-v0.6", "process-ir-v0.7", "process-ir-v0.8"}:
         errors.append("Unsupported or missing schema_version.")
     for field in (
         "speech_anchors", "canvas_actions", "objects", "spatial_relations",
@@ -62,6 +64,8 @@ def validate_process_ir(data: Any) -> list[str]:
         errors.append("ink_check_candidates must be a list.")
     if "paired_symbol_choice_candidates" in data and not isinstance(data["paired_symbol_choice_candidates"], list):
         errors.append("paired_symbol_choice_candidates must be a list.")
+    if "ink_annotation_candidates" in data and not isinstance(data["ink_annotation_candidates"], list):
+        errors.append("ink_annotation_candidates must be a list.")
     if "quality" in data and not isinstance(data["quality"], dict):
         errors.append("quality must be an object.")
     if "source" in data and not isinstance(data["source"], dict):
@@ -142,6 +146,18 @@ def validate_process_ir(data: Any) -> list[str]:
             errors.append("Paired-symbol choices require the x_vs_check convention.")
         elif not mapping.get("negative_object_id") or not mapping.get("positive_object_id") or mapping["negative_object_id"] == mapping["positive_object_id"]:
             errors.append("Paired-symbol choices require two distinct object candidates.")
+    supported_annotation_kinds = {"enclosure_like", "strikethrough_like", "underline_like", "plus_like", "caret_like", "bracket_like", "question_like", "scribble_like"}
+    for item in data.get("ink_annotation_candidates", []):
+        if item.get("assertion_level") != "observation" or item.get("resolution_status") != "unresolved":
+            errors.append("Hand-drawn annotation candidates must be unresolved observations.")
+        if item.get("kind") not in supported_annotation_kinds:
+            errors.append("Unsupported hand-drawn annotation candidate kind.")
+        stroke_ids = item.get("stroke_ids")
+        if not isinstance(stroke_ids, list) or not stroke_ids or any(not isinstance(value, str) or not value for value in stroke_ids):
+            errors.append("Hand-drawn annotation candidates require source stroke IDs.")
+        object_ids = item.get("candidate_object_ids")
+        if not isinstance(object_ids, list) or not object_ids or any(not isinstance(value, str) or not value for value in object_ids):
+            errors.append("Hand-drawn annotation candidates require candidate object IDs.")
     for item in data.get("ink_arrowhead_candidates", []):
         if item.get("assertion_level") != "observation" or item.get("resolution_status") != "unresolved":
             errors.append("Hand-drawn arrowhead candidates must be unresolved observations.")

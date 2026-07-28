@@ -24,14 +24,15 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by adapter import mo
 # causal edge or semantic relation.
 # Raw Prompt Packages remain the source of truth, so historical packages are
 # recompiled rather than mutating persisted IR snapshots in place.
-SCHEMA_VERSION = "process-ir-v0.7"
-COMPILER_VERSION = "process-ir-compiler-v0.6"
+SCHEMA_VERSION = "process-ir-v0.8"
+COMPILER_VERSION = "process-ir-compiler-v0.7"
 MAX_SPATIAL_RELATIONS = 300
 MAX_INK_RELATION_CANDIDATES = 100
 MAX_INK_CIRCLE_CANDIDATES = 100
 MAX_INK_ARROWHEAD_CANDIDATES = 100
 MAX_INK_CROSS_CANDIDATES = 100
 MAX_INK_CHECK_CANDIDATES = 100
+MAX_INK_ANNOTATION_CANDIDATES = 160
 MAX_VISUAL_UNIT_MEMBERS = 12
 TRANSFORM_SESSION_GAP_MS = 250
 TRANSFORM_CREATION_GRACE_MS = 1_500
@@ -898,6 +899,224 @@ def _paired_symbol_choice_candidates(
     return candidates
 
 
+def _ink_annotation_candidates(
+    package: dict[str, Any], objects: list[dict[str, Any]], circles: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Extract conservative, object-bound board annotation shapes.
+
+    These are deliberately visual candidates: a line through an object may be
+    a strike-through, an underline, or a layout rule; a caret may be writing.
+    Consumers receive shape and target evidence, never an automatic mutation.
+    """
+    indexed = [(obj, _rect(obj)) for obj in objects]
+    indexed = [(obj, rect) for obj, rect in indexed if obj.get("object_id") and rect]
+    strokes: list[tuple[str, list[tuple[float, float]]]] = []
+    for stroke in package.get("strokes") or []:
+        if not isinstance(stroke, dict) or not isinstance(stroke.get("stroke_id"), str):
+            continue
+        points = [point for point in (_point(raw) for raw in stroke.get("points") or []) if point]
+        if len(points) >= 2:
+            strokes.append((stroke["stroke_id"], points))
+
+    candidates: list[dict[str, Any]] = []
+    def emit(kind: str, stroke_ids: list[str], object_ids: list[str], geometry: dict[str, Any], constraint: str) -> None:
+        if not object_ids or len(candidates) >= MAX_INK_ANNOTATION_CANDIDATES:
+            return
+        candidates.append({
+            "mark_id": f"ink_mark_{len(candidates) + 1:03d}",
+            "kind": kind,
+            "stroke_ids": stroke_ids,
+            "candidate_object_ids": object_ids[:5],
+            "geometry": geometry,
+            "resolution_status": "unresolved",
+            "assertion_level": "observation",
+            "constraint": constraint,
+        })
+
+    # Closed loops are enclosure candidates whether they look circular, boxed,
+    # or lasso-like. The existing circle detector supplies the target evidence.
+    for circle in circles:
+        emit(
+            "enclosure_like", [circle.get("stroke_id", "")], circle.get("candidate_object_ids") or [],
+            circle.get("geometry") or {},
+            "enclosure_geometry_does_not_establish_selection_or_grouping_intent",
+        )
+
+    straight: list[tuple[str, tuple[float, float], tuple[float, float], float, float]] = []
+    for stroke_id, points in strokes:
+        start, end = points[0], points[-1]
+        direct = ((end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2) ** 0.5
+        path = _path_length(points)
+        if direct >= 24 and path > 0 and path / direct <= 1.35:
+            straight.append((stroke_id, start, end, direct, path / direct))
+
+    for stroke_id, start, end, direct, ratio in straight:
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        # A nearly horizontal stroke gets a distinct target-relative reading.
+        if abs(dy) <= direct * 0.3:
+            for obj, rect in indexed:
+                object_id = obj.get("object_id")
+                if stroke_id in (obj.get("source_strokes") or []):
+                    continue
+                x, y, width, height = rect
+                if width < 24 or height < 10 or min(start[0], end[0]) > x + width * 0.3 or max(start[0], end[0]) < x + width * 0.7:
+                    continue
+                mid_x = x + width / 2
+                t = 0.5 if abs(dx) < 1e-6 else (mid_x - start[0]) / dx
+                if not 0 <= t <= 1:
+                    continue
+                line_y = start[1] + t * dy
+                relative_y = (line_y - y) / height
+                geometry = {"relative_y": round(relative_y, 3), "path_to_direct_ratio": round(ratio, 3)}
+                if 0.24 <= relative_y <= 0.76:
+                    emit("strikethrough_like", [stroke_id], [object_id], geometry, "strikethrough_geometry_does_not_establish_removal_without_other_evidence")
+                elif 0.86 <= relative_y <= 1.22:
+                    emit("underline_like", [stroke_id], [object_id], geometry, "underline_geometry_does_not_establish_emphasis_without_other_evidence")
+
+    # Plus-like pairs are distinguished from X-like pairs by horizontal and
+    # vertical arms. Their semantics remain deliberately unspecified.
+    for left_index, (left_id, left_start, left_end, left_length, _) in enumerate(straight):
+        left_dx, left_dy = left_end[0] - left_start[0], left_end[1] - left_start[1]
+        for right_id, right_start, right_end, right_length, _ in straight[left_index + 1:]:
+            intersection = _segment_intersection(left_start, left_end, right_start, right_end)
+            if not intersection:
+                continue
+            right_dx, right_dy = right_end[0] - right_start[0], right_end[1] - right_start[1]
+            horizontal_vertical = (
+                abs(left_dy) <= left_length * 0.3 and abs(right_dx) <= right_length * 0.3
+            ) or (
+                abs(right_dy) <= right_length * 0.3 and abs(left_dx) <= left_length * 0.3
+            )
+            if not horizontal_vertical:
+                continue
+            ix, iy, _, _ = intersection
+            targets = []
+            for obj, rect in indexed:
+                if {left_id, right_id}.intersection(obj.get("source_strokes") or []):
+                    continue
+                x, y, width, height = rect
+                if x <= ix <= x + width and y <= iy <= y + height:
+                    targets.append((width * height, obj.get("object_id")))
+            targets.sort(key=lambda item: (item[0], item[1]))
+            emit("plus_like", [left_id, right_id], [object_id for _, object_id in targets], {"intersection": {"x": round(ix, 2), "y": round(iy, 2)}}, "plus_geometry_does_not_establish_addition_without_other_evidence")
+
+    # A caret is a single V with its pivot above both ends, commonly used near
+    # an insertion point. It is intentionally separate from the check-like V.
+    for stroke_id, points in strokes:
+        if len(points) < 3:
+            continue
+        pivot_index = min(range(1, len(points) - 1), key=lambda index: points[index][1])
+        pivot = points[pivot_index]
+        start, end = points[0], points[-1]
+        left = (start[0] - pivot[0], start[1] - pivot[1])
+        right = (end[0] - pivot[0], end[1] - pivot[1])
+        if min(left[1], right[1]) < 8 or abs(left[0]) < 6 or abs(right[0]) < 6:
+            continue
+        if not 0.12 <= pivot_index / (len(points) - 1) <= 0.88:
+            continue
+        targets = []
+        for obj, rect in indexed:
+            if stroke_id in (obj.get("source_strokes") or []):
+                continue
+            x, y, width, height = rect
+            if x - 24 <= pivot[0] <= x + width + 24 and y - 24 <= pivot[1] <= y + height + 24:
+                targets.append((width * height, obj.get("object_id")))
+        targets.sort(key=lambda item: (item[0], item[1]))
+        emit("caret_like", [stroke_id], [object_id for _, object_id in targets], {"pivot": {"x": round(pivot[0], 2), "y": round(pivot[1], 2)}}, "caret_geometry_does_not_establish_insertion_without_other_evidence")
+
+    # A bracket-like stroke hugs one side of an object without closing around
+    # it. This is useful for grouping or commenting, but never proves either.
+    for stroke_id, points in strokes:
+        if len(points) < 3:
+            continue
+        min_x, max_x = min(point[0] for point in points), max(point[0] for point in points)
+        min_y, max_y = min(point[1] for point in points), max(point[1] for point in points)
+        mark_width, mark_height = max_x - min_x, max_y - min_y
+        path = _path_length(points)
+        direct = ((points[-1][0] - points[0][0]) ** 2 + (points[-1][1] - points[0][1]) ** 2) ** 0.5
+        if mark_height < 28 or mark_width <= 0 or mark_height / mark_width < 1.4 or direct <= 0 or path / direct < 1.15:
+            continue
+        targets = []
+        for obj, rect in indexed:
+            if stroke_id in (obj.get("source_strokes") or []):
+                continue
+            x, y, width, height = rect
+            vertical_overlap = max(0.0, min(max_y, y + height) - max(min_y, y)) / height if height else 0
+            near_left = abs((min_x + max_x) / 2 - x) <= width * 0.32
+            near_right = abs((min_x + max_x) / 2 - (x + width)) <= width * 0.32
+            if vertical_overlap >= 0.6 and (near_left or near_right):
+                targets.append((width * height, obj.get("object_id")))
+        targets.sort(key=lambda item: (item[0], item[1]))
+        emit("bracket_like", [stroke_id], [object_id for _, object_id in targets], {"bounds": {"x": round(min_x, 2), "y": round(min_y, 2), "width": round(mark_width, 2), "height": round(mark_height, 2)}}, "bracket_geometry_does_not_establish_grouping_or_comment_scope_without_other_evidence")
+
+    # A question mark normally consists of a hook and a separated dot. We only
+    # record the pair when their relative layout is unambiguous; handwriting
+    # recognition remains the final arbiter for literal text.
+    short_strokes = []
+    for stroke_id, points in strokes:
+        path = _path_length(points)
+        min_x, max_x = min(point[0] for point in points), max(point[0] for point in points)
+        min_y, max_y = min(point[1] for point in points), max(point[1] for point in points)
+        if path <= 18 and max(max_x - min_x, max_y - min_y) <= 12:
+            short_strokes.append((stroke_id, (min_x + max_x) / 2, (min_y + max_y) / 2))
+    for hook_id, hook in strokes:
+        if len(hook) < 3:
+            continue
+        min_x, max_x = min(point[0] for point in hook), max(point[0] for point in hook)
+        min_y, max_y = min(point[1] for point in hook), max(point[1] for point in hook)
+        if max_x - min_x < 12 or max_y - min_y < 20 or _path_length(hook) < 28:
+            continue
+        for dot_id, dot_x, dot_y in short_strokes:
+            if dot_id == hook_id or not (min_x - 16 <= dot_x <= max_x + 16 and max_y + 4 <= dot_y <= max_y + 42):
+                continue
+            targets = []
+            for obj, rect in indexed:
+                if {hook_id, dot_id}.intersection(obj.get("source_strokes") or []):
+                    continue
+                x, y, width, height = rect
+                if x - 48 <= dot_x <= x + width + 48 and y - 48 <= (min_y + dot_y) / 2 <= y + height + 48:
+                    targets.append((width * height, obj.get("object_id")))
+            targets.sort(key=lambda item: (item[0], item[1]))
+            emit("question_like", [hook_id, dot_id], [object_id for _, object_id in targets], {"hook_bounds": {"x": round(min_x, 2), "y": round(min_y, 2), "width": round(max_x - min_x, 2), "height": round(max_y - min_y, 2)}}, "question_geometry_does_not_establish_uncertainty_without_other_evidence")
+
+    # Dense self-crossing ink over an object is often a scribble/cross-out.
+    for stroke_id, points in strokes:
+        if len(points) < 7:
+            continue
+        direct = ((points[-1][0] - points[0][0]) ** 2 + (points[-1][1] - points[0][1]) ** 2) ** 0.5
+        path = _path_length(points)
+        if direct <= 0 or path / direct < 2.4:
+            continue
+        intersections = 0
+        for index in range(len(points) - 1):
+            for other in range(index + 3, len(points) - 1):
+                if _segment_intersection(points[index], points[index + 1], points[other], points[other + 1]):
+                    intersections += 1
+        turns = 0
+        for previous, current, following in zip(points, points[1:], points[2:]):
+            first = (current[0] - previous[0], current[1] - previous[1])
+            second = (following[0] - current[0], following[1] - current[1])
+            first_length = (first[0] ** 2 + first[1] ** 2) ** 0.5
+            second_length = (second[0] ** 2 + second[1] ** 2) ** 0.5
+            if first_length and second_length and (first[0] * second[0] + first[1] * second[1]) / (first_length * second_length) < 0.45:
+                turns += 1
+        if intersections < 2 and turns < 2:
+            continue
+        min_x, max_x = min(point[0] for point in points), max(point[0] for point in points)
+        min_y, max_y = min(point[1] for point in points), max(point[1] for point in points)
+        targets = []
+        for obj, rect in indexed:
+            if stroke_id in (obj.get("source_strokes") or []):
+                continue
+            x, y, width, height = rect
+            center_x, center_y = x + width / 2, y + height / 2
+            if min_x <= center_x <= max_x and min_y <= center_y <= max_y:
+                targets.append((width * height, obj.get("object_id")))
+        targets.sort(key=lambda item: (item[0], item[1]))
+        emit("scribble_like", [stroke_id], [object_id for _, object_id in targets], {"self_intersection_count": intersections, "sharp_turn_count": turns}, "scribble_geometry_does_not_establish_removal_without_other_evidence")
+    return candidates
+
+
 def _arrowhead_candidates(
     package: dict[str, Any], relation_candidates: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -1140,6 +1359,7 @@ def compile_process_ir(
     ink_cross_candidates = _ink_cross_candidates(package, objects)
     ink_check_candidates = _ink_check_candidates(package, objects)
     paired_symbol_choice_candidates = _paired_symbol_choice_candidates(ink_cross_candidates, ink_check_candidates, objects)
+    ink_annotation_candidates = _ink_annotation_candidates(package, objects, ink_circle_candidates)
     layout_transform_observations = _layout_transform_observations(package, objects)
     review_mark_candidates = _review_mark_candidates(package, captions)
     view_transform_observations = _view_transform_observations(package)
@@ -1196,6 +1416,7 @@ def compile_process_ir(
         "ink_cross_candidates": ink_cross_candidates,
         "ink_check_candidates": ink_check_candidates,
         "paired_symbol_choice_candidates": paired_symbol_choice_candidates,
+        "ink_annotation_candidates": ink_annotation_candidates,
         "visual_unit_candidates": visual_unit_candidates,
         "layout_transform_observations": layout_transform_observations,
         "review_mark_candidates": review_mark_candidates,
@@ -1230,6 +1451,7 @@ def compile_process_ir(
             "ink_cross_candidate_count": len(ink_cross_candidates),
             "ink_check_candidate_count": len(ink_check_candidates),
             "paired_symbol_choice_candidate_count": len(paired_symbol_choice_candidates),
+            "ink_annotation_candidate_count": len(ink_annotation_candidates),
             "visual_unit_candidate_count": len(visual_unit_candidates),
             "layout_transform_observation_count": len(layout_transform_observations),
             "review_mark_candidate_count": len(review_mark_candidates),
