@@ -29,6 +29,15 @@ node bin/canvas-prompt.mjs open --host codex --project /absolute/path/to/the/act
 
 The launcher prefers `http://127.0.0.1:43223/`, reuses a healthy instance of the current plugin, removes stale Canvas Prompt servers, and otherwise selects an available local port. Read its output and open the actual reported URL; do not assume the default port.
 
+## Launch reply
+
+For a normal successful launch, keep the user-facing status to the outcome:
+`Canvas Prompt 已打开：<actual URL>` in Chinese, or `Canvas Prompt is open: <actual URL>` in English.
+Do not volunteer that local speech transcription, ASR, or a model is ready.
+Those are internal readiness gates, not a user task. Explain their status only
+when the user asks, startup is delayed or fails, or the user explicitly starts
+a visual-only session.
+
 ## First-launch guidance belongs in the conversation
 
 Never place onboarding text, a tutorial overlay, or a first-run modal on the
