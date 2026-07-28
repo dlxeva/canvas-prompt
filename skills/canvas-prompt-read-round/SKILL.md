@@ -1,6 +1,6 @@
 ---
 name: canvas-prompt-read-round
-description: Read and continue from the latest exported Canvas Prompt round in the active scope. The canonical continuation command is “根据画布（白板）内容推进”; invoke this skill whenever the user uses that exact command (or “根据画布内容推进” / “根据白板内容推进”), then read the latest package before responding. Also use when the user explicitly asks Codex to read, understand, or continue from an exported Canvas Prompt round. Do not activate from an unrelated vague prompt or merely because an old project archive exists.
+description: Read and continue from the latest exported Canvas Prompt round in the active scope. The canonical continuation commands are “根据画布内容推进” and “Continue with the canvas context”; invoke this skill whenever the user uses either command, then read the latest package before responding. Treat legacy “根据白板内容推进” as a compatible alias. Also use when the user explicitly asks Codex to read, understand, or continue from an exported Canvas Prompt round. Do not activate from an unrelated vague prompt or merely because an old project archive exists.
 ---
 
 # Canvas Prompt Read Round
@@ -9,7 +9,8 @@ Read the round as project-local context, then state clearly what is observed, wh
 
 ## Canonical continuation command
 
-Treat **“根据画布（白板）内容推进”** as the stable handoff command. It means:
+Treat **“根据画布内容推进”** and **“Continue with the canvas context”** as the
+stable handoff commands. It means:
 
 1. Read the latest immutable Canvas Prompt package in the fixed active scope.
 2. Use the Compact Package first, then continue the user's actual work directly.
@@ -24,6 +25,9 @@ Vague prompts such as “你怎么看？” remain ordinary conversation. Do not
 that the local canvas can reliably bind itself to the visible Codex task without
 an explicit host-provided bridge. Never search an old project archive to
 manufacture context.
+
+The legacy command **“根据白板内容推进”** remains a compatible alias, but is not
+shown as the primary product wording.
 
 ## Workflow
 
