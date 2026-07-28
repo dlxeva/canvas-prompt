@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { existsSync } from 'node:fs'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -40,6 +41,27 @@ const mcpConfig = (project, boundThreadId = null) => ({
 // cache so an installed ASR environment and model can be reused across plugin
 // versions without touching a user's global Python environment.
 const runtimeDir = () => resolve(process.env.CANVAS_PROMPT_RUNTIME_DIR ?? resolve(homedir(), '.canvas-prompt', 'runtime'))
+// This is a user interaction preference, not project or conversation state.
+// Keep it outside project archives so "do not show this again" means the same
+// thing when a person opens Canvas Prompt from another project.
+const preferencesPath = () => resolve(process.env.CANVAS_PROMPT_PREFERENCES_PATH ?? resolve(homedir(), '.canvas-prompt', 'preferences.json'))
+const defaultPreferences = () => ({ schema_version: 1, show_launch_guidance: true })
+const readPreferences = async () => {
+  try {
+    const candidate = JSON.parse(await readFile(preferencesPath(), 'utf8'))
+    return {
+      schema_version: 1,
+      show_launch_guidance: candidate?.show_launch_guidance !== false,
+    }
+  } catch {
+    return defaultPreferences()
+  }
+}
+const writePreferences = async (preferences) => {
+  const path = preferencesPath()
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, `${JSON.stringify(preferences, null, 2)}\n`, 'utf8')
+}
 const asrUrl = (environment = process.env) => environment.CANVAS_PROMPT_ASR_URL ?? `http://127.0.0.1:${environment.CANVAS_PROMPT_ASR_PORT ?? '8080'}`
 const runtimeEnvironment = (overrides = {}) => ({ ...process.env, ...overrides, CANVAS_PROMPT_RUNTIME_DIR: runtimeDir() })
 const runBootstrap = (mode) => spawnSync('bash', [resolve(rootDir, 'scripts', 'bootstrap-runtime.sh'), mode], { stdio: 'inherit', env: runtimeEnvironment() })
@@ -107,6 +129,7 @@ Usage:
   canvas-prompt open [--project <dir>] [--thread-id <id>] [--conversation-only] [--host codex|local]
   canvas-prompt init [--project <dir>] [--thread-id <id>] [--conversation-only]
   canvas-prompt doctor [--project <dir>] [--thread-id <id>] [--conversation-only]
+  canvas-prompt preferences [--guidance on|off]
 
 setup installs Canvas Prompt-managed dependencies into its local runtime and
 reuses validated existing dependencies. The local ASR model downloads on first
@@ -115,6 +138,16 @@ project history. init prints the fixed-scope MCP configuration.`)
 
 try {
   if (command === 'help' || command === '--help' || command === '-h') help()
+  else if (command === 'preferences') {
+    const guidance = flag('--guidance')
+    if (guidance && guidance !== 'on' && guidance !== 'off') throw new Error('preferences --guidance must be on or off.')
+    const preferences = await readPreferences()
+    if (guidance) {
+      preferences.show_launch_guidance = guidance === 'on'
+      await writePreferences(preferences)
+    }
+    console.log(JSON.stringify(preferences, null, 2))
+  }
   else {
     const project = projectDir()
     const boundThreadId = threadId()

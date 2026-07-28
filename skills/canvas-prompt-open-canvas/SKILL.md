@@ -38,11 +38,19 @@ Those are internal readiness gates, not a user task. Explain their status only
 when the user asks, startup is delayed or fails, or the user explicitly starts
 a visual-only session.
 
-## First-launch guidance belongs in the conversation
+## Launch guidance belongs in the conversation
 
 Never place onboarding text, a tutorial overlay, or a first-run modal on the
-canvas. After the first successful launch for a new installation, explain the
-basic workflow once in the main conversation:
+canvas. By default, give this compact workflow guidance in the main
+conversation after **every** successful launch. Before opening, read the
+user-level preference:
+
+```bash
+node bin/canvas-prompt.mjs preferences
+```
+
+If `show_launch_guidance` is `true`, append the following compact guidance to
+the normal launch reply in the user's locale:
 
 1. Click **Start session**, then draw, circle, connect, move, or speak naturally.
 2. Click **Finish session** and wait until the canvas says the round is ready.
@@ -70,8 +78,19 @@ conversation guidance:
 - English: `If Codex generates a revised image in chat, copy it, return to the canvas, press ⌘V to paste it, and continue annotating in a new round.`
 
 This is a continuation of the image-review workflow, not a separate mode the
-user must select. On later launches, do not repeat the guide unless the user
-asks how to use the product.
+user must select. End the Chinese guide with: `不想每次看到这段说明，可以直接说“以后不再提示画布使用说明”。`
+End the English guide with: `Say “Do not show Canvas Prompt guidance again” to hide this on future launches.`
+
+When the user asks in natural language to stop showing this guidance, run:
+
+```bash
+node bin/canvas-prompt.mjs preferences --guidance off
+```
+
+Confirm that future launches will only report the opened canvas and URL. When
+the user asks to restore or resume the guidance, run the same command with
+`--guidance on`. If the preference is off, do not show the workflow guide on
+later launches unless the user asks how to use the product.
 
 When the host has supplied a current conversation ID, the canvas writes into
 `<active-project>/.canvas-prompt/threads/<opaque-key>/`; otherwise it uses the
