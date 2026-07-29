@@ -7,6 +7,14 @@
 
 <h1 align="center">Canvas Prompt</h1>
 
+<p align="center">
+  <a href="https://github.com/dlxeva/canvas-prompt/blob/main/.codex-plugin/plugin.json"><img src="https://img.shields.io/badge/release-v0.1.30-C8462B" alt="发布版本 v0.1.30"></a>
+  <a href="https://github.com/dlxeva/canvas-prompt/actions/workflows/verify.yml"><img src="https://github.com/dlxeva/canvas-prompt/actions/workflows/verify.yml/badge.svg?branch=main" alt="持续集成状态"></a>
+  <img src="https://img.shields.io/badge/runtime-local--first-3A7D44" alt="本地优先运行时">
+  <img src="https://img.shields.io/badge/verified-macOS%20arm64-147E9E" alt="已验证 macOS arm64">
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-7A5195" alt="AGPL-3.0-or-later 许可证">
+</p>
+
 <p align="center"><strong>让 AI 看见该改哪里。</strong></p>
 
 <p align="center">在你指向的地方，说出你的意思。</p>

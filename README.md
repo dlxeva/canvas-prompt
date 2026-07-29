@@ -7,6 +7,14 @@
 
 <h1 align="center">Canvas Prompt</h1>
 
+<p align="center">
+  <a href="https://github.com/dlxeva/canvas-prompt/blob/main/.codex-plugin/plugin.json"><img src="https://img.shields.io/badge/release-v0.1.30-C8462B" alt="release v0.1.30"></a>
+  <a href="https://github.com/dlxeva/canvas-prompt/actions/workflows/verify.yml"><img src="https://github.com/dlxeva/canvas-prompt/actions/workflows/verify.yml/badge.svg?branch=main" alt="CI status"></a>
+  <img src="https://img.shields.io/badge/runtime-local--first-3A7D44" alt="local-first runtime">
+  <img src="https://img.shields.io/badge/verified-macOS%20arm64-147E9E" alt="verified on macOS arm64">
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-7A5195" alt="AGPL-3.0-or-later license"></a>
+</p>
+
 <p align="center"><strong>Show AI what to change.</strong></p>
 
 <p align="center">Say it where you mean it.</p>
