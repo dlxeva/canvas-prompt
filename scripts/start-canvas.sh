@@ -63,12 +63,6 @@ runtime_identity() {
   printf '%s' "$identity"
 }
 
-runtime_delivery_mode() {
-  local candidate="$1" identity
-  identity="$(runtime_identity "$candidate")" || return 1
-  printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("delivery_mode") or "local")' 2>/dev/null
-}
-
 is_healthy_canvas() {
   local candidate="$1"
   local pid command page
@@ -91,37 +85,16 @@ is_healthy_canvas() {
   runtime_identity "$candidate" >/dev/null
 }
 
-is_healthy_current_canvas() {
-  local candidate="$1" identity running_project running_scope running_storage_kind running_delivery_mode
+# The user has one private active board (single_board). Any healthy Canvas
+# Prompt instance serving that board can be reused regardless of which host
+# (Codex / WorkBuddy / local) started it. The delivery_mode field is retained
+# as internal diagnostic information but is NOT a routing key or reuse gate.
+is_reusable_canvas() {
+  local candidate="$1" identity running_storage_kind
   is_healthy_canvas "$candidate" || return 1
   identity="$(runtime_identity "$candidate")"
   running_storage_kind="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("storage_kind") or "")' 2>/dev/null)"
-  if [[ "$running_storage_kind" == "single_board" ]]; then
-    running_delivery_mode="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("delivery_mode") or "local")' 2>/dev/null)"
-    [[ "$running_delivery_mode" == "$DELIVERY_MODE" ]]
-    return $?
-  fi
-  running_project="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("project_dir") or "")' 2>/dev/null)"
-  running_scope="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("thread_scope_key") or "")' 2>/dev/null)"
-  [[ "$running_project" == "$PROJECT_DIR" && "$running_scope" == "$THREAD_SCOPE_KEY" ]]
-}
-
-is_reconfigurable_canvas() {
-  local candidate="$1" identity running_storage_kind running_delivery_mode
-  is_healthy_canvas "$candidate" || return 1
-  identity="$(runtime_identity "$candidate")"
-  running_storage_kind="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("storage_kind") or "")' 2>/dev/null)"
-  [[ "$running_storage_kind" == "single_board" ]] || return 1
-  running_delivery_mode="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("delivery_mode") or "local")' 2>/dev/null)"
-  [[ "$running_delivery_mode" != "$DELIVERY_MODE" ]]
-}
-
-stop_canvas_on_port() {
-  local candidate="$1"
-  while IFS= read -r pid; do
-    [ -n "$pid" ] || continue
-    kill "$pid" 2>/dev/null || true
-  done < <(port_pids "$candidate")
+  [[ "$running_storage_kind" == "single_board" ]]
 }
 
 stop_stale_canvas() {
@@ -133,10 +106,8 @@ stop_stale_canvas() {
     # When ps is unavailable, skip the command-line guard and rely on
     # runtime-identity alone. If runtime_identity also fails, the process
     # on this port is stale (not a healthy Canvas) and may be stopped.
-    local ps_confirmed=false
     if [[ -n "$command" ]]; then
       [[ "$command" == *"/canvas-prompt/"* && "$command" == *"vite"* ]] || continue
-      ps_confirmed=true
     fi
     if ! is_healthy_canvas "$candidate"; then
       echo "Stopping stale Canvas Prompt server (PID ${pid}) on port ${candidate}." >&2
@@ -153,24 +124,10 @@ select_port() {
       printf '%s' "$candidate"
       return 0
     fi
-    if is_healthy_current_canvas "$candidate"; then
+    if is_reusable_canvas "$candidate"; then
       echo "Canvas Prompt is already running at http://127.0.0.1:${candidate}/" >&2
       printf 'reuse:%s' "$candidate"
       return 0
-    fi
-    if is_reconfigurable_canvas "$candidate"; then
-      echo "Restarting Canvas Prompt with delivery mode '${DELIVERY_MODE}' (running service has '$(runtime_delivery_mode "$candidate")') on port ${candidate}." >&2
-      stop_canvas_on_port "$candidate"
-      for _ in {1..20}; do
-        if [ -z "$(port_pids "$candidate")" ]; then
-          printf '%s' "$candidate"
-          return 0
-        fi
-        sleep 0.25
-      done
-      candidate=$((candidate + 1))
-      attempts=$((attempts + 1))
-      continue
     fi
     if is_healthy_canvas "$candidate"; then
       echo "Canvas Prompt on port ${candidate} belongs to another project; selecting another port." >&2

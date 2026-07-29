@@ -96,108 +96,16 @@ test('a healthy Canvas service from an earlier cache is not mistaken for stale',
   }
 })
 
-test('a single-board canvas with matching delivery_mode is reused', async () => {
-  const projects = await mkdtemp(resolve(tmpdir(), 'canvas-port-dm-match-'))
+test('a single-board canvas is reused regardless of delivery_mode (codex started, workbuddy reuses)', async () => {
+  const projects = await mkdtemp(resolve(tmpdir(), 'canvas-port-dm-cross-wb-'))
   try {
     const project = resolve(projects, 'proj')
     await mkdir(project, { recursive: true })
     const canonical = await realpath(project)
-    // codex → codex
-    const codexReuse = await selectPort({ requestedProject: project, runningProject: canonical, runningDeliveryMode: 'codex', requestedDeliveryMode: 'codex' })
-    assert.equal(codexReuse.stdout, 'reuse:43223', codexReuse.stderr)
-    // workbuddy → workbuddy
-    const wbReuse = await selectPort({ requestedProject: project, runningProject: canonical, runningDeliveryMode: 'workbuddy', requestedDeliveryMode: 'workbuddy' })
-    assert.equal(wbReuse.stdout, 'reuse:43223', wbReuse.stderr)
-    // local → local
-    const localReuse = await selectPort({ requestedProject: project, runningProject: canonical, runningDeliveryMode: 'local', requestedDeliveryMode: 'local' })
-    assert.equal(localReuse.stdout, 'reuse:43223', localReuse.stderr)
-  } finally {
-    await rm(projects, { recursive: true, force: true })
-  }
-})
-
-test('a single-board canvas with mismatched delivery_mode (codex → workbuddy) is stopped and the port freed for restart', async () => {
-  const projects = await mkdtemp(resolve(tmpdir(), 'canvas-port-dm-mismatch-wb-'))
-  try {
-    const project = resolve(projects, 'proj')
-    await mkdir(project, { recursive: true })
-    const canonical = await realpath(project)
-    const temp = await mkdtemp(resolve(tmpdir(), 'canvas-kill-mock-wb-'))
-    try {
-      const bin = resolve(temp, 'bin')
-      const killFlag = resolve(temp, 'kill-called')
-      await mkdir(bin)
-      // Stateful lsof: returns PID before kill flag, exits empty after kill.
-      await fakeCommand(bin, 'lsof', `if [ -f ${JSON.stringify(killFlag)} ]; then exit 0; else [[ "$*" == *"43223"* ]] && echo 4242; fi`)
-      await fakeCommand(bin, 'ps', `echo ${JSON.stringify(`${root}/app node vite`)}`)
-      await fakeCommand(bin, 'curl', `if [[ "$*" == *"runtime-identity"* ]]; then echo ${JSON.stringify(JSON.stringify({ project_dir: canonical, thread_scope_key: '', storage_kind: 'single_board', delivery_mode: 'codex' }))}; else echo '<title>Canvas Prompt</title>'; fi`)
-      // Shell function override: kill() { touch flag; } takes precedence over bash builtin.
-      const killOverride = `kill() { touch ${JSON.stringify(killFlag)}; }`
-      const { stdout, stderr } = await run('bash', ['-c', `${killOverride}; source ${JSON.stringify(script)}; select_port`], {
-        env: {
-          ...process.env,
-          PATH: `${bin}:${process.env.PATH}`,
-          CANVAS_PROMPT_TEST_ONLY: '1',
-          CANVAS_PROMPT_PROJECT_DIR: project,
-          CANVAS_PROMPT_DELIVERY_MODE: 'workbuddy',
-        },
-      })
-      assert.equal(stdout.trim(), '43223', stderr)
-      assert.ok(existsSync(killFlag), 'kill was called to stop the mismatched canvas')
-    } finally {
-      await rm(temp, { recursive: true, force: true })
-    }
-  } finally {
-    await rm(projects, { recursive: true, force: true })
-  }
-})
-
-test('a single-board canvas with mismatched delivery_mode (workbuddy → codex) is stopped and the port freed for restart', async () => {
-  const projects = await mkdtemp(resolve(tmpdir(), 'canvas-port-dm-mismatch-cx-'))
-  try {
-    const project = resolve(projects, 'proj')
-    await mkdir(project, { recursive: true })
-    const canonical = await realpath(project)
-    const temp = await mkdtemp(resolve(tmpdir(), 'canvas-kill-mock-cx-'))
-    try {
-      const bin = resolve(temp, 'bin')
-      const killFlag = resolve(temp, 'kill-called')
-      await mkdir(bin)
-      await fakeCommand(bin, 'lsof', `if [ -f ${JSON.stringify(killFlag)} ]; then exit 0; else [[ "$*" == *"43223"* ]] && echo 4242; fi`)
-      await fakeCommand(bin, 'ps', `echo ${JSON.stringify(`${root}/app node vite`)}`)
-      await fakeCommand(bin, 'curl', `if [[ "$*" == *"runtime-identity"* ]]; then echo ${JSON.stringify(JSON.stringify({ project_dir: canonical, thread_scope_key: '', storage_kind: 'single_board', delivery_mode: 'workbuddy' }))}; else echo '<title>Canvas Prompt</title>'; fi`)
-      const killOverride = `kill() { touch ${JSON.stringify(killFlag)}; }`
-      const { stdout, stderr } = await run('bash', ['-c', `${killOverride}; source ${JSON.stringify(script)}; select_port`], {
-        env: {
-          ...process.env,
-          PATH: `${bin}:${process.env.PATH}`,
-          CANVAS_PROMPT_TEST_ONLY: '1',
-          CANVAS_PROMPT_PROJECT_DIR: project,
-          CANVAS_PROMPT_DELIVERY_MODE: 'codex',
-        },
-      })
-      assert.equal(stdout.trim(), '43223', stderr)
-      assert.ok(existsSync(killFlag), 'kill was called to stop the mismatched canvas')
-    } finally {
-      await rm(temp, { recursive: true, force: true })
-    }
-  } finally {
-    await rm(projects, { recursive: true, force: true })
-  }
-})
-
-test('when ps is unavailable, a matching delivery_mode single_board canvas is still reused via runtime-identity fallback', async () => {
-  const projects = await mkdtemp(resolve(tmpdir(), 'canvas-port-ps-na-match-'))
-  try {
-    const project = resolve(projects, 'proj')
-    await mkdir(project, { recursive: true })
-    const canonical = await realpath(project)
-    // ps unavailable → is_healthy_canvas falls through to runtime-identity
-    // matching delivery_mode → reuse
+    // Canvas started by codex, now workbuddy requests open → reuse, no restart
     const reuse = await selectPort({
       requestedProject: project, runningProject: canonical,
-      runningDeliveryMode: 'workbuddy', requestedDeliveryMode: 'workbuddy',
-      psUnavailable: true,
+      runningDeliveryMode: 'codex', requestedDeliveryMode: 'workbuddy',
     })
     assert.equal(reuse.stdout, 'reuse:43223', reuse.stderr)
   } finally {
@@ -205,38 +113,37 @@ test('when ps is unavailable, a matching delivery_mode single_board canvas is st
   }
 })
 
-test('when ps is unavailable, a mismatched delivery_mode canvas is still detected and stopped via runtime-identity fallback', async () => {
-  const projects = await mkdtemp(resolve(tmpdir(), 'canvas-port-ps-na-mismatch-'))
+test('a single-board canvas is reused regardless of delivery_mode (workbuddy started, codex reuses)', async () => {
+  const projects = await mkdtemp(resolve(tmpdir(), 'canvas-port-dm-cross-cx-'))
   try {
     const project = resolve(projects, 'proj')
     await mkdir(project, { recursive: true })
     const canonical = await realpath(project)
-    const temp = await mkdtemp(resolve(tmpdir(), 'canvas-kill-mock-ps-na-'))
-    try {
-      const bin = resolve(temp, 'bin')
-      const killFlag = resolve(temp, 'kill-called')
-      await mkdir(bin)
-      // Stateful lsof: returns PID before kill flag, exits empty after kill.
-      await fakeCommand(bin, 'lsof', `if [ -f ${JSON.stringify(killFlag)} ]; then exit 0; else [[ "$*" == *"43223"* ]] && echo 4242; fi`)
-      // ps unavailable — outputs nothing, simulating sandbox/restricted environment
-      await fakeCommand(bin, 'ps', 'exit 0')
-      await fakeCommand(bin, 'curl', `if [[ "$*" == *"runtime-identity"* ]]; then echo ${JSON.stringify(JSON.stringify({ project_dir: canonical, thread_scope_key: '', storage_kind: 'single_board', delivery_mode: 'codex' }))}; else echo '<title>Canvas Prompt</title>'; fi`)
-      // Shell function override: kill() { touch flag; } takes precedence over bash builtin.
-      const killOverride = `kill() { touch ${JSON.stringify(killFlag)}; }`
-      const { stdout, stderr } = await run('bash', ['-c', `${killOverride}; source ${JSON.stringify(script)}; select_port`], {
-        env: {
-          ...process.env,
-          PATH: `${bin}:${process.env.PATH}`,
-          CANVAS_PROMPT_TEST_ONLY: '1',
-          CANVAS_PROMPT_PROJECT_DIR: project,
-          CANVAS_PROMPT_DELIVERY_MODE: 'workbuddy',
-        },
-      })
-      assert.equal(stdout.trim(), '43223', stderr)
-      assert.ok(existsSync(killFlag), 'kill was called to stop the mismatched canvas even without ps')
-    } finally {
-      await rm(temp, { recursive: true, force: true })
-    }
+    // Canvas started by workbuddy, now codex requests open → reuse, no restart
+    const reuse = await selectPort({
+      requestedProject: project, runningProject: canonical,
+      runningDeliveryMode: 'workbuddy', requestedDeliveryMode: 'codex',
+    })
+    assert.equal(reuse.stdout, 'reuse:43223', reuse.stderr)
+  } finally {
+    await rm(projects, { recursive: true, force: true })
+  }
+})
+
+test('when ps is unavailable, a single-board canvas is still reused via runtime-identity fallback', async () => {
+  const projects = await mkdtemp(resolve(tmpdir(), 'canvas-port-ps-na-reuse-'))
+  try {
+    const project = resolve(projects, 'proj')
+    await mkdir(project, { recursive: true })
+    const canonical = await realpath(project)
+    // ps unavailable → is_healthy_canvas falls through to runtime-identity
+    // single_board → reuse regardless of delivery_mode
+    const reuse = await selectPort({
+      requestedProject: project, runningProject: canonical,
+      runningDeliveryMode: 'codex', requestedDeliveryMode: 'workbuddy',
+      psUnavailable: true,
+    })
+    assert.equal(reuse.stdout, 'reuse:43223', reuse.stderr)
   } finally {
     await rm(projects, { recursive: true, force: true })
   }

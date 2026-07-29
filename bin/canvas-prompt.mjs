@@ -134,6 +134,7 @@ const help = () => console.log(`Canvas Prompt host-neutral entrypoint
 Usage:
   canvas-prompt setup [--core-only]
   canvas-prompt open [--project <dir>] [--conversation-only] [--host codex|workbuddy|local]
+  canvas-prompt read [--project <dir>]
   canvas-prompt init [--project <dir>] [--thread-id <id>] [--conversation-only]
   canvas-prompt doctor [--project <dir>] [--thread-id <id>] [--conversation-only]
   canvas-prompt migrate --from <legacy-project-or-.canvas-prompt-dir>
@@ -143,7 +144,9 @@ setup installs Canvas Prompt-managed dependencies into its local runtime and
 reuses validated existing dependencies. The local ASR model downloads on first
 start. A supplied thread ID is provenance only, never inferred from project
 history. init prints the single-board MCP configuration. migrate copies complete
-legacy archives without deleting or scanning any source.`)
+legacy archives without deleting or scanning any source. read prints the latest
+completed prompt package from the single active board, using the same code path
+as the canvas_prompt MCP server's get_latest_prompt_package tool.`)
 
 try {
   if (command === 'help' || command === '--help' || command === '-h') help()
@@ -190,6 +193,21 @@ try {
         asr,
         mcp_config: mcpConfig(project, boundThreadId),
       }, null, 2))
+    } else if (command === 'read') {
+      // Maintained CLI fallback for get_latest_prompt_package. Uses the exact
+      // same code path as the canvas_prompt MCP server. This is NOT a
+      // temporary Bash/Python read — it is a first-class CLI command that
+      // imports and calls the MCP server's handler directly.
+      process.env.CANVAS_PROMPT_MCP_TEST = '1'
+      const { handleGetLatestPromptPackage } = await import('../mcp/server.mjs')
+      const response = await handleGetLatestPromptPackage({})
+      const text = response.content?.[0]?.text
+      if (response.isError) {
+        console.error(text)
+        process.exitCode = 1
+      } else {
+        console.log(text)
+      }
     } else if (command === 'open') {
       const hostFlag = flag('--host')
       const host = hostFlag === 'codex' ? 'codex' : hostFlag === 'workbuddy' ? 'workbuddy' : 'local'
