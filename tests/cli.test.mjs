@@ -106,6 +106,57 @@ test('help text lists workbuddy as a valid host', () => {
   assert.match(result.stdout, /workbuddy/)
 })
 
+test('read returns the latest prompt package from the single board via the formal MCP handler', () => {
+  const root = mkdtempSync(join(tmpdir(), 'canvas-prompt-read-'))
+  const home = join(root, 'home')
+  const project = join(root, 'project')
+  mkdirSync(project, { recursive: true })
+
+  const boardDir = join(home, '.canvas-prompt', 'board')
+  mkdirSync(boardDir, { recursive: true })
+
+  const packageId = 'pp_test_read_e2e_001'
+  const promptPackage = {
+    meta: {
+      package_id: packageId,
+      version: '2.1',
+      created_at: '2026-07-30T00:00:00.000Z',
+      duration_ms: 5000,
+      canvas_size: { width: 800, height: 600, unit: 'scene' },
+      coordinate_system: { space: 'excalidraw_scene', unit: 'scene', origin: { x: 0, y: 0 }, x_axis: 'right', y_axis: 'down' },
+      tags: ['canvas-prompt', 'excalidraw'],
+      conversation_binding: { version: 1, storage_kind: 'single_board', project_dir: null, source_thread_id: null, session_id: null, thread_scope_key: null },
+    },
+    canvas_snapshot: { final: { inline_data: 'excluded', format: 'png', width: 800, height: 600 }, scene_bounds: { x: 0, y: 0, width: 800, height: 600 } },
+    strokes: [],
+    transcript: { full_text: 'test transcript for CLI read', segments: [], language: 'zh', alignment_status: 'timestamped' },
+    timeline: [],
+    objects: [],
+    baseline_context: { scene_sha256: 'abc123', object_count: 0, image_count: 0, included_object_count: 0, status: 'none' },
+  }
+
+  writeFileSync(join(boardDir, 'latest-prompt-package.json'), JSON.stringify(promptPackage))
+
+  const result = runWithEnvironment({ HOME: home }, 'read', '--project', project)
+  assert.equal(result.status, 0, result.stderr)
+  const parsed = JSON.parse(result.stdout)
+  assert.equal(parsed.package.meta.package_id, packageId)
+  assert.equal(parsed.source.raw_package_path, realpathSync(join(boardDir, 'latest-prompt-package.json')))
+  assert.equal(parsed.delivery.inline_image_data, 'excluded')
+})
+
+test('read reports an error when no prompt package exists on the board', () => {
+  const root = mkdtempSync(join(tmpdir(), 'canvas-prompt-read-empty-'))
+  const home = join(root, 'home')
+  const project = join(root, 'project')
+  mkdirSync(project, { recursive: true })
+
+  const result = runWithEnvironment({ HOME: home }, 'read', '--project', project)
+  assert.equal(result.status, 1, result.stderr)
+  const parsed = JSON.parse(result.stderr)
+  assert.ok(parsed.error.includes('not found'), `unexpected error: ${result.stderr}`)
+})
+
 test('workbuddy plugin manifest exists and is valid', () => {
   const manifestPath = resolve('.workbuddy-plugin', 'plugin.json')
   assert.equal(existsSync(manifestPath), true)

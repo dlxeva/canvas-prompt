@@ -149,6 +149,88 @@ test('when ps is unavailable, a single-board canvas is still reused via runtime-
   }
 })
 
+test('when ps is unavailable and port hosts a non-Canvas service, kill is not called and next port is selected', async () => {
+  const temp = await mkdtemp(resolve(tmpdir(), 'canvas-port-ps-na-nokill-'))
+  try {
+    const bin = resolve(temp, 'bin')
+    await mkdir(bin)
+    // lsof: port 43223 has a PID, port 43224 is free
+    await fakeCommand(bin, 'lsof', '[[ "$*" == *"43223"* ]] && echo 4242')
+    // ps: unavailable (returns nothing)
+    await fakeCommand(bin, 'ps', 'exit 0')
+    // curl: non-Canvas service — no Canvas Prompt page, no runtime-identity
+    await fakeCommand(bin, 'curl', 'echo "Not a Canvas service"')
+
+    const project = resolve(temp, 'project')
+    await mkdir(project)
+
+    // kill() writes to a marker file because select_port runs in a subshell
+    // ($(…)) and variable assignments inside it don't propagate back.
+    const killMarker = resolve(temp, 'kill-marker')
+    const { stdout, stderr } = await run('bash', ['-c', [
+      `KILL_MARKER=${JSON.stringify(killMarker)}`,
+      'kill() { echo 1 > "$KILL_MARKER"; }',
+      `source ${JSON.stringify(script)}`,
+      'result=$(select_port)',
+      'echo "RESULT=$result"',
+      'if [ -f "$KILL_MARKER" ]; then echo "KILL_CALLED=1"; else echo "KILL_CALLED=0"; fi',
+    ].join('\n')], {
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        CANVAS_PROMPT_TEST_ONLY: '1',
+        CANVAS_PROMPT_PROJECT_DIR: project,
+      },
+    })
+
+    assert.match(stdout, /RESULT=43224/, `expected next port, got: ${stdout}\nstderr: ${stderr}`)
+    assert.match(stdout, /KILL_CALLED=0/, `kill should not be called, got: ${stdout}\nstderr: ${stderr}`)
+  } finally {
+    await rm(temp, { recursive: true, force: true })
+  }
+})
+
+test('when ps is unavailable and port hosts a stale Canvas (runtime-identity confirms), kill is called', async () => {
+  const temp = await mkdtemp(resolve(tmpdir(), 'canvas-port-ps-na-stale-'))
+  try {
+    const bin = resolve(temp, 'bin')
+    await mkdir(bin)
+    // lsof: port 43223 has a PID, port 43224 is free
+    await fakeCommand(bin, 'lsof', '[[ "$*" == *"43223"* ]] && echo 4242')
+    // ps: unavailable (returns nothing)
+    await fakeCommand(bin, 'ps', 'exit 0')
+    // curl: runtime-identity responds with Canvas Prompt identity (has service_version),
+    // but the root page does NOT have <title>Canvas Prompt</title> → is_healthy_canvas fails
+    // → stop_stale_canvas should kill it because runtime_identity provides positive evidence.
+    await fakeCommand(bin, 'curl', 'if [[ "$*" == *"runtime-identity"* ]]; then echo \'{"service_version":"0.1.30","storage_kind":"single_board","delivery_mode":"codex"}\'; else echo "<html><title>Something Else</title></html>"; fi')
+
+    const project = resolve(temp, 'project')
+    await mkdir(project)
+
+    const killMarker = resolve(temp, 'kill-marker')
+    const { stdout, stderr } = await run('bash', ['-c', [
+      `KILL_MARKER=${JSON.stringify(killMarker)}`,
+      'kill() { echo 1 > "$KILL_MARKER"; }',
+      `source ${JSON.stringify(script)}`,
+      'result=$(select_port)',
+      'echo "RESULT=$result"',
+      'if [ -f "$KILL_MARKER" ]; then echo "KILL_CALLED=1"; else echo "KILL_CALLED=0"; fi',
+    ].join('\n')], {
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        CANVAS_PROMPT_TEST_ONLY: '1',
+        CANVAS_PROMPT_PROJECT_DIR: project,
+      },
+    })
+
+    assert.match(stdout, /KILL_CALLED=1/, `kill should be called for stale Canvas, got: ${stdout}\nstderr: ${stderr}`)
+    assert.match(stdout, /RESULT=43224/, `expected next port after kill, got: ${stdout}\nstderr: ${stderr}`)
+  } finally {
+    await rm(temp, { recursive: true, force: true })
+  }
+})
+
 test('macOS canvas service receives the configured ASR identity instead of reverting to port 8080', async () => {
   const temp = await mkdtemp(resolve(tmpdir(), 'canvas-asr-identity-'))
   try {

@@ -99,15 +99,22 @@ is_reusable_canvas() {
 
 stop_stale_canvas() {
   local candidate="$1"
-  local pid command
+  local pid command identity
   while IFS= read -r pid; do
     [ -n "$pid" ] || continue
     command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-    # When ps is unavailable, skip the command-line guard and rely on
-    # runtime-identity alone. If runtime_identity also fails, the process
-    # on this port is stale (not a healthy Canvas) and may be stopped.
     if [[ -n "$command" ]]; then
+      # ps available — only stop processes that are definitely Canvas Prompt.
       [[ "$command" == *"/canvas-prompt/"* && "$command" == *"vite"* ]] || continue
+    else
+      # ps unavailable — require positive Canvas Prompt evidence from
+      # runtime-identity before attempting to stop. Without command-line
+      # evidence we must NOT kill: the port could host the user's
+      # unrelated local service. If runtime_identity does not return a
+      # Canvas Prompt identity (containing service_version), skip this
+      # port entirely and let select_port try the next one.
+      identity="$(runtime_identity "$candidate" 2>/dev/null || true)"
+      [[ "$identity" == *"service_version"* ]] || continue
     fi
     if ! is_healthy_canvas "$candidate"; then
       echo "Stopping stale Canvas Prompt server (PID ${pid}) on port ${candidate}." >&2
