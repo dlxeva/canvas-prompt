@@ -84,6 +84,9 @@ export HOME="$SANDBOX_HOME"
 export CANVAS_PROMPT_RUNTIME_DIR="$SANDBOX_HOME/.canvas-prompt/runtime"
 export HF_HOME="$SANDBOX_HOME/.cache/huggingface"
 export CANVAS_PROMPT_ASR_PORT="$ASR_PORT"
+# Pin the full endpoint as well as its port. This keeps the isolated smoke
+# test from silently reusing a host default when a launcher normalizes ports.
+export CANVAS_PROMPT_ASR_URL="http://127.0.0.1:${ASR_PORT}"
 export CANVAS_PROMPT_PORT="$CANVAS_PORT"
 
 echo "[clean-room] isolated root: $SANDBOX_ROOT"
