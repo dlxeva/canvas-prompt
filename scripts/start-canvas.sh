@@ -72,13 +72,20 @@ runtime_delivery_mode() {
 is_healthy_canvas() {
   local candidate="$1"
   local pid command page
+
   pid="$(port_pids "$candidate" | head -n 1)"
   [ -n "$pid" ] || return 1
+
   command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-  # A Canvas service installed by an earlier plugin cache has a different core
-  # path. It is still a healthy Canvas service and must be treated as owned by
-  # its runtime project, never killed merely because this launcher is newer.
-  [[ "$command" == *"canvas-prompt"* && "$command" == *"vite"* ]] || return 1
+  # When ps succeeds but the command is NOT a Canvas Prompt vite process,
+  # reject immediately — something else is on this port.
+  # When ps is unavailable (sandbox, restricted environment), command is
+  # empty; fall through to runtime-identity verification which is sufficient
+  # to confirm a genuine Canvas Prompt instance responding on this port.
+  if [[ -n "$command" ]]; then
+    [[ "$command" == *"canvas-prompt"* && "$command" == *"vite"* ]] || return 1
+  fi
+
   page="$(curl --silent --show-error --max-time 1 "http://127.0.0.1:${candidate}/" 2>/dev/null || true)"
   [[ "$page" == *"<title>Canvas Prompt</title>"* ]] || return 1
   runtime_identity "$candidate" >/dev/null
@@ -123,10 +130,15 @@ stop_stale_canvas() {
   while IFS= read -r pid; do
     [ -n "$pid" ] || continue
     command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-    # Never terminate another healthy Canvas instance: its data belongs to a
-    # different business project. Only a process that cannot prove runtime
-    # identity is considered stale.
-    if [[ "$command" == *"/canvas-prompt/"* && "$command" == *"vite"* ]] && ! is_healthy_canvas "$candidate"; then
+    # When ps is unavailable, skip the command-line guard and rely on
+    # runtime-identity alone. If runtime_identity also fails, the process
+    # on this port is stale (not a healthy Canvas) and may be stopped.
+    local ps_confirmed=false
+    if [[ -n "$command" ]]; then
+      [[ "$command" == *"/canvas-prompt/"* && "$command" == *"vite"* ]] || continue
+      ps_confirmed=true
+    fi
+    if ! is_healthy_canvas "$candidate"; then
       echo "Stopping stale Canvas Prompt server (PID ${pid}) on port ${candidate}." >&2
       kill "$pid" 2>/dev/null || true
     fi
