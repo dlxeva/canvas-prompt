@@ -56,6 +56,10 @@ your marks + material + speech
 the conversation you choose to continue
 ```
 
+<p align="center">
+  <img src="./assets/session-replay.gif" width="800" alt="A Canvas Prompt session replay: alternatives appear on the canvas, one is rejected, and a final direction is marked.">
+</p>
+
 The board stays available after a round. The package is saved locally first;
 the conversation reads it only when you explicitly ask it to continue.
 

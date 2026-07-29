@@ -50,6 +50,10 @@ codex plugin add canvas-prompt@canvas-prompt
 你选择继续的主对话
 ```
 
+<p align="center">
+  <img src="./assets/session-replay.gif" width="800" alt="Canvas Prompt 推演回放：候选方案出现在画布上，其中一个被否定，最终方向被标记出来。">
+</p>
+
 一轮结束后，画布仍保留在原处。上下文包会先保存在本机；只有你明确要求继续时，主对话才会读取它。
 
 ## 用起来是什么感觉
