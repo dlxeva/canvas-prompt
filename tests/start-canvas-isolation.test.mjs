@@ -100,6 +100,9 @@ test('macOS canvas service receives the configured ASR identity instead of rever
     await mkdir(bin)
     await fakeCommand(bin, 'lsof', 'exit 0')
     await fakeCommand(bin, 'curl', "echo '<title>Canvas Prompt</title>'")
+    // This test only verifies the macOS launch arguments. On Linux CI, force
+    // the same branch so the script never execs a long-lived Vite process.
+    await fakeCommand(bin, 'uname', "echo Darwin")
     await fakeCommand(bin, 'launchctl', `if [[ "$1" == "submit" ]]; then printf '%s\\n' "$@" > ${JSON.stringify(submission)}; fi`)
     const project = resolve(temp, 'project')
     await mkdir(project)
