@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { writeFileAtomically } from './round-store.mjs'
 
 const SAFE_PACKAGE_ID = /^[A-Za-z0-9_-]{1,128}$/
+const COMPLETE_ROUND_STATUSES = new Set(['engine_compiled', 'handoff_accepted'])
 
 async function readJson(path) {
   try { return JSON.parse(await readFile(path, 'utf8')) } catch { return null }
@@ -32,7 +33,7 @@ async function completedRounds(roundsDir) {
       readJson(resolve(roundPath, 'round.json')),
       readJson(resolve(roundPath, 'prompt-package.json')),
     ])
-    if (manifest?.status !== 'engine_compiled' || packageJson?.meta?.package_id !== entry.name) {
+    if (!COMPLETE_ROUND_STATUSES.has(manifest?.status) || packageJson?.meta?.package_id !== entry.name) {
       skipped.push(entry.name)
       continue
     }
