@@ -26,6 +26,7 @@ dist-ssr
 
 # Project-local Canvas Prompt outputs
 .canvas-prompt/
+.canvas-prompt-runtime/
 
 # Python runtime caches
 __pycache__/

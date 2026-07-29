@@ -1,70 +1,74 @@
-# Canvas Prompt Desktop Acceptance Gate
+# Canvas Prompt v0.1 安装版真人验收
 
-This gate proves facts that unit tests and a fake App Server cannot prove.
-Run it in a real Codex Desktop task before a public plugin release.
+这份运行单只验证 v0.1 已承诺的主链路：一次白板过程被保存到用户私有的单一活动白板档案，并能在用户指定的 Codex 主对话通过固定续接指令读取；MCP 读取的是导出后的不可变产物。
 
-## Preconditions
+它必须在**准备发布的安装版本**上完成，不能用源码目录、手工读取 JSON、Agent 扫描原始归档或单元测试替代。测试者只需要画、说、结束一轮并在主对话继续讨论；验收工具读取的是导出后的不可变轮次产物。
 
-- Start Canvas Prompt with `./scripts/start-canvas.sh <project-dir>`.
-- Open the URL reported by the launcher, not an assumed port.
-- In the same Codex task, verify the MCP server stderr reports the canonical
-  `<project-dir>` rather than `unbound` or the plugin installation directory.
+## 开始前
 
-## Mixed-material round
+- 新建一个空项目目录（只用于记录来源，不是档案路由键）。
+- 通过安装候选的 `Open Canvas Prompt canvas` 打开它；使用启动结果给出的地址，不假定固定端口。
+- 等界面显示语音可用后再进行含语音的轮次。若明确选择“不等语音，开始画”，该轮只能作为视觉回合，不可替代下方的含语音验收。
+- 每一轮结束后记下 Package ID；它仅用于维护者生成本地验收报告，普通用户无需接触。
 
-1. Start a round on an empty board, then import one or more images while recording.
-2. Continue drawing ordinary diagram content; circle two regions on one material, describing only one of them by voice.
-3. Zoom, pan, move one mark, then export and send to the current task.
-4. Inspect `<project>/.canvas-prompt/rounds/<package_id>/`.
+## Round 1：空白画布推演
 
-Expected evidence:
+1. 从空白画布开始，画一个简单结构。
+2. 边画边说一句说明；圈一个区域、拉一条连接线，再移动一个对象。
+3. 点击“结束推演”，确认白板明确显示“本轮已整理”，且画布没有被系统清空或改动。
+4. 在当前主对话输入“根据画布内容推进”，不要粘贴 Package ID；确认它读取这轮上下文后，能自然推进结构推导、指出遗漏或风险，而不是要求测试者先选择“推演模式”。
 
-- `prompt-package.json`, `engine/process-ir.json`,
-  `engine/compact-package.json`, `round.json`, `archive.json`, and
-  `handoff.json` exist.
-- Every imported material is retained as an independently addressable artifact,
-  including materials added after the round began. The package does not emit a
-  whiteboard-decided `round_kind`.
-- A circle, freehand mark, or arrow overlapping a material becomes an
-  unresolved, image-relative observation; it is not promoted to an edit intent.
-- The unspoken mark has `speech_link_status: unavailable`.
-- Zoom/pan appear only as viewport observations; object movement remains a
-  layout observation.
-- `handoff.json` reaches `accepted` or `delivered` with the exact thread/turn
-  identifiers; a visible Desktop reply is required for `delivered`.
-- `get_latest_prompt_package` and `get_round_artifact(process_ir)` read this
-  project only. Inline image data must be excluded from MCP output.
+**通过条件：** 包含画笔记录和完整编译产物；主对话在固定续接指令后读取刚结束白板轮次，并且没有要求测试者手动粘贴 JSON、说出 Package ID 或切换到别的项目。v0.1 不把模糊追问自动续接作为承诺。
 
-## P0 deictic-binding round
+## Round 1b：在既有画布上续画
 
-1. 在同一回合中放置至少两个可区分的对象或素材区域。
-2. 只说 `this / here` 或“这个 / 这里”，并在说话时圈选、指向或移动其中一个对象。
-3. 导出后检查 Process IR / Compact Package。
+1. 不清空 Round 1 的画布，开始下一轮。
+2. 只圈选或标记上一轮已有的两个对象，并口述它们的修改意图。
+3. 结束这一轮后读取其最终快照。
 
-Expected evidence:
+**通过条件：** 最终快照同时包含上一轮已有结构和本轮标记；过程事件只描述本轮的圈选/语音/移动，不把旧内容重复写成本轮新创作。
 
-- 每个指代语音片段都有时间范围与 `reference_candidate`；
-- 候选对象或素材区域带空间边界，并说明来自 `nearby_canvas_action`、`pointer_hit`、素材相对位置等何种支撑；
-- 无唯一证据时保持 `unresolved`，不输出确定对象绑定；
-- 主对话只能基于候选复述或追问，不能把候选写成用户已确认的事实。
+## Round 2：图片批阅
 
-## Consecutive-round isolation
+1. 新开一轮，导入一张图片。
+2. 圈出两个区域，但只口述其中一个；缩放、平移并移动一个批注。
+3. 结束这一轮，在当前主对话输入“根据画布内容推进”，并记下 Package ID。
 
-1. Immediately export a second, visibly different round.
-2. Confirm `latest-prompt-package.json` identifies round B.
-3. Confirm the prompt packages, screenshots, Process IRs, Compact packages and
-  handoff receipts under rounds A and B still identify their own package IDs.
-4. Delete B in Local Archive and confirm latest rolls back to A; wait past any pending handoff completion and confirm B is not recreated.
-5. Delete A and confirm latest is removed.
+**通过条件：** 轮次包含图片素材和相对素材的批注观察；固定续接指令后，主对话把最终快照、标记和语音组成 visual brief，并把画布中导入的未标注原图作为图片编辑参考，而不是据截图重画。若本轮没有原图，才在当前对话请测试者补原图，不要求重复标注。未口述的圈保持未决，不被说成已确认的编辑意图；视图缩放/平移不被改写成对象移动语义。
 
-## Fail conditions
+## Round 2b：新版图片回流
 
-Do not release if any of these occurs:
+1. 让 Codex 根据 Round 2 的 visual brief 在主对话生成一张新版图片。
+2. 在主对话复制这张图片，回到 Canvas Prompt，在画布区域按 `⌘V`。
+3. 确认新版图片只导入一次，可以立即在上面继续圈改并开始下一轮。
 
-- Canvas service for project B reuses project A's identity or storage.
-- MCP reports `unbound`, plugin-root scope, or reads another project.
-- `handoff.json` claims acceptance before `turn/start` is accepted.
-- A later `accepted`, timeout, or failure receipt overwrites an earlier `delivered` receipt.
-- An accepted handoff times out or exits while the UI remains indefinitely in “processing”.
-- A deleted round is recreated by a late handoff write.
-- A package without timestamped segments binds speech to a review mark.
+**通过条件：** 用户不需要下载文件、寻找本地路径或重新使用“导入图片”；一次 `⌘V` 只产生一个图片对象。若宿主没有把图片暴露为标准网页剪贴板数据，Canvas Prompt 的 macOS 原生剪贴板桥仍能读取图片。
+
+## Round 3：单白板跨对话续接
+
+1. 在 Round 2 结束后切换到另一个 Codex 主对话，或从另一项目再次打开 Canvas Prompt。
+2. 确认它复用了同一活动白板和既有本地档案，而没有创建第二个服务或清空画布。
+3. 在需要继续的主对话显式输入“根据画布内容推进”。
+
+**通过条件：** 仅在显式续接指令后，当前对话读取最近完成的轮次并可基于它继续讨论；不要求用户提供项目路径、Package ID 或手工粘贴 JSON。没有这句明确指令时，不得自动读取、自动续聊或根据历史绑定猜测上下文。
+
+## 生成验收报告
+
+三轮结束后，运行安装包内的验收工具。报告只可保存在本地或私有 PR，绝不能加入公开仓库：
+
+```bash
+python3 maintainer-skills/canvas-prompt-demo-acceptance/scripts/check_demo_acceptance.py \
+  --board-dir ~/.canvas-prompt/board \
+  --blank-round pp_空白轮次ID \
+  --review-round pp_图片轮次ID \
+  --continuation-round pp_续接轮次ID \
+  --report /绝对路径/私有位置/demo-acceptance-report.json
+```
+
+`passed: true` 是发布前的必要证据，但不证明英语泛化、自动意图识别或唯一指代绑定。任何一轮的归档或编译失败、最近完成轮次被错误覆盖、显式续接后主对话无法经 MCP 读取该轮，或需要手工粘贴 JSON 补救，均为失败；修复后必须重新做那一轮，不能原地修改产物。
+
+若发布负责人明确判断 Round 3 对当前候选非必要，可用 `--waive-continuation` 和 `--waiver-reason` 生成报告。报告会将其标成 `waived`，而不是把它写成跨对话续接已通过；这项豁免必须同步记录在发布状态中。
+
+## 不属于 v0.1 发布阻塞的校准
+
+`this / here`、圈画、箭头、光标停驻和英语表达会保留为带时间与空间证据的候选。可额外收集样本用于发布后校准，但不把“自动绑定到唯一对象”的准确率作为这三轮验收的隐含要求。

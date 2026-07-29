@@ -362,6 +362,22 @@ describe('Excalidraw process bridge', () => {
     })
   })
 
+  it('keeps prior live objects as spatial anchors without turning them into new actions', () => {
+    const priorText: CanvasObject = {
+      object_id: 'obj_prior_text', type: 'text_block', timestamp_ms: 0,
+      bounds: { x: 20, y: 30, width: 240, height: 48 },
+      properties: { baseline_anchor: true, evidence_source: 'round_start_scene' },
+      source_strokes: ['prior_text'], semantic_content: '简介',
+    }
+
+    const pkg = compilePromptPackage([], '', 'data:image/png;base64,AA==', {
+      baselineAnchors: [priorText],
+    })
+
+    expect(pkg.objects).toContainEqual(priorText)
+    expect(pkg.timeline).toEqual([])
+  })
+
   it('keeps pointer gestures but excludes raw cursor samples from normal exports', () => {
     const events = compactTraceToCognitiveEvents([arrow])
     const pointer = buildPointerTrack([
@@ -492,6 +508,21 @@ describe('Excalidraw process bridge', () => {
       assertion_level: 'observation',
       resolution_status: 'unresolved',
     })])
+  })
+
+  it('keeps an editable original only while its matching image artifact remains live', () => {
+    const image: CanvasObject = { object_id: 'obj_image', type: 'image', timestamp_ms: 0, bounds: { x: 0, y: 0, width: 100, height: 100 }, properties: {} }
+    const sourceImage = {
+      artifact_object_id: 'obj_image', asset_id: 'asset_image', mime_type: 'image/png', width: 1200, height: 800,
+      archive_relative_path: 'source-images/image.png', availability: 'available' as const,
+    }
+    const live = compilePromptPackage([], '', 'data:image/png;base64,AA==', { baseArtifacts: [image], sourceImages: [sourceImage] })
+    expect(live.source_images).toEqual([sourceImage])
+
+    const deleted = compilePromptPackage([{ id: 'delete_image', timestamp: 10, type: 'deletion', shapeId: 'image', shapeType: 'image', data: {} }], '', 'data:image/png;base64,AA==', {
+      baseArtifacts: [image], sourceImages: [sourceImage],
+    })
+    expect(deleted.source_images).toBeUndefined()
   })
 
   it('keeps a material imported mid-round with its timestamp and an unresolved mark candidate', () => {

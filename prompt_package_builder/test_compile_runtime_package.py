@@ -39,8 +39,8 @@ class RuntimeArtifactPathTests(unittest.TestCase):
             compact = json.loads((root / "engine" / "compact-package.json").read_text(encoding="utf-8"))
             errors, _warnings = validate_package(compact)
             self.assertEqual([], errors)
-            self.assertEqual("process-ir-v0.5", compact["process_ir_summary"]["schema_version"])
-            self.assertEqual("2.3", compact["meta"]["version"])
+            self.assertEqual("process-ir-v0.8", compact["process_ir_summary"]["schema_version"])
+            self.assertEqual("2.6", compact["meta"]["version"])
 
             legacy_compact = deepcopy(compact)
             legacy_compact["meta"]["version"] = "2.2"

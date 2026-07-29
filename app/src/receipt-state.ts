@@ -17,9 +17,12 @@ export type HandoffReceipt = {
 export function deriveExportReceiptStatus(handoff: HandoffReceipt | null | undefined): ExportReceiptStatus {
   if (handoff?.status === 'archived') return 'archived'
   if (handoff?.delivered || handoff?.status === 'delivered') return 'delivered'
-  if (handoff?.status === 'failed' || handoff?.status === 'timed_out' || handoff?.status === 'completed_failed' || handoff?.status === 'completed_cancelled' || handoff?.status === 'accepted_failed') return 'failed'
-  if (handoff?.status === 'accepted_timeout' || handoff?.status === 'accepted_observer_lost') return 'accepted'
-  if (handoff?.accepted || handoff?.status === 'accepted') return 'accepted'
+  // The whiteboard promises delivery into the current conversation, not a
+  // successful downstream model response. Once turn/start accepted a round,
+  // later completion failures remain diagnosable in handoff.json but must not
+  // retroactively tell the user that their round was not sent.
+  if (handoff?.accepted || handoff?.status === 'accepted' || handoff?.status === 'accepted_timeout' || handoff?.status === 'accepted_observer_lost' || handoff?.status === 'completed_failed' || handoff?.status === 'completed_cancelled' || handoff?.status === 'accepted_failed') return 'accepted'
+  if (handoff?.status === 'failed' || handoff?.status === 'timed_out') return 'failed'
   if (handoff?.attempted) return 'failed'
   return 'archived'
 }

@@ -16,7 +16,7 @@ async function fakeCommand(directory, name, contents) {
   await chmod(path, 0o755)
 }
 
-async function selectPort({ requestedProject, runningProject, runningCommand = `${root}/app node vite` }) {
+async function selectPort({ requestedProject, runningProject, requestedThreadScope = '', runningThreadScope = '', runningStorageKind = 'single_board', runningCommand = `${root}/app node vite` }) {
   const temp = await mkdtemp(resolve(tmpdir(), 'canvas-port-isolation-'))
   try {
     await mkdir(requestedProject, { recursive: true })
@@ -24,13 +24,14 @@ async function selectPort({ requestedProject, runningProject, runningCommand = `
     await (await import('node:fs/promises')).mkdir(bin)
     await fakeCommand(bin, 'lsof', '[[ "$*" == *"43223"* ]] && echo 4242')
     await fakeCommand(bin, 'ps', `echo ${JSON.stringify(runningCommand)}`)
-    await fakeCommand(bin, 'curl', `if [[ "$*" == *"runtime-identity"* ]]; then echo ${JSON.stringify(JSON.stringify({ project_dir: runningProject }))}; else echo '<title>Canvas Prompt</title>'; fi`)
+    await fakeCommand(bin, 'curl', `if [[ "$*" == *"runtime-identity"* ]]; then echo ${JSON.stringify(JSON.stringify({ project_dir: runningProject, thread_scope_key: runningThreadScope, storage_kind: runningStorageKind }))}; else echo '<title>Canvas Prompt</title>'; fi`)
     const { stdout, stderr } = await run('bash', ['-c', `source ${JSON.stringify(script)}; select_port`], {
       env: {
         ...process.env,
         PATH: `${bin}:${process.env.PATH}`,
         CANVAS_PROMPT_TEST_ONLY: '1',
         CANVAS_PROMPT_PROJECT_DIR: requestedProject,
+        ...(requestedThreadScope ? { CANVAS_PROMPT_THREAD_ID: requestedThreadScope } : {}),
       },
     })
     return { stdout: stdout.trim(), stderr }
@@ -39,7 +40,7 @@ async function selectPort({ requestedProject, runningProject, runningCommand = `
   }
 }
 
-test('a healthy Canvas service is reused only by the exact same project', async () => {
+test('a healthy single-board Canvas service is reused from another project', async () => {
   const projects = await mkdtemp(resolve(tmpdir(), 'canvas-port-projects-'))
   try {
     const projectA = resolve(projects, 'a')
@@ -49,7 +50,24 @@ test('a healthy Canvas service is reused only by the exact same project', async 
     const same = await selectPort({ requestedProject: projectA, runningProject: canonicalA })
     assert.equal(same.stdout, 'reuse:43223', same.stderr)
     const other = await selectPort({ requestedProject: projectB, runningProject: canonicalA })
-    assert.equal(other.stdout, '43224', other.stderr)
+    assert.equal(other.stdout, 'reuse:43223', other.stderr)
+  } finally {
+    await rm(projects, { recursive: true, force: true })
+  }
+})
+
+test('a healthy single-board Canvas service is reused from another conversation', async () => {
+  const projects = await mkdtemp(resolve(tmpdir(), 'canvas-port-thread-projects-'))
+  try {
+    const project = resolve(projects, 'shared')
+    await mkdir(project, { recursive: true })
+    const canonical = await realpath(project)
+    const threadA = '019fa-thread-a-12345678'
+    const threadB = '019fa-thread-b-12345678'
+    const same = await selectPort({ requestedProject: project, runningProject: canonical, requestedThreadScope: threadA })
+    assert.equal(same.stdout, 'reuse:43223', same.stderr)
+    const other = await selectPort({ requestedProject: project, runningProject: canonical, requestedThreadScope: threadB })
+    assert.equal(other.stdout, 'reuse:43223', other.stderr)
   } finally {
     await rm(projects, { recursive: true, force: true })
   }
@@ -65,10 +83,44 @@ test('a healthy Canvas service from an earlier cache is not mistaken for stale',
     const result = await selectPort({
       requestedProject: projectB,
       runningProject: canonicalA,
+      runningStorageKind: '',
       runningCommand: '/tmp/canvas-prompt-cache/older/app/node_modules/vite/bin/vite.js --port 43223',
     })
     assert.equal(result.stdout, '43224', result.stderr)
   } finally {
     await rm(projects, { recursive: true, force: true })
+  }
+})
+
+test('macOS canvas service receives the configured ASR identity instead of reverting to port 8080', async () => {
+  const temp = await mkdtemp(resolve(tmpdir(), 'canvas-asr-identity-'))
+  try {
+    const bin = resolve(temp, 'bin')
+    const submission = resolve(temp, 'launchctl-submit.txt')
+    await mkdir(bin)
+    await fakeCommand(bin, 'lsof', 'exit 0')
+    await fakeCommand(bin, 'curl', "echo '<title>Canvas Prompt</title>'")
+    // This test only verifies the macOS launch arguments. On Linux CI, force
+    // the same branch so the script never execs a long-lived Vite process.
+    await fakeCommand(bin, 'uname', "echo Darwin")
+    await fakeCommand(bin, 'launchctl', `if [[ "$1" == "submit" ]]; then printf '%s\\n' "$@" > ${JSON.stringify(submission)}; fi`)
+    const project = resolve(temp, 'project')
+    await mkdir(project)
+    await run('bash', [script, project], {
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        CANVAS_PROMPT_PORT: '43319',
+        CANVAS_PROMPT_ASR_PORT: '18081',
+        CANVAS_PROMPT_ASR: 'disabled',
+        CANVAS_PROMPT_DELIVERY_MODE: 'codex',
+      },
+    })
+    const args = await (await import('node:fs/promises')).readFile(submission, 'utf8')
+    assert.match(args, /http:\/\/127\.0\.0\.1:18081/)
+    assert.match(args, /^disabled$/m)
+    assert.match(args, /^codex$/m)
+  } finally {
+    await rm(temp, { recursive: true, force: true })
   }
 })

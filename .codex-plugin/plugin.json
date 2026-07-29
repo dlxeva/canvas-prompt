@@ -1,6 +1,6 @@
 {
   "name": "canvas-prompt",
-  "version": "0.1.5+codex.20260726235000",
+  "version": "0.1.29+codex.20260729062500",
   "description": "A local thinking canvas for Codex: draw, circle, move, and export the context behind your prompt.",
   "author": {
     "name": "Canvas Prompt",
@@ -9,19 +9,25 @@
   "homepage": "https://github.com/dlxeva/canvas-prompt",
   "repository": "https://github.com/dlxeva/canvas-prompt",
   "license": "AGPL-3.0-or-later",
-  "keywords": ["canvas", "whiteboard", "thinking", "context", "voice"],
+  "keywords": [
+    "canvas",
+    "whiteboard",
+    "thinking",
+    "context",
+    "voice"
+  ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Canvas Prompt",
     "shortDescription": "Draw, circle, move, and export the context behind your prompt.",
-    "longDescription": "Canvas Prompt is a local canvas for the work that happens before a clean chat prompt exists. Draw, circle, move, and explain; export the round as project-local context that Codex can read.",
+    "longDescription": "Canvas Prompt is a local canvas for the work that happens before a clean chat prompt exists. Draw, circle, move, and explain; export each round as device-local context that Codex can read on explicit request.",
     "developerName": "Canvas Prompt",
     "category": "Productivity",
     "capabilities": [
       "Interactive canvas",
       "Voice and timeline capture",
       "Prompt Package export",
-      "Project-local package persistence",
+      "Single-board local package archive",
       "MCP package inspection"
     ],
     "brandColor": "#C8462B",
@@ -29,9 +35,9 @@
     "logo": "./assets/logo.png",
     "logoDark": "./assets/logo-dark.png",
     "defaultPrompt": [
-      "Open the Canvas Prompt thinking canvas for this project.",
+      "Open the Canvas Prompt thinking canvas.",
       "Export this Canvas Prompt session as a Prompt Package.",
-      "Read the latest Canvas Prompt Package for this project."
+      "Continue with the latest Canvas Prompt board context."
     ]
   },
   "mcpServers": "./.mcp.json"

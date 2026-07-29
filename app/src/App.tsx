@@ -12,9 +12,9 @@ import { WindowedAsrSession } from './windowed-asr'
 import type { AsrWindowProgress } from './windowed-asr'
 import { compactTraceToCognitiveEvents, buildPointerTrack } from './excalidraw-cognitive-events'
 import { compilePromptPackage, validatePromptPackage } from './prompt-package-compiler'
-import type { BaselineContext, CanvasObject, Keyframe, PromptPackage, ViewTransformation } from './prompt-package-compiler'
+import type { BaselineContext, CanvasObject, EditableSourceImage, Keyframe, PromptPackage, ViewTransformation } from './prompt-package-compiler'
 import { appendViewTransformation } from './view-transform'
-import { countIncludedBaselineObjects, projectLiveRoundElementIds } from './baseline-projection'
+import { countIncludedBaselineObjects, projectFinalSnapshotElements, projectLiveRoundElementIds } from './baseline-projection'
 import { deriveExportReceiptStatus, isReceiptComplete } from './receipt-state'
 import type { ExportReceiptStatus, HandoffReceipt } from './receipt-state'
 import { protectedLocalApiFetch } from './protected-local-api'
@@ -32,10 +32,11 @@ const tools: Array<{ id: CanvasTool; zh: string; en: string }> = [
   { id: 'ellipse', zh: '圆形', en: 'Ellipse' },
   { id: 'eraser', zh: '擦除', en: 'Erase' },
 ]
+const CANONICAL_CONTINUATION_COMMAND = '根据画布内容推进'
 
 const ui = {
-  zh: { importImage: '导入图片', importing: '正在导入…', more: '更多功能', archive: '本地档案', recording: '录音中', finish: '结束推演', processing: '处理中', export: '发送到当前对话', retryExport: '重新发送到当前对话', sending: '正在发送…', archived: '✓ 已保存到本地', accepted: '✓ 已送入主对话', deliveredReceipt: '✓ 主对话已完成处理', failedReceipt: '已保存 · 推送失败', next: '开始下一轮', start: '开始推演', preparing: '准备中…', canvasTools: '画布工具', expandTools: '展开画布工具', collapseTools: '收起画布工具', undo: '撤销（⌘Z）', redo: '重做（⇧⌘Z）', zoomOut: '缩小', zoomIn: '放大', color: '颜色', weight: '粗细', releaseToImport: '松开以导入图片', archiveDescription: '保存在本项目的', archiveDescriptionEnd: '。不自动上传云端；删除后无法恢复。', closeArchive: '关闭本地档案', loadingArchive: '正在读取本地档案…', noArchive: '还没有已归档的推演。', seconds: '秒', unknownDuration: '时长未知', snapshot: '画布快照', noSnapshot: '无快照', audio: '录音', noAudio: '无录音', delivered: '已送达', sent: '已接收', sendFailed: '发送失败', local: '仅本地', delete: '删除' },
-  en: { importImage: 'Import image', importing: 'Importing…', more: 'More', archive: 'Local archive', recording: 'Recording', finish: 'Finish session', processing: 'Processing', export: 'Send to Codex', retryExport: 'Retry sending', sending: 'Sending…', archived: '✓ Saved locally', accepted: '✓ Sent to main conversation', deliveredReceipt: '✓ Main conversation completed', failedReceipt: 'Saved · send failed', next: 'Start next round', start: 'Start session', preparing: 'Preparing…', canvasTools: 'Canvas tools', expandTools: 'Expand tools', collapseTools: 'Collapse tools', undo: 'Undo (⌘Z)', redo: 'Redo (⇧⌘Z)', zoomOut: 'Zoom out', zoomIn: 'Zoom in', color: 'Color', weight: 'Weight', releaseToImport: 'Release to import image', archiveDescription: 'Stored locally in', archiveDescriptionEnd: '. Nothing is uploaded automatically; deleted rounds cannot be recovered.', closeArchive: 'Close local archive', loadingArchive: 'Loading local archive…', noArchive: 'No saved rounds yet.', seconds: 'sec', unknownDuration: 'duration unknown', snapshot: 'canvas snapshot', noSnapshot: 'no snapshot', audio: 'audio', noAudio: 'no audio', delivered: 'delivered', sent: 'received', sendFailed: 'send failed', local: 'local only', delete: 'Delete' },
+  zh: { importImage: '导入图片', importing: '正在导入…', more: '更多功能', archive: '本地档案', recording: '录音中', asrPreparing: '语音准备中', asrUnavailable: '语音不转写', finish: '结束推演', processing: '处理中', export: '整理本轮', retryExport: '重新整理本轮', sending: '正在整理…', archived: '✓ 本轮已整理', accepted: '✓ 本轮已整理', deliveredReceipt: '✓ 本轮已整理', failedReceipt: '✓ 本轮已整理', next: '开始下一轮', start: '开始推演', startVisualOnly: '不等语音，开始画', preparing: '准备中…', canvasTools: '画布工具', expandTools: '展开画布工具', collapseTools: '收起画布工具', undo: '撤销（⌘Z）', redo: '重做（⇧⌘Z）', zoomOut: '缩小', zoomIn: '放大', color: '颜色', weight: '粗细', releaseToImport: '松开以导入图片', archiveDescription: '保存在这台设备上。', archiveDescriptionEnd: '不自动上传云端；删除后无法恢复。', closeArchive: '关闭本地档案', loadingArchive: '正在读取本地档案…', noArchive: '还没有已归档的推演。', seconds: '秒', unknownDuration: '时长未知', snapshot: '画布快照', noSnapshot: '无快照', audio: '录音', noAudio: '无录音', delivered: '已整理', sent: '已整理', sendFailed: '已整理', local: '已整理', delete: '删除' },
+  en: { importImage: 'Import image', importing: 'Importing…', more: 'More', archive: 'Local archive', recording: 'Recording', asrPreparing: 'Speech preparing', asrUnavailable: 'Speech not transcribed', finish: 'Finish session', processing: 'Processing', export: 'Finish this round', retryExport: 'Try again', sending: 'Finishing…', archived: '✓ Round ready · Continue in this conversation', accepted: '✓ Round ready · Continue in this conversation', deliveredReceipt: '✓ Round ready · Continue in this conversation', failedReceipt: '✓ Round ready · Continue in this conversation', next: 'Start next round', start: 'Start session', startVisualOnly: 'Start without speech', preparing: 'Preparing…', canvasTools: 'Canvas tools', expandTools: 'Expand tools', collapseTools: 'Collapse tools', undo: 'Undo (⌘Z)', redo: 'Redo (⇧⌘Z)', zoomOut: 'Zoom out', zoomIn: 'Zoom in', color: 'Color', weight: 'Weight', releaseToImport: 'Release to import image', archiveDescription: 'Stored on this device. ', archiveDescriptionEnd: 'Nothing is uploaded automatically; deleted rounds cannot be recovered.', closeArchive: 'Close local archive', loadingArchive: 'Loading local archive…', noArchive: 'No saved rounds yet.', seconds: 'sec', unknownDuration: 'duration unknown', snapshot: 'canvas snapshot', noSnapshot: 'no snapshot', audio: 'audio', noAudio: 'no audio', delivered: 'ready', sent: 'ready', sendFailed: 'ready', local: 'ready', delete: 'Delete' },
 } as const
 
 function visibleWorkflowMessage(message: string, locale: Locale) {
@@ -44,6 +45,7 @@ function visibleWorkflowMessage(message: string, locale: Locale) {
     '画下来，圈出来，需要时说出来。': 'Draw it, circle it, and speak when useful.',
     '正在准备本次推演…': 'Preparing this session…',
     '推演中 · 画、圈、移动，也可以直接说。语音会在后台分段整理。': 'In session · Draw, circle, move, and speak. Audio is transcribed in the background.',
+    '推演中 · 画、圈、移动。当前没有可用语音转写。': 'In session · Draw, circle, and move. Speech transcription is not available.',
     '推演中 · 画、圈、移动，也可以直接说。': 'In session · Draw, circle, move, and speak.',
     '推演中 · 麦克风不可用，但画布过程仍会被记录。': 'In session · Microphone unavailable; canvas activity is still recorded.',
     '正在结束录音…': 'Finishing the recording…',
@@ -51,9 +53,11 @@ function visibleWorkflowMessage(message: string, locale: Locale) {
     '少量语音片段需要回退补齐…': 'A few audio segments need recovery…',
     '正在整理画布和标记…': 'Compiling canvas marks…',
     '正在准备本轮上下文…': 'Preparing this round’s context…',
-    '本轮内容已整理完成。导出后会作为主对话的上下文。': 'This round is ready. Export it as context for the main conversation.',
+    [`本轮内容已整理完成。在当前对话输入「${CANONICAL_CONTINUATION_COMMAND}」。`]: 'This round is ready. In the current conversation, enter: “Continue with the canvas context”.',
     '本轮内容已整理完成；当前没有可用的语音转写。': 'This round is ready; no usable voice transcript is available.',
-    '正在归档并发送到当前对话…': 'Archiving and sending to the current conversation…',
+    '正在归档本轮上下文…': 'Preparing this round…',
+    '本轮已整理完成。回到当前对话继续说、提问或下达下一步。': 'This round is ready. Continue in the current conversation—say, ask, or direct the next step.',
+    '本轮已整理完成。请回到当前对话继续。': 'This round is ready. Continue in the current conversation.',
   }
   return translated[message] ?? message
 }
@@ -104,6 +108,11 @@ type StoredRound = {
   handoff?: HandoffReceipt
 }
 
+type EditableSourceUpload = {
+  metadata: EditableSourceImage
+  blob: Blob
+}
+
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -129,6 +138,56 @@ function imageDimensions(blob: Blob): Promise<{ width: number; height: number }>
   })
 }
 
+function imageExtension(mimeType: string) {
+  const subtype = mimeType.split('/')[1]?.toLowerCase()
+  if (subtype === 'jpeg' || subtype === 'jpg' || subtype === 'jfif') return 'jpg'
+  if (subtype === 'svg+xml') return 'svg'
+  if (subtype && /^[a-z0-9]+$/.test(subtype)) return subtype
+  return 'png'
+}
+
+/**
+ * Preserve the imported image separately from the annotated canvas snapshot.
+ * The snapshot is evidence of the user's marks; this is the only material an
+ * image-editing turn may use as its visual source.
+ */
+async function collectEditableSourceImages(
+  elements: readonly CanvasElement[],
+  files: Record<string, { dataURL?: string; mimeType?: string }> | null | undefined,
+): Promise<EditableSourceUpload[]> {
+  if (!files) return []
+  const uploads: EditableSourceUpload[] = []
+  for (const element of elements) {
+    if (element.type !== 'image' || element.isDeleted || !('fileId' in element) || !element.fileId) continue
+    const file = files[element.fileId]
+    if (!file?.dataURL?.startsWith('data:image/')) continue
+    try {
+      const response = await fetch(file.dataURL)
+      const blob = await response.blob()
+      const mimeType = file.mimeType || blob.type || 'image/png'
+      if (!mimeType.startsWith('image/') || blob.size === 0) continue
+      const dimensions = await imageDimensions(blob).catch(() => ({ width: Math.max(1, Math.round(element.width)), height: Math.max(1, Math.round(element.height)) }))
+      const artifactObjectId = `obj_${element.id}`
+      uploads.push({
+        metadata: {
+          artifact_object_id: artifactObjectId,
+          asset_id: element.fileId,
+          mime_type: mimeType,
+          width: dimensions.width,
+          height: dimensions.height,
+          archive_relative_path: `source-images/${element.id}.${imageExtension(mimeType)}`,
+          availability: 'available',
+        },
+        blob,
+      })
+    } catch {
+      // The final snapshot remains available even if one browser-managed image
+      // cannot be re-read. Do not claim an editable original for that asset.
+    }
+  }
+  return uploads
+}
+
 function sceneBounds(elements: readonly CanvasElement[]) {
   const visible = elements.filter((element) => !element.isDeleted)
   if (visible.length === 0) return { x: 0, y: 0, width: 1, height: 1 }
@@ -137,6 +196,33 @@ function sceneBounds(elements: readonly CanvasElement[]) {
   const right = Math.max(...visible.map((element) => element.x + element.width))
   const bottom = Math.max(...visible.map((element) => element.y + element.height))
   return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) }
+}
+
+function baselineAnchorFromElement(element: CanvasElement): CanvasObject {
+  const semanticContent = element.type === 'text'
+    ? (element.originalText?.trim() || element.text?.trim() || '')
+    : ''
+  const type: CanvasObject['type'] = element.type === 'text'
+    ? 'text_block'
+    : element.type === 'image'
+      ? 'image'
+      : ['rectangle', 'ellipse', 'diamond', 'line', 'arrow'].includes(element.type)
+        ? 'shape'
+        : 'diagram_element'
+  return {
+    object_id: `obj_${element.id}`,
+    type,
+    timestamp_ms: 0,
+    bounds: { x: element.x, y: element.y, width: element.width, height: element.height },
+    properties: {
+      shapeType: element.type,
+      color: element.strokeColor ?? null,
+      baseline_anchor: true,
+      evidence_source: 'round_start_scene',
+    },
+    source_strokes: [element.id],
+    ...(semanticContent ? { semantic_content: semanticContent } : {}),
+  }
 }
 
 export default function App() {
@@ -157,6 +243,13 @@ export default function App() {
   const [workflowMessage, setWorkflowMessage] = useState('画下来，圈出来，需要时说出来。')
   const displayWorkflow = visibleWorkflowMessage(workflowMessage, locale)
   const [asrProgress, setAsrProgress] = useState<AsrWindowProgress>({ completed: 0, pending: 0, failed: 0, active: 0 })
+  const [asrAvailable, setAsrAvailable] = useState(false)
+  const [asrPreparing, setAsrPreparing] = useState(true)
+  const [asrEndpoint, setAsrEndpoint] = useState('http://127.0.0.1:8080')
+  // Do not probe the default port before runtime identity tells us which
+  // isolated ASR instance this canvas owns. Otherwise a cold start can briefly
+  // look like "audio only" (or accidentally observe another app's ASR).
+  const [asrRuntimeResolved, setAsrRuntimeResolved] = useState(false)
   const [compiledPackage, setCompiledPackage] = useState<PromptPackage | null>(null)
   const [lastRecording, setLastRecording] = useState<RecordingResult | null>(null)
   const [transcription, setTranscription] = useState<TranscriptionResult | null>(null)
@@ -183,6 +276,7 @@ export default function App() {
   const recorderRef = useRef<VoiceRecorder | null>(null)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
   const audioRunning = useRef(false)
+  const asrAvailableRef = useRef(false)
   const pointerSamples = useRef<Array<{ t: number; x: number; y: number; speed?: number; pressure?: number }>>([])
   const lastPointer = useRef<{ t: number; x: number; y: number } | null>(null)
   const lastPointerSampleAt = useRef(0)
@@ -191,6 +285,7 @@ export default function App() {
   // addressable artifact for later spatial candidates.
   const artifactImageIds = useRef(new Set<string>())
   const baselineObjectIds = useRef(new Set<string>())
+  const baselineAnchors = useRef<CanvasObject[]>([])
   const baselineContext = useRef<BaselineContext | null>(null)
   const stateFrames = useRef<Keyframe[]>([])
   const viewTransformations = useRef<ViewTransformation[]>([])
@@ -207,10 +302,53 @@ export default function App() {
 
   useEffect(() => {
     void fetch('/api/runtime-identity', { cache: 'no-store' })
-      .then(async (response) => response.ok ? await response.json() as { delivery_mode?: DeliveryMode } : null)
-      .then((identity) => { if (identity?.delivery_mode === 'codex' || identity?.delivery_mode === 'local') setDeliveryMode(identity.delivery_mode) })
+      .then(async (response) => response.ok ? await response.json() as { delivery_mode?: DeliveryMode; asr_url?: string | null; asr_enabled?: boolean } : null)
+      .then((identity) => {
+        if (identity?.delivery_mode === 'codex' || identity?.delivery_mode === 'local') setDeliveryMode(identity.delivery_mode)
+        if (typeof identity?.asr_url === 'string') setAsrEndpoint(identity.asr_url)
+        setAsrPreparing(identity?.asr_enabled !== false)
+      })
       .catch(() => undefined)
+      .finally(() => setAsrRuntimeResolved(true))
   }, [])
+
+  const refreshAsrAvailability = useCallback(async () => {
+    try {
+      asrClient.setBaseUrl(asrEndpoint)
+      const health = await asrClient.health()
+      // The launcher only reuses a Canvas Prompt-managed endpoint by default.
+      // Mirror that provenance check in the browser instead of treating an
+      // unrelated local Whisper process as this session's transcription.
+      const available = health.status === 'ok'
+        && health.whisper_loaded !== false
+        && health.canvas_prompt_asr === true
+      asrAvailableRef.current = available
+      setAsrAvailable(available)
+      if (available) setAsrPreparing(false)
+      return available
+    } catch {
+      asrAvailableRef.current = false
+      setAsrAvailable(false)
+      return false
+    }
+  }, [asrEndpoint])
+
+  useEffect(() => {
+    if (!asrRuntimeResolved) return
+    void refreshAsrAvailability()
+    const timer = window.setInterval(() => { void refreshAsrAvailability() }, 5_000)
+    return () => window.clearInterval(timer)
+  }, [asrRuntimeResolved, refreshAsrAvailability])
+
+  // A cold model download can take several minutes. During that time the
+  // canvas remains visible, but a session cannot begin and falsely promise
+  // timestamped speech. After the grace window a failed service becomes the
+  // explicit visual-only state instead of blocking forever.
+  useEffect(() => {
+    if (!asrPreparing || asrAvailable) return
+    const timer = window.setTimeout(() => setAsrPreparing(false), 10 * 60_000)
+    return () => window.clearTimeout(timer)
+  }, [asrAvailable, asrPreparing])
 
   const bindCanvasApi = useCallback((canvasApi: ExcalidrawImperativeAPI) => {
     apiRef.current = canvasApi
@@ -236,8 +374,26 @@ export default function App() {
     return () => window.clearInterval(timer)
   }, [recording])
 
+  // A stationary mouse does not keep emitting pointermove events. Once a
+  // pointer has entered the drawing surface, sample its last scene position
+  // while it remains there so an intentional hover becomes a dwell gesture.
+  useEffect(() => {
+    if (!recording || !startedAt) return
+    const timer = window.setInterval(() => {
+      const previous = lastPointer.current
+      if (!previous) return
+      const now = Date.now()
+      if (now - lastPointerSampleAt.current < 100) return
+      const t = now - startedAt
+      pointerSamples.current.push({ t, x: previous.x, y: previous.y, speed: 0 })
+      lastPointer.current = { t, x: previous.x, y: previous.y }
+      lastPointerSampleAt.current = now
+    }, 100)
+    return () => window.clearInterval(timer)
+  }, [recording, startedAt])
+
   const beginTrace = async () => {
-    if (recording || sessionStage === 'compiling') return
+    if (recording || sessionStage === 'compiling' || asrPreparing) return
     const startElements = (apiRef.current ?? api)?.getSceneElementsIncludingDeleted() ?? []
     setSessionStage('starting')
     setWorkflowMessage('正在准备本次推演…')
@@ -245,6 +401,7 @@ export default function App() {
     const baseline = startElements
     const liveBaseline = baseline.filter((element) => !element.isDeleted)
     baselineObjectIds.current = new Set(liveBaseline.map((element) => element.id))
+    baselineAnchors.current = liveBaseline.map(baselineAnchorFromElement)
     versions.current = new Map(baseline.map((element) => [element.id, {
       version: element.version,
       isDeleted: element.isDeleted,
@@ -296,14 +453,16 @@ export default function App() {
     setNowMs(start)
     setRecording(true)
     audioRunning.current = false
+    const canTranscribe = await refreshAsrAvailability()
     try {
       await recorderRef.current?.start()
       audioRunning.current = true
       const stream = recorderRef.current?.createInputStreamClone()
-      if (stream && typeof MediaRecorder !== 'undefined') {
+      if (canTranscribe && stream && typeof MediaRecorder !== 'undefined') {
         windowedAsrRef.current = new WindowedAsrSession({
           stream,
           language: recordingLocale === 'zh' ? 'zh-CN' : 'en',
+          endpoint: `${asrEndpoint}/transcribe?backend=whisper`,
           windowMs: 25_000,
           overlapMs: 3_000,
           onProgress: setAsrProgress,
@@ -311,11 +470,15 @@ export default function App() {
         windowedAsrRef.current.start()
         transcriberRef.current = null
         setWorkflowMessage('推演中 · 画、圈、移动，也可以直接说。语音会在后台分段整理。')
-      } else {
+      } else if (canTranscribe) {
         // Fallback for browsers without a second MediaRecorder stream.
-        transcriberRef.current = new VoiceTranscriber({ strategy: 'local-whisper', language: recordingLocale, asrServerUrl: 'http://localhost:8080' })
+        transcriberRef.current = new VoiceTranscriber({ strategy: 'local-whisper', language: recordingLocale, asrServerUrl: asrEndpoint })
         await transcriberRef.current.start()
         setWorkflowMessage('推演中 · 画、圈、移动，也可以直接说。')
+      } else {
+        transcriberRef.current = null
+        windowedAsrRef.current = null
+        setWorkflowMessage('推演中 · 画、圈、移动。当前没有可用语音转写。')
       }
     } catch {
       setWorkflowMessage('推演中 · 麦克风不可用，但画布过程仍会被记录。')
@@ -365,7 +528,7 @@ export default function App() {
       }
       // Do not export a partial timeline just because some windows succeeded.
       // The raw archival recording is the authoritative recovery source.
-      if ((!transcript?.text || backgroundSession?.hasFailures()) && audio?.blob) {
+      if (asrAvailableRef.current && (!transcript?.text || backgroundSession?.hasFailures()) && audio?.blob) {
         if (backgroundSession?.hasFailures()) setWorkflowMessage('少量语音片段需要回退补齐…')
         try {
           const result = await asrClient.transcribe(audio.blob, sessionLocale.current)
@@ -383,6 +546,10 @@ export default function App() {
       setTranscription(transcript)
       setWorkflowMessage('正在整理画布和标记…')
       const elements = api?.getSceneElements() ?? []
+      const editableSourceImages = await collectEditableSourceImages(
+        elements,
+        (api?.getFiles() ?? null) as Record<string, { dataURL?: string; mimeType?: string }> | null,
+      )
       const baseArtifacts: CanvasObject[] = elements
         .filter((element) => artifactImageIds.current.has(element.id) && element.type === 'image' && !element.isDeleted)
         .map((element) => ({
@@ -395,9 +562,16 @@ export default function App() {
           bounds: { x: element.x, y: element.y, width: element.width, height: element.height },
           properties: { base_artifact: true, asset_id: 'fileId' in element ? element.fileId ?? null : null },
         }))
+      // Keep the two projections deliberately separate. The compiler's event
+      // graph is scoped to this round, while the image a person (and an AI)
+      // receives must show the whole canvas they were actually annotating.
       const currentRoundIds = projectLiveRoundElementIds(elements, trace.current, artifactImageIds.current)
+      const finalSnapshotElements = projectFinalSnapshotElements(elements)
       const baselineObjectCount = baselineContext.current?.object_count ?? 0
-      const includedBaselineCount = countIncludedBaselineObjects(baselineObjectIds.current, currentRoundIds)
+      const includedBaselineCount = countIncludedBaselineObjects(
+        baselineObjectIds.current,
+        new Set(finalSnapshotElements.map((element) => element.id)),
+      )
       const roundBaselineContext: BaselineContext | undefined = baselineContext.current
         ? {
             ...baselineContext.current,
@@ -412,9 +586,9 @@ export default function App() {
           }
         : undefined
       const roundElements = elements.filter((element) => currentRoundIds.has(element.id))
-      const screenshotBlob = await exportToBlob({ elements: roundElements, appState: api?.getAppState(), files: api?.getFiles() ?? null, mimeType: 'image/png', exportPadding: 24 })
+      const screenshotBlob = await exportToBlob({ elements: finalSnapshotElements, appState: api?.getAppState(), files: api?.getFiles() ?? null, mimeType: 'image/png', exportPadding: 24 })
       const [screenshot, snapshotSize] = await Promise.all([blobToDataUrl(screenshotBlob), imageDimensions(screenshotBlob)])
-      const exportedSceneBounds = sceneBounds(roundElements)
+      const exportedSceneBounds = sceneBounds(finalSnapshotElements)
       setWorkflowMessage('正在准备本轮上下文…')
       const cognitiveEvents = compactTraceToCognitiveEvents(trace.current)
       const pointerTrack = buildPointerTrack(pointerSamples.current)
@@ -434,6 +608,8 @@ export default function App() {
         language: transcript?.language || (sessionLocale.current === 'zh' ? 'zh-CN' : 'en'),
         tags: ['canvas-prompt', 'excalidraw'],
         baseArtifacts,
+        sourceImages: editableSourceImages.map((item) => item.metadata),
+        baselineAnchors: baselineAnchors.current,
         viewTransformations: viewTransformations.current,
         baselineContext: roundBaselineContext,
         keyframes: stateFrames.current,
@@ -449,10 +625,17 @@ export default function App() {
       const validation = validatePromptPackage(pkg)
       if (!validation.valid) throw new Error(validation.errors.join('；'))
       setCompiledPackage(pkg)
+      // Ending a session is the user's one completion action. Persisting the
+      // package is an internal reliability step of sending it, never a second
+      // user task they must discover after the canvas has stopped recording.
       setWorkflowMessage(transcript?.text
-        ? '本轮内容已整理完成。导出后会作为主对话的上下文。'
-        : '本轮内容已整理完成；当前没有可用的语音转写。')
+        ? '正在整理画布和标记…'
+        : '正在整理画布和标记…')
       setSessionStage('ready')
+      // `setLastRecording(audio)` does not synchronously update React state.
+      // Pass this round's finished recording explicitly so the durable archive
+      // cannot accidentally omit it while its transcript is retained.
+      await exportPromptPackage({ packageToExport: pkg, recordingToArchive: audio, editableSourceImages })
     } catch (error) {
       setWorkflowMessage(`整理失败：${error instanceof Error ? error.message : '请重试'}`)
       setSessionStage('error')
@@ -476,14 +659,9 @@ export default function App() {
         const receipt = round?.handoff ?? null
         const status = deriveExportReceiptStatus(receipt)
         if (receipt) setHandoffReceipt(receipt)
-        if (status === 'delivered') {
-          setExportStatus('delivered')
-          setWorkflowMessage('本轮已送达当前 Codex 对话。')
-          return
-        }
-        if (status === 'failed') {
-          setExportStatus('failed')
-          setWorkflowMessage('本轮已保存在本地，但主对话未能完成处理。')
+        if (status === 'delivered' || status === 'failed') {
+          setExportStatus(status)
+          setWorkflowMessage(`本轮内容已整理完成。在当前对话输入「${CANONICAL_CONTINUATION_COMMAND}」。`)
           return
         }
       } catch {
@@ -493,22 +671,40 @@ export default function App() {
     }
   }
 
-  const exportPromptPackage = async ({ retryHandoff = false } = {}) => {
-    if (!compiledPackage) return
+  const exportPromptPackage = async ({
+    retryHandoff = false,
+    packageToExport = compiledPackage,
+    recordingToArchive = lastRecording,
+    editableSourceImages = [],
+  }: {
+    retryHandoff?: boolean
+    packageToExport?: PromptPackage | null
+    recordingToArchive?: RecordingResult | null
+    editableSourceImages?: EditableSourceUpload[]
+  } = {}) => {
+    if (!packageToExport) return
     setExportStatus('exporting')
     setHandoffReceipt(null)
-    setWorkflowMessage(deliveryMode === 'codex' ? '正在归档并发送到当前对话…' : '正在归档本轮上下文…')
+    setWorkflowMessage('正在归档本轮上下文…')
     const payload = {
-      ...compiledPackage,
-      source: { canvas: 'excalidraw', trace: trace.current, audio: lastRecording ? { mime_type: lastRecording.blob.type, duration_ms: lastRecording.duration } : null },
+      ...packageToExport,
+      source: { canvas: 'excalidraw', trace: trace.current, audio: recordingToArchive ? { mime_type: recordingToArchive.blob.type, duration_ms: recordingToArchive.duration } : null },
     }
 
     try {
-      if (lastRecording) {
-        const audioResponse = await protectedLocalApiFetch(`/api/round-audio/${compiledPackage.meta.package_id}`, {
+      for (const sourceImage of editableSourceImages) {
+        const response = await protectedLocalApiFetch(`/api/round-source-image/${packageToExport.meta.package_id}/${encodeURIComponent(sourceImage.metadata.artifact_object_id)}`, {
           method: 'POST',
-          headers: { 'content-type': lastRecording.blob.type || 'audio/webm' },
-          body: lastRecording.blob,
+          headers: { 'content-type': sourceImage.metadata.mime_type },
+          body: sourceImage.blob,
+        })
+        if (!response.ok) throw new Error('原图未能保存到本轮档案')
+      }
+      if (recordingToArchive) {
+        const audioResponse = await protectedLocalApiFetch(`/api/round-audio/${packageToExport.meta.package_id}`, {
+          method: 'POST',
+          headers: { 'content-type': recordingToArchive.blob.type || 'audio/webm' },
+          body: recordingToArchive.blob,
         })
         if (!audioResponse.ok) throw new Error('本轮录音未能保存到本地档案')
       }
@@ -519,25 +715,17 @@ export default function App() {
         // It is intentionally not retained inside the model-facing package.
         body: JSON.stringify(payload),
       })
-      const result = await response.json().catch(() => null) as { ok?: boolean; error?: string; engine?: { error?: string }; handoff?: HandoffReceipt } | null
+      const result = await response.json().catch(() => null) as { ok?: boolean; error?: string; roundPath?: string; engine?: { error?: string }; handoff?: HandoffReceipt } | null
       if (!response.ok || !result?.ok) throw new Error(result?.error || result?.engine?.error || `本轮上下文未能归档（${response.status}）`)
       const receiptStatus = deriveExportReceiptStatus(result.handoff)
       setHandoffReceipt(result.handoff ?? null)
       setExportStatus(receiptStatus)
-      setWorkflowMessage(deliveryMode === 'local'
-        ? '本轮已保存在本地。请在你的 AI 终端中读取 Canvas Prompt 上下文。'
-        : receiptStatus === 'delivered'
-        ? '本轮已送达当前 Codex 对话。'
-          : receiptStatus === 'accepted'
-            ? '本轮已送入主对话，请在主对话继续。'
-          : receiptStatus === 'failed'
-            ? `本轮已保存在本地，但主对话没有确认接收：${result.handoff?.reason || '可重新发送'}`
-            : '本轮已保存在本地，并已完成核心编译。')
+      setWorkflowMessage(`本轮内容已整理完成。在当前对话输入「${CANONICAL_CONTINUATION_COMMAND}」。`)
       if (storageOpen) void loadStoredRounds()
       window.dispatchEvent(new Event('canvas-prompt-exported'))
     } catch (error) {
       setExportStatus('error')
-      setWorkflowMessage(`本轮未送达：${error instanceof Error ? error.message : '请重试'}`)
+      setWorkflowMessage(`本轮整理失败：${error instanceof Error ? error.message : '请重试'}`)
     }
   }
 
@@ -887,19 +1075,20 @@ export default function App() {
 
   const latestEvent = events.at(-1)
   const hasReceipt = exportStatus !== 'error' && isReceiptComplete(exportStatus)
-  const canRetryHandoff = deliveryMode === 'codex' && exportStatus === 'failed' && handoffReceipt?.accepted !== true
-  const exportLabel = deliveryMode === 'codex' ? text.export : locale === 'zh' ? '保存上下文' : 'Save context'
-  const retryExportLabel = deliveryMode === 'codex' ? text.retryExport : locale === 'zh' ? '重新保存上下文' : 'Save context again'
-  const receiptText = exportStatus === 'delivered'
-    ? text.deliveredReceipt
-    : exportStatus === 'accepted'
-    ? text.accepted
-      : exportStatus === 'failed'
-        ? text.failedReceipt
-        : text.archived
+  const canRetryHandoff = false
+  const exportLabel = text.export
+  const retryExportLabel = text.retryExport
+  const receiptText = text.archived
 
   const capturePointer = (event: React.PointerEvent<HTMLElement>) => {
     if (!recording || !startedAt || !api) return
+    // Excalidraw handles pointer events internally and can stop bubbling.
+    // Capture at the canvas boundary so a natural hover remains evidence even
+    // when no canvas element changes; ignore our own toolbar controls.
+    if ((event.target as Element).closest('.canvas-tools')) {
+      lastPointer.current = null
+      return
+    }
     const now = Date.now()
     if (now - lastPointerSampleAt.current < 100) return
     lastPointerSampleAt.current = now
@@ -911,6 +1100,11 @@ export default function App() {
     const speed = previous ? Math.hypot(x - previous.x, y - previous.y) / Math.max(1, t - previous.t) : 0
     pointerSamples.current.push({ t, x, y, speed, pressure: event.pressure || undefined })
     lastPointer.current = { t, x, y }
+  }
+
+  const stopPointerCapture = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return
+    lastPointer.current = null
   }
 
   return (
@@ -930,6 +1124,8 @@ export default function App() {
         </div>
         <div className="header-actions">
           {recording ? <span className="recording-state" aria-live="polite"><i />{text.recording} {elapsed}</span> : null}
+          {!recording && asrPreparing ? <span className="quiet-state" title={locale === 'zh' ? '正在准备本地语音模型；准备完成前不会开始会丢失转写的推演。' : 'The local speech model is preparing; a session stays disabled until timestamped transcription is ready.'}>{text.asrPreparing}</span> : null}
+          {!recording && !asrPreparing && !asrAvailable ? <span className="quiet-state" title={locale === 'zh' ? '当前没有可用语音转写；这一轮不会包含语音文本。' : 'Speech transcription is unavailable; this round will not include speech text.'}>{text.asrUnavailable}</span> : null}
           {recording ? (
             <button className="button icon-button stop" onClick={() => void finishTrace()} aria-label={text.finish} title={text.finish}><HeaderIcon kind="stop" /></button>
           ) : sessionStage === 'compiling' ? (
@@ -945,10 +1141,12 @@ export default function App() {
             <>
               <span className={`receipt-status receipt-${exportStatus}`} role="status">{receiptText}</span>
               {canRetryHandoff ? <button className="button icon-button" onClick={() => void exportPromptPackage({ retryHandoff: true })} aria-label={retryExportLabel} title={retryExportLabel}><HeaderIcon kind="send" /></button> : null}
-              <button className="button primary session-action" onClick={() => void beginTrace()}><HeaderIcon kind="next" /><span>{text.next}</span></button>
+              <button className="button primary session-action" onClick={() => void beginTrace()} disabled={asrPreparing}><HeaderIcon kind="next" /><span>{text.next}</span></button>
             </>
+          ) : asrPreparing ? (
+            <button className="button session-action" onClick={() => setAsrPreparing(false)} title={locale === 'zh' ? '本轮会保留画布过程；尚未就绪的语音不会转写。' : 'This round keeps the visual process; speech is not transcribed until the local model is ready.'}><HeaderIcon kind="record" /><span>{text.startVisualOnly}</span></button>
           ) : (
-            <button className="button primary session-action" onClick={() => void beginTrace()} disabled={sessionStage === 'starting'}><HeaderIcon kind="record" /><span>{sessionStage === 'starting' ? text.preparing : text.start}</span></button>
+            <button className="button primary session-action" onClick={() => void beginTrace()} disabled={sessionStage === 'starting' || asrPreparing}><HeaderIcon kind="record" /><span>{sessionStage === 'starting' || asrPreparing ? text.preparing : text.start}</span></button>
           )}
           <button className="button icon-button image-import" type="button" disabled={imageImporting} onClick={() => imageInputRef.current?.click()} aria-label={imageImporting ? text.importing : text.importImage} title={imageImporting ? text.importing : text.importImage}>
             <HeaderIcon kind="upload" />
@@ -980,7 +1178,8 @@ export default function App() {
 
       <section
         className={imageDropActive ? 'canvas-wrap spike-canvas drop-active' : 'canvas-wrap spike-canvas'}
-        onPointerMove={capturePointer}
+        onPointerMoveCapture={capturePointer}
+        onPointerOutCapture={stopPointerCapture}
         onDragOverCapture={handleExternalDragOver}
         onDragLeave={() => setImageDropActive(false)}
         onDropCapture={handleExternalDrop}
@@ -1088,7 +1287,7 @@ export default function App() {
       {storageOpen && <div className="storage-backdrop" role="presentation" onClick={() => setStorageOpen(false)}>
         <section className="storage-dialog" role="dialog" aria-modal="true" aria-label={text.archive} onClick={(event) => event.stopPropagation()}>
           <div className="storage-dialog-head">
-            <div><h2>{text.archive}</h2><p>{text.archiveDescription} <code>.canvas-prompt/rounds</code>{text.archiveDescriptionEnd}</p></div>
+            <div><h2>{text.archive}</h2><p>{text.archiveDescription}{text.archiveDescriptionEnd}</p></div>
             <button className="dialog-close" type="button" onClick={() => setStorageOpen(false)} aria-label={text.closeArchive}>×</button>
           </div>
           <div className="storage-list">

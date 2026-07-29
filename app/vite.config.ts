@@ -9,8 +9,9 @@ import type { Plugin } from 'vite'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { handoffToMainThread } from './codex-main-thread-handoff.mjs'
-import { deleteRoundAndUpdateLatest } from './round-store.mjs'
+import { deleteRoundAndUpdateLatest, writeFileAtomically } from './round-store.mjs'
 import { submitImmutableRound } from './round-submission.mjs'
+import { resolveConversationScope } from './conversation-scope.mjs'
 import {
   enforceProtectedLocalApi,
   enforceRuntimeSession,
@@ -22,19 +23,61 @@ import {
 } from './local-api-guard'
 
 const configDir = dirname(fileURLToPath(import.meta.url))
-const projectDir = resolve(process.env.CANVAS_PROMPT_PROJECT_DIR ?? resolve(configDir, '..'))
-const latestPackagePath = resolve(projectDir, '.canvas-prompt', 'latest-prompt-package.json')
-const roundsDir = resolve(projectDir, '.canvas-prompt', 'rounds')
+const configuredProjectDir = process.env.CANVAS_PROMPT_PROJECT_DIR
+const codexMainThreadId = process.env.CANVAS_PROMPT_CODEX_THREAD_ID ?? process.env.CANVAS_PROMPT_THREAD_ID
+const canvasSessionId = process.env.CANVAS_PROMPT_SESSION_ID
+// Direct Vite development and its test runner have no host context. Keep the
+// old source-root fallback only there; a launched project-less conversation
+// always supplies a thread ID and therefore receives no invented project.
+const projectDir = configuredProjectDir ? resolve(configuredProjectDir) : (codexMainThreadId || canvasSessionId) ? null : resolve(configDir, '..')
+// Canvas Prompt deliberately has one active user board. Project and thread
+// metadata remain provenance only; they never choose which latest round reads.
+const conversationScope = resolveConversationScope({ projectDir, threadId: codexMainThreadId, sessionId: canvasSessionId, singleBoard: true })
+const canvasDir = conversationScope.canvasDir
+const latestPackagePath = conversationScope.latestPackagePath
+const roundsDir = conversationScope.roundsDir
 const runCommand = promisify(execFile)
 const deliveryMode = process.env.CANVAS_PROMPT_DELIVERY_MODE === 'codex' ? 'codex' : 'local'
+const configuredAsrUrl = process.env.CANVAS_PROMPT_ASR_URL ?? `http://127.0.0.1:${process.env.CANVAS_PROMPT_ASR_PORT ?? '8080'}`
 
-function runtimeIdentity() {
-  return realpath(projectDir).catch(() => projectDir).then((canonicalProjectDir) => ({
+function localAsrUrl() {
+  try {
+    const value = new URL(configuredAsrUrl)
+    if (value.protocol !== 'http:' || !['127.0.0.1', 'localhost', '::1'].includes(value.hostname)) return null
+    return value.toString().replace(/\/$/, '')
+  } catch {
+    return null
+  }
+}
+
+async function runtimeIdentity() {
+  const canonicalProjectDir = projectDir ? await realpath(projectDir).catch(() => projectDir) : null
+  return {
     project_dir: canonicalProjectDir,
-    project_hash: createHash('sha256').update(canonicalProjectDir).digest('hex'),
-    service_version: '0.1.5',
+    project_hash: canonicalProjectDir ? createHash('sha256').update(canonicalProjectDir).digest('hex') : null,
+    storage_kind: conversationScope.storageKind,
+    conversation_bound: false,
+    thread_scope_key: conversationScope.threadScopeKey,
+    session_scope_key: null,
+    service_version: '0.1.29',
     delivery_mode: deliveryMode,
-  }))
+    asr_url: localAsrUrl(),
+    asr_enabled: process.env.CANVAS_PROMPT_ASR !== 'disabled',
+  }
+}
+
+async function persistConversationBinding() {
+  await mkdir(canvasDir, { recursive: true })
+  await writeFileAtomically(resolve(canvasDir, 'binding.json'), `${JSON.stringify({
+    version: 1,
+    storage_kind: conversationScope.storageKind,
+    project_dir: projectDir,
+    source_thread_id: null,
+    session_id: null,
+    thread_scope_key: conversationScope.threadScopeKey,
+    bound_by: 'single_active_board',
+    updated_at: new Date().toISOString(),
+  }, null, 2)}\n`)
 }
 
 const macPasteboardReader = String.raw`
@@ -137,7 +180,12 @@ async function existingRoundArtifacts(roundPath: string) {
     .filter((entry) => entry.isFile() && entry.name.endsWith('.png'))
     .map((entry) => resolve(stateFramesDir, entry.name))
     .sort()
-  return { snapshotPath: snapshot, keyframePaths }
+  const sourceImagesDir = resolve(roundPath, 'source-images')
+  const sourceImagePaths = (await readdir(sourceImagesDir, { withFileTypes: true }).catch(() => []))
+    .filter((entry) => entry.isFile())
+    .map((entry) => resolve(sourceImagesDir, entry.name))
+    .sort()
+  return { snapshotPath: snapshot, keyframePaths, sourceImagePaths }
 }
 
 async function compileCoreEngine(packagePath: string, roundPath: string): Promise<EngineResult> {
@@ -145,7 +193,7 @@ async function compileCoreEngine(packagePath: string, roundPath: string): Promis
   // the active project, so installation does not require a private source tree.
   const compilerPath = resolve(configDir, '..', 'prompt_package_builder', 'compile_runtime_package.py')
   try {
-    const { stdout } = await runCommand('python3', [compilerPath, '--input', packagePath, '--output-dir', resolve(roundPath, 'engine')], { cwd: projectDir, maxBuffer: 1024 * 1024 })
+    const { stdout } = await runCommand('python3', [compilerPath, '--input', packagePath, '--output-dir', resolve(roundPath, 'engine')], { cwd: projectDir ?? canvasDir, maxBuffer: 1024 * 1024 })
     return JSON.parse(stdout) as EngineResult
   } catch (error) {
     const stderr = error && typeof error === 'object' && 'stderr' in error ? String(error.stderr) : ''
@@ -214,6 +262,44 @@ function promptPackagePersistence(): Plugin {
             const contentType = normalizedMediaType(req.headers['content-type'])
             const extension = contentType === 'audio/ogg' ? 'ogg' : contentType === 'audio/mp4' ? 'm4a' : 'webm'
             await writeFile(resolve(roundPath, `audio.${extension}`), Buffer.concat(chunks))
+            res.setHeader('content-type', 'application/json')
+            res.end(JSON.stringify({ ok: true }))
+          } catch (error) {
+            res.statusCode = 500
+            res.end(error instanceof Error ? error.message : String(error))
+          }
+        })
+      })
+
+      server.middlewares.use('/api/round-source-image/', (req, res) => {
+        const match = (req.url?.split('?')[0] ?? '').match(/^\/([^/]+)\/(obj_[A-Za-z0-9_-]+)$/)
+        const packageId = match?.[1] ?? ''
+        const artifactObjectId = match?.[2] ?? ''
+        if (req.method !== 'POST' || !safePackageId(packageId) || !artifactObjectId) { rejectLocalApiRequest(res, 405, 'Method Not Allowed'); return }
+        if (!enforceProtectedLocalApi(req, res, security)) return
+        const contentType = normalizedMediaType(req.headers['content-type'])
+        const extensions: Record<string, string> = {
+          'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif',
+          'image/svg+xml': 'svg', 'image/bmp': 'bmp', 'image/avif': 'avif',
+        }
+        const extension = extensions[contentType]
+        if (!extension) { rejectLocalApiRequest(res, 415, 'Unsupported source image content type.'); return }
+        const chunks: Buffer[] = []
+        let total = 0
+        const maxBytes = 25 * 1024 * 1024
+        req.on('data', (chunk: Buffer) => {
+          total += chunk.length
+          if (total > maxBytes) req.destroy(new Error('原图超过 25MB 限制'))
+          else chunks.push(chunk)
+        })
+        req.on('error', (error) => { res.statusCode = 413; res.end(error.message) })
+        req.on('end', async () => {
+          try {
+            const bytes = Buffer.concat(chunks)
+            if (bytes.length === 0) throw new Error('原图为空')
+            const sourceDir = resolve(roundsDir, packageId, 'source-images')
+            await mkdir(sourceDir, { recursive: true })
+            await writeFile(resolve(sourceDir, `${artifactObjectId.slice(4)}.${extension}`), bytes)
             res.setHeader('content-type', 'application/json')
             res.end(JSON.stringify({ ok: true }))
           } catch (error) {
@@ -315,7 +401,20 @@ function promptPackagePersistence(): Plugin {
             // The raw trace is a local replay artifact, never an input to the
             // compiler or MCP package reader. Keep the durable Prompt Package
             // free of this high-volume renderer history.
-            const payload = { ...received }
+            const payload = {
+              ...received,
+              meta: {
+                ...(received.meta ?? {}),
+                conversation_binding: {
+                  version: 1,
+                  storage_kind: conversationScope.storageKind,
+                  project_dir: projectDir,
+                  source_thread_id: conversationScope.threadId,
+                  session_id: conversationScope.sessionId,
+                  thread_scope_key: conversationScope.threadScopeKey,
+                },
+              },
+            }
             if (payload.source && typeof payload.source === 'object') {
               const { trace: _trace, ...sourceWithoutTrace } = payload.source
               payload.source = sourceWithoutTrace
@@ -325,6 +424,7 @@ function promptPackagePersistence(): Plugin {
             const serialized = `${JSON.stringify(payload, null, 2)}\n`
             const roundPath = resolve(roundsDir, packageId)
             const retryHandoff = req.headers['x-canvas-prompt-retry-handoff'] === '1'
+            await persistConversationBinding()
             const submitted = await submitImmutableRound({
               archiveOptions: {
                 roundPath, latestPackagePath, serializedPackage: serialized, packageId,
@@ -332,20 +432,21 @@ function promptPackagePersistence(): Plugin {
                 persistArtifacts: async () => {
                   const rawTraceManifest = await persistRawTrace(rawTrace, roundPath)
                   const snapshots = await persistCanvasSnapshots(payload, roundPath)
-                  return { rawTraceManifest, ...snapshots }
+                  const sourceImages = await existingRoundArtifacts(roundPath)
+                  return { rawTraceManifest, ...snapshots, sourceImagePaths: sourceImages.sourceImagePaths }
                 },
                 compileCore: (roundPackagePath: string) => compileCoreEngine(roundPackagePath, roundPath),
               },
               retryHandoff,
               persistArchive: async (archived: { artifacts: { rawTraceManifest?: unknown } }) => {
-                await writeFile(resolve(roundPath, 'archive.json'), `${JSON.stringify({ schema_version: 1, storage: 'local_project', retention: 'kept_until_deleted_by_user', contents: ['prompt-package.json', 'canvas-snapshot.png', 'state-frames/ when captured', 'audio.* when recorded', 'raw-trace.ndjson.gz when available', 'raw-trace-manifest.json when available', 'engine/', 'handoff.json when sent'], raw_trace: archived.artifacts.rawTraceManifest ?? undefined, created_at: new Date().toISOString() }, null, 2)}\n`, 'utf8')
+                await writeFile(resolve(roundPath, 'archive.json'), `${JSON.stringify({ schema_version: 1, storage: conversationScope.storageKind, conversation_binding: { source_thread_id: conversationScope.threadId, session_id: conversationScope.sessionId, thread_scope_key: conversationScope.threadScopeKey }, retention: 'kept_until_deleted_by_user', contents: ['prompt-package.json', 'canvas-snapshot.png', 'source-images/ when original images were imported', 'state-frames/ when captured', 'audio.* when recorded', 'raw-trace.ndjson.gz when available', 'raw-trace-manifest.json when available', 'engine/', 'handoff.json when sent'], raw_trace: archived.artifacts.rawTraceManifest ?? undefined, created_at: new Date().toISOString() }, null, 2)}\n`, 'utf8')
               },
-              startHandoff: async (archived: { roundPackagePath: string; engine: EngineResult; artifacts: { snapshotPath?: string | null; keyframePaths?: string[] } | null }) => {
+              startHandoff: async (archived: { roundPackagePath: string; engine: EngineResult; artifacts: { snapshotPath?: string | null; keyframePaths?: string[]; sourceImagePaths?: string[] } | null }) => {
                 if (deliveryMode === 'local') {
                   return { status: 'archived', attempted: false, accepted: false, delivered: false, host: 'local', reason: 'Context is saved locally for the active AI host to read through Canvas Prompt MCP.' } satisfies HandoffResult
                 }
                 const artifacts = archived.artifacts ?? await existingRoundArtifacts(roundPath)
-                return { ...await handoffToMainThread({ projectDir, packagePath: archived.roundPackagePath, roundPath, snapshotPath: artifacts.snapshotPath ?? null, keyframePaths: artifacts.keyframePaths ?? [], engine: archived.engine }) as HandoffResult, host: 'codex' }
+                return { ...await handoffToMainThread({ projectDir: projectDir ?? canvasDir, packagePath: archived.roundPackagePath, roundPath, snapshotPath: artifacts.snapshotPath ?? null, keyframePaths: artifacts.keyframePaths ?? [], sourceImagePaths: artifacts.sourceImagePaths ?? [], engine: archived.engine, mainThreadId: codexMainThreadId }) as HandoffResult, host: 'codex' }
               },
             })
             const { roundPackagePath, engine, handoff } = submitted
