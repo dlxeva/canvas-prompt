@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { execFile } from 'node:child_process'
@@ -16,21 +17,22 @@ async function fakeCommand(directory, name, contents) {
   await chmod(path, 0o755)
 }
 
-async function selectPort({ requestedProject, runningProject, requestedThreadScope = '', runningThreadScope = '', runningStorageKind = 'single_board', runningCommand = `${root}/app node vite` }) {
+async function selectPort({ requestedProject, runningProject, requestedThreadScope = '', runningThreadScope = '', runningStorageKind = 'single_board', runningDeliveryMode = 'local', requestedDeliveryMode = 'local', runningCommand = `${root}/app node vite` }) {
   const temp = await mkdtemp(resolve(tmpdir(), 'canvas-port-isolation-'))
   try {
     await mkdir(requestedProject, { recursive: true })
     const bin = resolve(temp, 'bin')
-    await (await import('node:fs/promises')).mkdir(bin)
+    await mkdir(bin)
     await fakeCommand(bin, 'lsof', '[[ "$*" == *"43223"* ]] && echo 4242')
     await fakeCommand(bin, 'ps', `echo ${JSON.stringify(runningCommand)}`)
-    await fakeCommand(bin, 'curl', `if [[ "$*" == *"runtime-identity"* ]]; then echo ${JSON.stringify(JSON.stringify({ project_dir: runningProject, thread_scope_key: runningThreadScope, storage_kind: runningStorageKind }))}; else echo '<title>Canvas Prompt</title>'; fi`)
+    await fakeCommand(bin, 'curl', `if [[ "$*" == *"runtime-identity"* ]]; then echo ${JSON.stringify(JSON.stringify({ project_dir: runningProject, thread_scope_key: runningThreadScope, storage_kind: runningStorageKind, delivery_mode: runningDeliveryMode }))}; else echo '<title>Canvas Prompt</title>'; fi`)
     const { stdout, stderr } = await run('bash', ['-c', `source ${JSON.stringify(script)}; select_port`], {
       env: {
         ...process.env,
         PATH: `${bin}:${process.env.PATH}`,
         CANVAS_PROMPT_TEST_ONLY: '1',
         CANVAS_PROMPT_PROJECT_DIR: requestedProject,
+        CANVAS_PROMPT_DELIVERY_MODE: requestedDeliveryMode,
         ...(requestedThreadScope ? { CANVAS_PROMPT_THREAD_ID: requestedThreadScope } : {}),
       },
     })
@@ -87,6 +89,96 @@ test('a healthy Canvas service from an earlier cache is not mistaken for stale',
       runningCommand: '/tmp/canvas-prompt-cache/older/app/node_modules/vite/bin/vite.js --port 43223',
     })
     assert.equal(result.stdout, '43224', result.stderr)
+  } finally {
+    await rm(projects, { recursive: true, force: true })
+  }
+})
+
+test('a single-board canvas with matching delivery_mode is reused', async () => {
+  const projects = await mkdtemp(resolve(tmpdir(), 'canvas-port-dm-match-'))
+  try {
+    const project = resolve(projects, 'proj')
+    await mkdir(project, { recursive: true })
+    const canonical = await realpath(project)
+    // codex → codex
+    const codexReuse = await selectPort({ requestedProject: project, runningProject: canonical, runningDeliveryMode: 'codex', requestedDeliveryMode: 'codex' })
+    assert.equal(codexReuse.stdout, 'reuse:43223', codexReuse.stderr)
+    // workbuddy → workbuddy
+    const wbReuse = await selectPort({ requestedProject: project, runningProject: canonical, runningDeliveryMode: 'workbuddy', requestedDeliveryMode: 'workbuddy' })
+    assert.equal(wbReuse.stdout, 'reuse:43223', wbReuse.stderr)
+    // local → local
+    const localReuse = await selectPort({ requestedProject: project, runningProject: canonical, runningDeliveryMode: 'local', requestedDeliveryMode: 'local' })
+    assert.equal(localReuse.stdout, 'reuse:43223', localReuse.stderr)
+  } finally {
+    await rm(projects, { recursive: true, force: true })
+  }
+})
+
+test('a single-board canvas with mismatched delivery_mode (codex → workbuddy) is stopped and the port freed for restart', async () => {
+  const projects = await mkdtemp(resolve(tmpdir(), 'canvas-port-dm-mismatch-wb-'))
+  try {
+    const project = resolve(projects, 'proj')
+    await mkdir(project, { recursive: true })
+    const canonical = await realpath(project)
+    const temp = await mkdtemp(resolve(tmpdir(), 'canvas-kill-mock-wb-'))
+    try {
+      const bin = resolve(temp, 'bin')
+      const killFlag = resolve(temp, 'kill-called')
+      await mkdir(bin)
+      // Stateful lsof: returns PID before kill flag, exits empty after kill.
+      await fakeCommand(bin, 'lsof', `if [ -f ${JSON.stringify(killFlag)} ]; then exit 0; else [[ "$*" == *"43223"* ]] && echo 4242; fi`)
+      await fakeCommand(bin, 'ps', `echo ${JSON.stringify(`${root}/app node vite`)}`)
+      await fakeCommand(bin, 'curl', `if [[ "$*" == *"runtime-identity"* ]]; then echo ${JSON.stringify(JSON.stringify({ project_dir: canonical, thread_scope_key: '', storage_kind: 'single_board', delivery_mode: 'codex' }))}; else echo '<title>Canvas Prompt</title>'; fi`)
+      // Shell function override: kill() { touch flag; } takes precedence over bash builtin.
+      const killOverride = `kill() { touch ${JSON.stringify(killFlag)}; }`
+      const { stdout, stderr } = await run('bash', ['-c', `${killOverride}; source ${JSON.stringify(script)}; select_port`], {
+        env: {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH}`,
+          CANVAS_PROMPT_TEST_ONLY: '1',
+          CANVAS_PROMPT_PROJECT_DIR: project,
+          CANVAS_PROMPT_DELIVERY_MODE: 'workbuddy',
+        },
+      })
+      assert.equal(stdout.trim(), '43223', stderr)
+      assert.ok(existsSync(killFlag), 'kill was called to stop the mismatched canvas')
+    } finally {
+      await rm(temp, { recursive: true, force: true })
+    }
+  } finally {
+    await rm(projects, { recursive: true, force: true })
+  }
+})
+
+test('a single-board canvas with mismatched delivery_mode (workbuddy → codex) is stopped and the port freed for restart', async () => {
+  const projects = await mkdtemp(resolve(tmpdir(), 'canvas-port-dm-mismatch-cx-'))
+  try {
+    const project = resolve(projects, 'proj')
+    await mkdir(project, { recursive: true })
+    const canonical = await realpath(project)
+    const temp = await mkdtemp(resolve(tmpdir(), 'canvas-kill-mock-cx-'))
+    try {
+      const bin = resolve(temp, 'bin')
+      const killFlag = resolve(temp, 'kill-called')
+      await mkdir(bin)
+      await fakeCommand(bin, 'lsof', `if [ -f ${JSON.stringify(killFlag)} ]; then exit 0; else [[ "$*" == *"43223"* ]] && echo 4242; fi`)
+      await fakeCommand(bin, 'ps', `echo ${JSON.stringify(`${root}/app node vite`)}`)
+      await fakeCommand(bin, 'curl', `if [[ "$*" == *"runtime-identity"* ]]; then echo ${JSON.stringify(JSON.stringify({ project_dir: canonical, thread_scope_key: '', storage_kind: 'single_board', delivery_mode: 'workbuddy' }))}; else echo '<title>Canvas Prompt</title>'; fi`)
+      const killOverride = `kill() { touch ${JSON.stringify(killFlag)}; }`
+      const { stdout, stderr } = await run('bash', ['-c', `${killOverride}; source ${JSON.stringify(script)}; select_port`], {
+        env: {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH}`,
+          CANVAS_PROMPT_TEST_ONLY: '1',
+          CANVAS_PROMPT_PROJECT_DIR: project,
+          CANVAS_PROMPT_DELIVERY_MODE: 'codex',
+        },
+      })
+      assert.equal(stdout.trim(), '43223', stderr)
+      assert.ok(existsSync(killFlag), 'kill was called to stop the mismatched canvas')
+    } finally {
+      await rm(temp, { recursive: true, force: true })
+    }
   } finally {
     await rm(projects, { recursive: true, force: true })
   }

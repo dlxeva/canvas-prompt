@@ -24,4 +24,16 @@ describe('Prompt Package persistence handoff contract', () => {
     expect(source).toContain("status: handoff?.status ?? raw.status ?? 'unknown'")
     expect(source).toContain("handoff: handoff")
   })
+
+  it('never delivers to a Codex thread when delivery_mode is workbuddy or local', async () => {
+    const source = await readFile(viteConfigPath, 'utf8')
+
+    // The startHandoff must short-circuit for any non-codex host, recording
+    // host: deliveryMode and status: 'archived' without attempting Codex
+    // thread injection. This guards against host-switch contamination: a
+    // WorkBuddy round must never post to an old Codex conversation thread.
+    expect(source).toContain("if (deliveryMode !== 'codex')")
+    expect(source).toContain("host: deliveryMode")
+    expect(source).toContain("status: 'archived'")
+  })
 })

@@ -63,6 +63,12 @@ runtime_identity() {
   printf '%s' "$identity"
 }
 
+runtime_delivery_mode() {
+  local candidate="$1" identity
+  identity="$(runtime_identity "$candidate")" || return 1
+  printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("delivery_mode") or "local")' 2>/dev/null
+}
+
 is_healthy_canvas() {
   local candidate="$1"
   local pid command page
@@ -79,15 +85,36 @@ is_healthy_canvas() {
 }
 
 is_healthy_current_canvas() {
-  local candidate="$1" identity running_project running_scope
+  local candidate="$1" identity running_project running_scope running_storage_kind running_delivery_mode
   is_healthy_canvas "$candidate" || return 1
   identity="$(runtime_identity "$candidate")"
-  if [[ "$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("storage_kind") or "")' 2>/dev/null)" == "single_board" ]]; then
-    return 0
+  running_storage_kind="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("storage_kind") or "")' 2>/dev/null)"
+  if [[ "$running_storage_kind" == "single_board" ]]; then
+    running_delivery_mode="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("delivery_mode") or "local")' 2>/dev/null)"
+    [[ "$running_delivery_mode" == "$DELIVERY_MODE" ]]
+    return $?
   fi
   running_project="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("project_dir") or "")' 2>/dev/null)"
   running_scope="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("thread_scope_key") or "")' 2>/dev/null)"
   [[ "$running_project" == "$PROJECT_DIR" && "$running_scope" == "$THREAD_SCOPE_KEY" ]]
+}
+
+is_reconfigurable_canvas() {
+  local candidate="$1" identity running_storage_kind running_delivery_mode
+  is_healthy_canvas "$candidate" || return 1
+  identity="$(runtime_identity "$candidate")"
+  running_storage_kind="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("storage_kind") or "")' 2>/dev/null)"
+  [[ "$running_storage_kind" == "single_board" ]] || return 1
+  running_delivery_mode="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("delivery_mode") or "local")' 2>/dev/null)"
+  [[ "$running_delivery_mode" != "$DELIVERY_MODE" ]]
+}
+
+stop_canvas_on_port() {
+  local candidate="$1"
+  while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
+    kill "$pid" 2>/dev/null || true
+  done < <(port_pids "$candidate")
 }
 
 stop_stale_canvas() {
@@ -118,6 +145,20 @@ select_port() {
       echo "Canvas Prompt is already running at http://127.0.0.1:${candidate}/" >&2
       printf 'reuse:%s' "$candidate"
       return 0
+    fi
+    if is_reconfigurable_canvas "$candidate"; then
+      echo "Restarting Canvas Prompt with delivery mode '${DELIVERY_MODE}' (running service has '$(runtime_delivery_mode "$candidate")') on port ${candidate}." >&2
+      stop_canvas_on_port "$candidate"
+      for _ in {1..20}; do
+        if [ -z "$(port_pids "$candidate")" ]; then
+          printf '%s' "$candidate"
+          return 0
+        fi
+        sleep 0.25
+      done
+      candidate=$((candidate + 1))
+      attempts=$((attempts + 1))
+      continue
     fi
     if is_healthy_canvas "$candidate"; then
       echo "Canvas Prompt on port ${candidate} belongs to another project; selecting another port." >&2
