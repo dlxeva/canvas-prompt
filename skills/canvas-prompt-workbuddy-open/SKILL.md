@@ -27,8 +27,20 @@ Never ask the user to manually find Whisper, ffmpeg, or a private ASR project.
 
 ```bash
 node bin/canvas-prompt.mjs setup --project /absolute/path/to/the/active/project
+```
+
+After setup, launch the canvas in a background task so it persists after the
+Bash tool shell exits. The CLI `open` command runs all readiness gates (ASR,
+port selection, health check) and reports a URL when the canvas is ready:
+
+```bash
 node bin/canvas-prompt.mjs open --host workbuddy --project /absolute/path/to/the/active/project
 ```
+
+In WorkBuddy, this command must be run with `run_in_background=true` in the
+Bash tool so the canvas and ASR daemon processes survive after the tool shell
+exits. After the background task completes, read its output to extract the
+reported URL.
 
 The launcher prefers `http://127.0.0.1:43223/`, reuses a healthy instance of the current plugin, removes stale Canvas Prompt servers, and otherwise selects an available local port. Read its output and open the actual reported URL; do not assume the default port.
 

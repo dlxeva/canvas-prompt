@@ -49,9 +49,17 @@ if [[ "$(uname -s)" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
   service_id="$(printf '%s' "${ROOT_DIR}:${PORT}" | shasum -a 256 | cut -c1-12)"
   SERVICE_LABEL="com.canvas-prompt.asr.${service_id}"
   launchctl bootout "gui/$(id -u)/${SERVICE_LABEL}" >/dev/null 2>&1 || true
-  launchctl submit -l "$SERVICE_LABEL" -o "$LOG_FILE" -e "$LOG_FILE" -- \
-    "$ASR_PYTHON" "$ROOT_DIR/runtime/asr-server.py" --host 127.0.0.1 --port "$PORT"
-  rm -f "$PID_FILE"
+  if launchctl submit -l "$SERVICE_LABEL" -o "$LOG_FILE" -e "$LOG_FILE" -- \
+    "$ASR_PYTHON" "$ROOT_DIR/runtime/asr-server.py" --host 127.0.0.1 --port "$PORT" 2>/dev/null; then
+    rm -f "$PID_FILE"
+  else
+    # launchctl submit is unavailable (e.g. sandboxed environments like WorkBuddy).
+    # Fall back to nohup like the non-macOS path. A double-fork ensures the
+    # daemon survives the launcher's exit. PID is discovered from the port
+    # after the process binds, since $! is unavailable after a subshell fork.
+    SERVICE_LABEL=""
+    ( nohup "$ASR_PYTHON" "$ROOT_DIR/runtime/asr-server.py" --host 127.0.0.1 --port "$PORT" >"$LOG_FILE" 2>&1 & )
+  fi
 else
   nohup "$ASR_PYTHON" "$ROOT_DIR/runtime/asr-server.py" --host 127.0.0.1 --port "$PORT" >"$LOG_FILE" 2>&1 &
   echo $! >"$PID_FILE"
@@ -61,6 +69,8 @@ echo "Starting Canvas Prompt local ASR at $ASR_URL. On first launch the base spe
 STARTUP_TIMEOUT_SECONDS="${CANVAS_PROMPT_ASR_STARTUP_TIMEOUT_SECONDS:-600}"
 for ((attempt = 0; attempt < STARTUP_TIMEOUT_SECONDS * 2; attempt++)); do
   if healthy_asr; then
+    # Write the PID file from the port when $! was unavailable (double-fork).
+    lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null >"$PID_FILE" || true
     echo "Canvas Prompt local ASR is ready at $ASR_URL" >&2
     exit 0
   fi
@@ -69,7 +79,7 @@ for ((attempt = 0; attempt < STARTUP_TIMEOUT_SECONDS * 2; attempt++)); do
       echo "Canvas Prompt local ASR exited. Log: $LOG_FILE" >&2
       exit 1
     fi
-  elif ! kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+  elif [[ -f "$PID_FILE" ]] && ! kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
     echo "Canvas Prompt local ASR exited. Log: $LOG_FILE" >&2
     exit 1
   fi

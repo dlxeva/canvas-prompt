@@ -168,8 +168,21 @@ SERVICE_LOG="${TMPDIR:-/tmp}/${SERVICE_LABEL}.log"
 
 # A prior crashed job can survive without a listener. Remove it before submit.
 launchctl bootout "gui/$(id -u)/${SERVICE_LABEL}" >/dev/null 2>&1 || true
-launchctl submit -l "$SERVICE_LABEL" -o "$SERVICE_LOG" -e "$SERVICE_LOG" -- \
-  "$RUNNER" "$CORE_APP_DIR" "$WORKING_DIR" "$PROJECT_DIR" "$PORT" "$NODE_BIN" "$ASR_URL" "$ASR_ENABLED" "$DELIVERY_MODE" "$THREAD_ID" "$SESSION_ID"
+LAUNCHCTL_OK=false
+if launchctl submit -l "$SERVICE_LABEL" -o "$SERVICE_LOG" -e "$SERVICE_LOG" -- \
+  "$RUNNER" "$CORE_APP_DIR" "$WORKING_DIR" "$PROJECT_DIR" "$PORT" "$NODE_BIN" "$ASR_URL" "$ASR_ENABLED" "$DELIVERY_MODE" "$THREAD_ID" "$SESSION_ID" 2>/dev/null; then
+  LAUNCHCTL_OK=true
+fi
+
+if [[ "$LAUNCHCTL_OK" == "false" ]]; then
+  # launchctl submit is unavailable (e.g. sandboxed environments like WorkBuddy).
+  # Start the Vite service directly in the background. A double-fork ensures
+  # the daemon survives the launcher's exit — the intermediate child exits
+  # immediately, orphaning the grandchild which is reparented to launchd.
+  # The readiness polling below confirms the server is up before the script
+  # exits.
+  ( "$RUNNER" "$CORE_APP_DIR" "$WORKING_DIR" "$PROJECT_DIR" "$PORT" "$NODE_BIN" "$ASR_URL" "$ASR_ENABLED" "$DELIVERY_MODE" "$THREAD_ID" "$SESSION_ID" >"$SERVICE_LOG" 2>&1 & )
+fi
 
 for _ in {1..20}; do
   if curl --silent --show-error --max-time 1 "http://127.0.0.1:${PORT}/" 2>/dev/null | grep -q '<title>Canvas Prompt</title>'; then
