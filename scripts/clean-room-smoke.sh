@@ -129,5 +129,5 @@ done
 curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:${CANVAS_PORT}/api/runtime-identity" \
   | python3 -c "import json, sys; value=json.load(sys.stdin); assert value['project_dir'] == '$SANDBOX_PROJECT'; assert value['asr_url'] == 'http://127.0.0.1:$ASR_PORT'; print('[clean-room] canvas identity: OK')"
 
-echo "[clean-room] PASS — fresh user-space install, ASR model bootstrap, and project-bound canvas startup succeeded."
+echo "[clean-room] PASS — fresh user-space install, ASR model bootstrap, and canvas startup with project provenance succeeded."
 echo "[clean-room] temporary sandbox will now move to Trash."

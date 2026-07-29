@@ -1,18 +1,32 @@
 # Canvas Prompt integration contract
 
-If a user gives you this GitHub repository, do not treat it as Codex-only and do not replace it with a simplified canvas.
+Canvas Prompt is a local-first thinking canvas. Its v0.1 public contract is
+one private active board and an immutable Prompt Package for each completed
+round. Do not replace it with a simplified canvas or claim behavior that the
+current host has not demonstrated.
 
-## Host identity gate
+## Host identity and continuation
 
-The **current host** is the agent application receiving this user's conversation. It is not any CLI binary that happens to be installed on the same machine.
+The **current host** is the agent application receiving the user's
+conversation. It is not a CLI binary that happens to be installed on the same
+machine.
 
-- Use the Codex marketplace only when the current conversation itself runs in Codex and the user asked to install for Codex.
-- Never select the Codex route merely because `codex` is on `PATH`, another Codex window exists, or a terminal command succeeds.
-- When the current host is WorkBuddy, ZCode, or another agent, use that host's adapter or the generic MCP route.
+- Use the Codex marketplace only when the current conversation runs in Codex
+  and the user asked to install for Codex.
+- Do not select the Codex route merely because `codex` is on `PATH`, another
+  Codex window exists, or a terminal command succeeds.
+- A project path and a thread ID are provenance for a round. They never select
+  which archive is read.
 
-1. If the current host is Codex, install the plugin through the Git marketplace.
-2. If you can run local commands and use stdio MCP, run `node bin/canvas-prompt.mjs init --project <project>` and add the emitted MCP configuration to your host.
-3. Start the browser canvas with `node bin/canvas-prompt.mjs open --project <project>`.
-4. After export, read `get_latest_prompt_package` from the project-bound `canvas_prompt` MCP server.
+1. In Codex, install the plugin through the Git marketplace.
+2. In another MCP-capable host, run `node bin/canvas-prompt.mjs init` and add
+   the emitted MCP configuration.
+3. Start the browser canvas with `node bin/canvas-prompt.mjs open`.
+4. After the user completes a round and explicitly asks to continue, read
+   `get_latest_prompt_package` from the fixed-scope `canvas_prompt` MCP
+   server.
 
-Codex automatic handoff is an optional host adapter. The durable, portable contract is the project-local `.canvas-prompt/` archive plus the MCP reader. If the bound project has no round, say so; do not search other `.canvas-prompt` directories or read them directly. If your host cannot run commands or MCP, say that only manual export is available; do not claim an automatic integration.
+The durable v0.1 contract is the user's private single-board archive and its
+MCP reader. Do not scan arbitrary local archives, infer a conversation from
+history, or claim automatic chat injection. If the host cannot run commands or
+MCP, explain that it supports only manual export.

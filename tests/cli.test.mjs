@@ -16,7 +16,7 @@ const runWithEnvironment = (environment, ...args) => spawnSync(process.execPath,
   encoding: 'utf8', env: { ...process.env, ...environment },
 })
 
-test('init emits project-bound MCP configuration', () => {
+test('init emits MCP configuration with optional project provenance', () => {
   const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
   const result = run('init', '--project', project)
   assert.equal(result.status, 0, result.stderr)
