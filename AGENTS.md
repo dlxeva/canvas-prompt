@@ -13,16 +13,24 @@ machine.
 
 - Use the Codex marketplace only when the current conversation runs in Codex
   and the user asked to install for Codex.
-- Do not select the Codex route merely because `codex` is on `PATH`, another
-  Codex window exists, or a terminal command succeeds.
+- Use the WorkBuddy plugin only when the current conversation runs in
+  WorkBuddy and the user asked to install for WorkBuddy.
+- Do not select the Codex or WorkBuddy route merely because the host binary is
+  on `PATH`, another host window exists, or a terminal command succeeds.
 - A project path and a thread ID are provenance for a round. They never select
   which archive is read.
 
 1. In Codex, install the plugin through the Git marketplace.
-2. In another MCP-capable host, run `node bin/canvas-prompt.mjs init` and add
+2. In WorkBuddy, install the plugin from the `.workbuddy-plugin/` directory.
+   WorkBuddy does not provide a native thread-injection protocol; the round is
+   saved locally (`host: 'workbuddy'`, `status: 'archived'`) and read through
+   the `canvas_prompt` MCP server on explicit request.
+3. In another MCP-capable host, run `node bin/canvas-prompt.mjs init` and add
    the emitted MCP configuration.
-3. Start the browser canvas with `node bin/canvas-prompt.mjs open`.
-4. After the user completes a round and explicitly asks to continue, read
+4. Start the browser canvas with `node bin/canvas-prompt.mjs open`
+   (`--host codex` for Codex, `--host workbuddy` for WorkBuddy, `--host local`
+   or omitted for other hosts).
+5. After the user completes a round and explicitly asks to continue, read
    `get_latest_prompt_package` from the fixed-scope `canvas_prompt` MCP
    server.
 

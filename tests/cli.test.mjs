@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, realpathSync } from 'node:fs'
+import { existsSync, mkdtempSync, realpathSync, readFileSync } from 'node:fs'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -98,4 +98,31 @@ test('migrate copies an explicitly named legacy archive into the single-board ho
   assert.deepEqual(report.copied, ['pp_cli_legacy'])
   assert.equal(existsSync(join(project, '.canvas-prompt', 'rounds', 'pp_cli_legacy')), true)
   assert.equal(existsSync(join(home, '.canvas-prompt', 'board', 'rounds', 'pp_cli_legacy')), true)
+})
+
+test('help text lists workbuddy as a valid host', () => {
+  const result = run('help')
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /workbuddy/)
+})
+
+test('workbuddy plugin manifest exists and is valid', () => {
+  const manifestPath = resolve('.workbuddy-plugin', 'plugin.json')
+  assert.equal(existsSync(manifestPath), true)
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  assert.equal(manifest.name, 'canvas-prompt')
+  assert.match(manifest.version, /workbuddy/)
+  assert.equal(manifest.mcpServers, './.mcp.json')
+  assert.equal(manifest.skills, './skills/')
+  assert.ok(Array.isArray(manifest.interface.capabilities))
+})
+
+test('workbuddy skills exist and are non-empty', () => {
+  for (const skill of ['canvas-prompt-workbuddy-open', 'canvas-prompt-workbuddy-read']) {
+    const skillPath = resolve('skills', skill, 'SKILL.md')
+    assert.equal(existsSync(skillPath), true, `missing skill: ${skill}`)
+    const content = readFileSync(skillPath, 'utf8')
+    assert.ok(content.length > 100, `skill too short: ${skill}`)
+    assert.match(content, new RegExp(`name: ${skill}`))
+  }
 })

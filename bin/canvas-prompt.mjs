@@ -133,7 +133,7 @@ const help = () => console.log(`Canvas Prompt host-neutral entrypoint
 
 Usage:
   canvas-prompt setup [--core-only]
-  canvas-prompt open [--project <dir>] [--conversation-only] [--host codex|local]
+  canvas-prompt open [--project <dir>] [--conversation-only] [--host codex|workbuddy|local]
   canvas-prompt init [--project <dir>] [--thread-id <id>] [--conversation-only]
   canvas-prompt doctor [--project <dir>] [--thread-id <id>] [--conversation-only]
   canvas-prompt migrate --from <legacy-project-or-.canvas-prompt-dir>
@@ -191,7 +191,8 @@ try {
         mcp_config: mcpConfig(project, boundThreadId),
       }, null, 2))
     } else if (command === 'open') {
-      const host = flag('--host') === 'codex' ? 'codex' : 'local'
+      const hostFlag = flag('--host')
+      const host = hostFlag === 'codex' ? 'codex' : hostFlag === 'workbuddy' ? 'workbuddy' : 'local'
       const asrEnvironment = await asrEnvironmentForOpen(project)
       const environment = runtimeEnvironment(asrEnvironment)
       if (process.env.CANVAS_PROMPT_ASR !== 'disabled') {
