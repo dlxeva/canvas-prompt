@@ -6,14 +6,14 @@ description: Open the local Canvas Prompt thinking canvas for the active WorkBud
 # Open Canvas Prompt
 
 Start the local canvas for the active project and open the URL reported by the
-launcher in the user's default browser. This is the supported v0.1 route for
-WorkBuddy. The canvas exports an immutable round. Canvas Prompt deliberately
-supports one active user board: all rounds live in its private archive, and an
-explicit continuation command in any conversation reads that board's latest
-round. Do not make the user copy a path, choose an archive, or manage a
-conversation binding. WorkBuddy does not provide a native thread-injection
-protocol; the round is saved locally and read through the Canvas Prompt MCP
-server on explicit request.
+launcher in the WorkBuddy sidebar browser preview panel. This is the
+supported v0.1 route for WorkBuddy. The canvas exports an immutable round.
+Canvas Prompt deliberately supports one active user board: all rounds live in
+its private archive, and an explicit continuation command in any conversation
+reads that board's latest round. Do not make the user copy a path, choose an
+archive, or manage a conversation binding. WorkBuddy does not provide a native
+thread-injection protocol; the round is saved locally and read through the
+Canvas Prompt MCP server on explicit request.
 
 Before the first launch in a new installation, tell the user that bootstrap
 will install Canvas Prompt-managed Node and local-ASR dependencies into an
@@ -32,9 +32,18 @@ node bin/canvas-prompt.mjs open --host workbuddy --project /absolute/path/to/the
 
 The launcher prefers `http://127.0.0.1:43223/`, reuses a healthy instance of the current plugin, removes stale Canvas Prompt servers, and otherwise selects an available local port. Read its output and open the actual reported URL; do not assume the default port.
 
+After the launcher reports a ready URL, open it in the WorkBuddy sidebar
+browser preview panel by calling `present_files` with the reported localhost
+URL. This keeps the canvas next to the conversation: the user marks on the
+canvas, clicks Finish session, and continues in the same window without
+switching to an external browser. Do not open the canvas in the system default
+browser unless the sidebar preview panel is unavailable.
+
 ## Launch reply
 
-For a normal successful launch, keep the user-facing status to the outcome:
+For a normal successful launch, first call `present_files` with the reported
+localhost URL to open the canvas in the WorkBuddy sidebar browser preview
+panel. Then keep the user-facing status to the outcome:
 `Canvas Prompt 已打开：<actual URL>` in Chinese, or `Canvas Prompt is open: <actual URL>` in English.
 Do not volunteer that local speech transcription, ASR, or a model is ready.
 Those are internal readiness gates, not a user task. Explain their status only

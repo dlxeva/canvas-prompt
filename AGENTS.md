@@ -24,7 +24,9 @@ machine.
 2. In WorkBuddy, install the plugin from the `.workbuddy-plugin/` directory.
    WorkBuddy does not provide a native thread-injection protocol; the round is
    saved locally (`host: 'workbuddy'`, `status: 'archived'`) and read through
-   the `canvas_prompt` MCP server on explicit request.
+   the `canvas_prompt` MCP server on explicit request. WorkBuddy opens the
+   canvas in its built-in sidebar browser preview panel (via `present_files`
+   with the localhost URL), keeping the canvas next to the conversation.
 3. In another MCP-capable host, run `node bin/canvas-prompt.mjs init` and add
    the emitted MCP configuration.
 4. Start the browser canvas with `node bin/canvas-prompt.mjs open`
