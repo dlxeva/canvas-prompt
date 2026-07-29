@@ -1,0 +1,44 @@
+{
+  "name": "canvas-prompt",
+  "version": "0.1.30+workbuddy.20260729110000",
+  "description": "A local thinking canvas for WorkBuddy: draw, circle, move, and export the context behind your prompt.",
+  "author": {
+    "name": "Canvas Prompt",
+    "url": "https://github.com/dlxeva/canvas-prompt"
+  },
+  "homepage": "https://github.com/dlxeva/canvas-prompt",
+  "repository": "https://github.com/dlxeva/canvas-prompt",
+  "license": "AGPL-3.0-or-later",
+  "keywords": [
+    "canvas",
+    "whiteboard",
+    "thinking",
+    "context",
+    "voice"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Canvas Prompt",
+    "shortDescription": "Draw, circle, move, and export the context behind your prompt.",
+    "longDescription": "Canvas Prompt is a local canvas for the work that happens before a clean chat prompt exists. Draw, circle, move, and explain; export each round as device-local context that WorkBuddy can read on explicit request.",
+    "developerName": "Canvas Prompt",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive canvas",
+      "Voice and timeline capture",
+      "Prompt Package export",
+      "Single-board local package archive",
+      "MCP package inspection"
+    ],
+    "brandColor": "#C8462B",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png",
+    "logoDark": "./assets/logo-dark.png",
+    "defaultPrompt": [
+      "Open the Canvas Prompt thinking canvas.",
+      "Export this Canvas Prompt session as a Prompt Package.",
+      "Continue with the latest Canvas Prompt board context."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

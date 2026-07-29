@@ -66,40 +66,57 @@ runtime_identity() {
 is_healthy_canvas() {
   local candidate="$1"
   local pid command page
+
   pid="$(port_pids "$candidate" | head -n 1)"
   [ -n "$pid" ] || return 1
+
   command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-  # A Canvas service installed by an earlier plugin cache has a different core
-  # path. It is still a healthy Canvas service and must be treated as owned by
-  # its runtime project, never killed merely because this launcher is newer.
-  [[ "$command" == *"canvas-prompt"* && "$command" == *"vite"* ]] || return 1
+  # When ps succeeds but the command is NOT a Canvas Prompt vite process,
+  # reject immediately — something else is on this port.
+  # When ps is unavailable (sandbox, restricted environment), command is
+  # empty; fall through to runtime-identity verification which is sufficient
+  # to confirm a genuine Canvas Prompt instance responding on this port.
+  if [[ -n "$command" ]]; then
+    [[ "$command" == *"canvas-prompt"* && "$command" == *"vite"* ]] || return 1
+  fi
+
   page="$(curl --silent --show-error --max-time 1 "http://127.0.0.1:${candidate}/" 2>/dev/null || true)"
   [[ "$page" == *"<title>Canvas Prompt</title>"* ]] || return 1
   runtime_identity "$candidate" >/dev/null
 }
 
-is_healthy_current_canvas() {
-  local candidate="$1" identity running_project running_scope
+# The user has one private active board (single_board). Any healthy Canvas
+# Prompt instance serving that board can be reused regardless of which host
+# (Codex / WorkBuddy / local) started it. The delivery_mode field is retained
+# as internal diagnostic information but is NOT a routing key or reuse gate.
+is_reusable_canvas() {
+  local candidate="$1" identity running_storage_kind
   is_healthy_canvas "$candidate" || return 1
   identity="$(runtime_identity "$candidate")"
-  if [[ "$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("storage_kind") or "")' 2>/dev/null)" == "single_board" ]]; then
-    return 0
-  fi
-  running_project="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("project_dir") or "")' 2>/dev/null)"
-  running_scope="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("thread_scope_key") or "")' 2>/dev/null)"
-  [[ "$running_project" == "$PROJECT_DIR" && "$running_scope" == "$THREAD_SCOPE_KEY" ]]
+  running_storage_kind="$(printf '%s' "$identity" | python3 -c 'import json, sys; print(json.load(sys.stdin).get("storage_kind") or "")' 2>/dev/null)"
+  [[ "$running_storage_kind" == "single_board" ]]
 }
 
 stop_stale_canvas() {
   local candidate="$1"
-  local pid command
+  local pid command identity
   while IFS= read -r pid; do
     [ -n "$pid" ] || continue
     command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-    # Never terminate another healthy Canvas instance: its data belongs to a
-    # different business project. Only a process that cannot prove runtime
-    # identity is considered stale.
-    if [[ "$command" == *"/canvas-prompt/"* && "$command" == *"vite"* ]] && ! is_healthy_canvas "$candidate"; then
+    if [[ -n "$command" ]]; then
+      # ps available — only stop processes that are definitely Canvas Prompt.
+      [[ "$command" == *"/canvas-prompt/"* && "$command" == *"vite"* ]] || continue
+    else
+      # ps unavailable — require positive Canvas Prompt evidence from
+      # runtime-identity before attempting to stop. Without command-line
+      # evidence we must NOT kill: the port could host the user's
+      # unrelated local service. If runtime_identity does not return a
+      # Canvas Prompt identity (containing service_version), skip this
+      # port entirely and let select_port try the next one.
+      identity="$(runtime_identity "$candidate" 2>/dev/null || true)"
+      [[ "$identity" == *"service_version"* ]] || continue
+    fi
+    if ! is_healthy_canvas "$candidate"; then
       echo "Stopping stale Canvas Prompt server (PID ${pid}) on port ${candidate}." >&2
       kill "$pid" 2>/dev/null || true
     fi
@@ -114,7 +131,7 @@ select_port() {
       printf '%s' "$candidate"
       return 0
     fi
-    if is_healthy_current_canvas "$candidate"; then
+    if is_reusable_canvas "$candidate"; then
       echo "Canvas Prompt is already running at http://127.0.0.1:${candidate}/" >&2
       printf 'reuse:%s' "$candidate"
       return 0
@@ -168,8 +185,21 @@ SERVICE_LOG="${TMPDIR:-/tmp}/${SERVICE_LABEL}.log"
 
 # A prior crashed job can survive without a listener. Remove it before submit.
 launchctl bootout "gui/$(id -u)/${SERVICE_LABEL}" >/dev/null 2>&1 || true
-launchctl submit -l "$SERVICE_LABEL" -o "$SERVICE_LOG" -e "$SERVICE_LOG" -- \
-  "$RUNNER" "$CORE_APP_DIR" "$WORKING_DIR" "$PROJECT_DIR" "$PORT" "$NODE_BIN" "$ASR_URL" "$ASR_ENABLED" "$DELIVERY_MODE" "$THREAD_ID" "$SESSION_ID"
+LAUNCHCTL_OK=false
+if launchctl submit -l "$SERVICE_LABEL" -o "$SERVICE_LOG" -e "$SERVICE_LOG" -- \
+  "$RUNNER" "$CORE_APP_DIR" "$WORKING_DIR" "$PROJECT_DIR" "$PORT" "$NODE_BIN" "$ASR_URL" "$ASR_ENABLED" "$DELIVERY_MODE" "$THREAD_ID" "$SESSION_ID" 2>/dev/null; then
+  LAUNCHCTL_OK=true
+fi
+
+if [[ "$LAUNCHCTL_OK" == "false" ]]; then
+  # launchctl submit is unavailable (e.g. sandboxed environments like WorkBuddy).
+  # Start the Vite service directly in the background. A double-fork ensures
+  # the daemon survives the launcher's exit — the intermediate child exits
+  # immediately, orphaning the grandchild which is reparented to launchd.
+  # The readiness polling below confirms the server is up before the script
+  # exits.
+  ( "$RUNNER" "$CORE_APP_DIR" "$WORKING_DIR" "$PROJECT_DIR" "$PORT" "$NODE_BIN" "$ASR_URL" "$ASR_ENABLED" "$DELIVERY_MODE" "$THREAD_ID" "$SESSION_ID" >"$SERVICE_LOG" 2>&1 & )
+fi
 
 for _ in {1..20}; do
   if curl --silent --show-error --max-time 1 "http://127.0.0.1:${PORT}/" 2>/dev/null | grep -q '<title>Canvas Prompt</title>'; then

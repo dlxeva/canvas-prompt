@@ -97,7 +97,7 @@ function HeaderIcon({ kind }: { kind: 'upload' | 'record' | 'stop' | 'send' | 'n
 
 type SessionStage = 'idle' | 'starting' | 'recording' | 'compiling' | 'ready' | 'error'
 type ExportStatus = ExportReceiptStatus | 'error'
-type DeliveryMode = 'codex' | 'local'
+type DeliveryMode = 'codex' | 'local' | 'workbuddy'
 type StoredRound = {
   package_id: string
   exported_at: string
@@ -304,7 +304,7 @@ export default function App() {
     void fetch('/api/runtime-identity', { cache: 'no-store' })
       .then(async (response) => response.ok ? await response.json() as { delivery_mode?: DeliveryMode; asr_url?: string | null; asr_enabled?: boolean } : null)
       .then((identity) => {
-        if (identity?.delivery_mode === 'codex' || identity?.delivery_mode === 'local') setDeliveryMode(identity.delivery_mode)
+        if (identity?.delivery_mode === 'codex' || identity?.delivery_mode === 'local' || identity?.delivery_mode === 'workbuddy') setDeliveryMode(identity.delivery_mode)
         if (typeof identity?.asr_url === 'string') setAsrEndpoint(identity.asr_url)
         setAsrPreparing(identity?.asr_enabled !== false)
       })
