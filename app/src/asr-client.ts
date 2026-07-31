@@ -42,7 +42,7 @@ export class ASRClient {
   private timeout: number
 
   constructor(options: ASRClientOptions = {}) {
-    this.baseUrl = options.baseUrl || 'http://localhost:8080'
+    this.baseUrl = options.baseUrl || 'http://127.0.0.1:18080'
     this.timeout = options.timeout || 120000
   }
 

@@ -92,7 +92,7 @@ export class WindowedAsrSession {
   constructor(options: WindowedAsrOptions) {
     this.stream = options.stream
     this.language = options.language || 'zh-CN'
-    this.endpoint = options.endpoint || 'http://localhost:8080/transcribe?backend=whisper'
+    this.endpoint = options.endpoint || 'http://127.0.0.1:18080/transcribe?backend=whisper'
     this.windowMs = options.windowMs || 25_000
     this.overlapMs = options.overlapMs || 3_000
     this.onProgress = options.onProgress
@@ -185,7 +185,14 @@ export class WindowedAsrSession {
             const form = new FormData()
             form.append('audio', audio, 'window.webm')
             form.append('language', this.language)
-            const response = await fetch(this.endpoint, { method: 'POST', body: form })
+            const controller = new AbortController()
+            const timeout = window.setTimeout(() => controller.abort(), 45_000)
+            let response: Response
+            try {
+              response = await fetch(this.endpoint, { method: 'POST', body: form, signal: controller.signal })
+            } finally {
+              window.clearTimeout(timeout)
+            }
             const candidate = await response.json().catch(() => null) as AsrResponse | { detail?: string } | null
             if (!response.ok || !candidate || !('segments' in candidate)) {
               throw new Error(candidate && 'detail' in candidate ? candidate.detail || 'ASR failed' : 'ASR failed')

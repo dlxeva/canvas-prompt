@@ -9,6 +9,7 @@ archives, browser tabs, or any host-agent state.
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -20,6 +21,8 @@ from fastapi.responses import JSONResponse
 import uvicorn
 from faster_whisper import WhisperModel
 
+
+logger = logging.getLogger("canvas_prompt.asr")
 
 app = FastAPI(title="Canvas Prompt local ASR", version="1.0")
 app.add_middleware(
@@ -105,6 +108,10 @@ async def transcribe(
     except HTTPException:
         raise
     except Exception as error:  # noqa: BLE001 - return a local API error, never an archive fallback
+        # Uvicorn only records the 500 access line by default. Keep the local
+        # exception in the service log so a transient transcription failure is
+        # diagnosable without inspecting a person's recording.
+        logger.exception("Canvas Prompt local ASR transcription failed")
         raise HTTPException(status_code=500, detail=f"Local ASR failed: {error}") from error
     finally:
         try:

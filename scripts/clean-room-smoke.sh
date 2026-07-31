@@ -108,7 +108,7 @@ fi
 printf '%s\n' "$OPEN_OUTPUT"
 SERVICE_LABEL="$(printf '%s\n' "$OPEN_OUTPUT" | sed -n 's/^Service: //p' | tail -n 1)"
 if [[ "$(uname -s)" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
-  asr_service_id="$(printf '%s' "${SANDBOX_REPO}:${ASR_PORT}" | shasum -a 256 | cut -c1-12)"
+  asr_service_id="$(printf '%s' "${CANVAS_PROMPT_RUNTIME_DIR}:${ASR_PORT}" | shasum -a 256 | cut -c1-12)"
   ASR_SERVICE_LABEL="com.canvas-prompt.asr.${asr_service_id}"
 fi
 ASR_PID="$(cat "$CANVAS_PROMPT_RUNTIME_DIR/asr.pid" 2>/dev/null || true)"
