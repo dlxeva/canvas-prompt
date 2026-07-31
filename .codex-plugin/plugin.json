@@ -1,6 +1,6 @@
 {
   "name": "canvas-prompt",
-  "version": "0.1.34+codex.20260801021611",
+  "version": "0.1.33+codex.20260731120000",
   "description": "A local thinking canvas for Codex: draw, circle, move, and export the context behind your prompt.",
   "author": {
     "name": "Canvas Prompt",
