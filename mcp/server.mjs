@@ -46,7 +46,10 @@ const PROJECT_SCOPE_ERROR = null;
 const CANVAS_PROMPT_DIR = configuredConversationScope?.canvasDir ?? null;
 const MAX_LATEST_PACKAGE_TEXT_BYTES = 1_500_000;
 const MAX_ARTIFACT_BYTES = 4 * 1024 * 1024;
-const MAX_RAW_PACKAGE_BYTES = 32 * 1024 * 1024;
+// Large local Packages can be reconstructed from bounded browser checkpoints.
+// This controls only trusted local artifact reading; latestPackageResponse
+// still strips inline media and caps model-facing text at 1.5MB.
+const MAX_RAW_PACKAGE_BYTES = 256 * 1024 * 1024;
 const ROUND_ARTIFACTS = {
   prompt_package: ['prompt-package.json'],
   compact_package: ['engine', 'compact-package.json'],

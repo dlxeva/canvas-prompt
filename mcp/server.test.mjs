@@ -90,7 +90,7 @@ test('a legal large raw package is readable before image data is stripped for MC
   });
   const filePath = resolve(canvasDir, 'latest-prompt-package.json');
   await writeFile(filePath, large);
-  const trusted = await readTrustedCanvasArtifact(filePath, ['latest-prompt-package.json'], { canvasPromptDir: canvasDir, maxBytes: 32 * 1024 * 1024 });
+  const trusted = await readTrustedCanvasArtifact(filePath, ['latest-prompt-package.json'], { canvasPromptDir: canvasDir, maxBytes: 256 * 1024 * 1024 });
   const response = latestPackageResponse(JSON.parse(trusted.contents), trusted.path);
   assert.equal(response.includes('data:image/'), false);
   await assert.rejects(

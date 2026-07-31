@@ -36,4 +36,20 @@ describe('Prompt Package persistence handoff contract', () => {
     expect(source).toContain("host: deliveryMode")
     expect(source).toContain("status: 'archived'")
   })
+
+  it('archives high-frequency replay as bounded local checkpoint segments before sending the compact package', async () => {
+    const appSource = await readFile(fileURLToPath(new URL('../src/App.tsx', import.meta.url)), 'utf8')
+    const viteSource = await readFile(viteConfigPath, 'utf8')
+
+    expect(appSource).toContain('splitRawTraceSegments(trace.current)')
+    expect(appSource).toContain('/api/round-trace-segment/${packageToExport.meta.package_id}/')
+    expect(appSource).toContain("source: { canvas: 'excalidraw', audio:")
+    expect(viteSource).toContain("server.middlewares.use('/api/round-trace-segment/'")
+    expect(viteSource).toContain("'raw-trace.ndjson.gz or raw-trace-segments/ when available'")
+    expect(appSource).toContain('usesPackageSegments')
+    expect(viteSource).toContain("server.middlewares.use('/api/prompt-package-segment/'")
+    expect(viteSource).toContain('MAX_SEGMENTED_PACKAGE_BYTES')
+    expect(viteSource).toContain("'session-manifest.json'")
+    expect(viteSource).toContain("continuity: 'single_continuous_session'")
+  })
 })
