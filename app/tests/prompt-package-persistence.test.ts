@@ -52,4 +52,12 @@ describe('Prompt Package persistence handoff contract', () => {
     expect(viteSource).toContain("'session-manifest.json'")
     expect(viteSource).toContain("continuity: 'single_continuous_session'")
   })
+
+  it('offers an explicit visual-only path instead of silently fabricating a transcript', async () => {
+    const appSource = await readFile(fileURLToPath(new URL('../src/App.tsx', import.meta.url)), 'utf8')
+
+    expect(appSource).toContain('setAsrPreparing(false)')
+    expect(appSource).toContain('本轮会保留画布过程；尚未就绪的语音不会转写。')
+    expect(appSource).toContain('audio: recordingToArchive ?')
+  })
 })

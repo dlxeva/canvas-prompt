@@ -44,8 +44,9 @@ shown as the primary product wording.
    - **Context-and-collaboration path.** When the canvas primarily supplies background for an ongoing task, use it as context for the user's current request instead of narrating it back or asking the user to label the use case.
    - **Mixed path.** A marked design can also contain strategic reasoning. Preserve both when supported; do not force the round into one label.
    - Ask one minimal clarification only when neither the evidence nor the current request reveals the desired outcome. For example: “你希望我把这些落实成修改，还是先帮你推演和查漏？”
-5. Respond in this order: what was received; concrete source-backed observations; current understanding labelled as an inference when needed; and the useful next work. Do not lead with an internal route label.
-6. Continue pure reasoning or discussion when the desired outcome is clear: test the decision, find an omission, or surface risks. For a material action, stop after the confirmation plan and wait for the user’s explicit go-ahead. Do not stop at a transcript-style “here is what I understood” response or at “the original file path is unknown.”
+5. Begin with a short, collaborative restatement: what the person marked or changed; what they appear to be asking for; and any uncertainty that still needs correction. Do this even when the request is only the canonical continuation command. Keep it grounded in the package and phrased as an invitation to correct the reading, not as a claim that the AI has fully understood the person.
+6. Then give concrete source-backed observations, current understanding labelled as an inference when needed, and the useful next work. Do not lead with an internal route label.
+7. Continue pure reasoning or discussion when the desired outcome is clear: test the decision, find an omission, or surface risks. For a material action, stop after the confirmation plan and wait for the user’s explicit go-ahead. Do not stop at a transcript-style “here is what I understood” response or at “the original file path is unknown.”
 
 ## Latency budget
 
