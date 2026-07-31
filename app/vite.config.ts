@@ -2,7 +2,7 @@ import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 
 import { execFile } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
-import { gzipSync } from 'node:zlib'
+import { gzipSync, gunzipSync } from 'node:zlib'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import type { Plugin } from 'vite'
@@ -125,6 +125,9 @@ type RoundManifest = {
   handoff?: Pick<HandoffResult, 'status' | 'accepted' | 'delivered'>
 }
 
+const MAX_PACKAGE_SEGMENT_BYTES = 5 * 1024 * 1024
+const MAX_SEGMENTED_PACKAGE_BYTES = 256 * 1024 * 1024
+
 function safePackageId(packageId: string) {
   return /^[a-zA-Z0-9_-]+$/.test(packageId)
 }
@@ -153,18 +156,29 @@ async function persistCanvasSnapshots(payload: { canvas_snapshot?: { final?: { u
 }
 
 async function persistRawTrace(rawTrace: unknown, roundPath: string) {
-  if (!Array.isArray(rawTrace)) return null
-  const ndjson = rawTrace.map((event) => JSON.stringify(event)).join('\n') + (rawTrace.length ? '\n' : '')
-  const uncompressed = Buffer.from(ndjson, 'utf8')
-  const compressed = gzipSync(uncompressed)
-  await writeFile(resolve(roundPath, 'raw-trace.ndjson.gz'), compressed)
+  const segmentDir = resolve(roundPath, 'raw-trace-segments')
+  const persistedSegments = (await readdir(segmentDir, { withFileTypes: true }).catch(() => []))
+    .filter((entry) => entry.isFile() && /^\d{6}\.json\.gz$/.test(entry.name))
+    .map((entry) => entry.name)
+    .sort()
+  if (!Array.isArray(rawTrace) && persistedSegments.length === 0) return null
+  const chunks = Array.isArray(rawTrace)
+    ? [Buffer.from(rawTrace.map((event) => JSON.stringify(event)).join('\n') + (rawTrace.length ? '\n' : ''), 'utf8')]
+    : await Promise.all(persistedSegments.map(async (name) => gunzipSync(await readFile(resolve(segmentDir, name)))))
+  const eventCount = chunks.reduce((total, chunk) => total + chunk.toString('utf8').split('\n').filter(Boolean).length, 0)
+  const uncompressedBytes = chunks.reduce((total, chunk) => total + chunk.byteLength, 0)
+  const hash = createHash('sha256')
+  chunks.forEach((chunk) => hash.update(chunk))
+  const compressed = Array.isArray(rawTrace) ? gzipSync(chunks[0]) : null
+  if (compressed) await writeFile(resolve(roundPath, 'raw-trace.ndjson.gz'), compressed)
   const manifest = {
     schema_version: 'excalidraw-trace-v1',
     compression: 'gzip',
-    event_count: rawTrace.length,
-    uncompressed_bytes: uncompressed.byteLength,
-    compressed_bytes: compressed.byteLength,
-    content_sha256: createHash('sha256').update(uncompressed).digest('hex'),
+    event_count: eventCount,
+    uncompressed_bytes: uncompressedBytes,
+    compressed_bytes: compressed ? compressed.byteLength : (await Promise.all(persistedSegments.map(async (name) => (await stat(resolve(segmentDir, name))).size))).reduce((total, size) => total + size, 0),
+    content_sha256: hash.digest('hex'),
+    segments: persistedSegments.length ? persistedSegments : undefined,
     retention: 'local_round_archive_only',
     model_context: 'excluded',
   }
@@ -266,6 +280,75 @@ function promptPackagePersistence(): Plugin {
             res.end(JSON.stringify({ ok: true }))
           } catch (error) {
             res.statusCode = 500
+            res.end(error instanceof Error ? error.message : String(error))
+          }
+        })
+      })
+
+      // Each replay checkpoint is independently bounded and compressed on
+      // disk. A long session therefore produces a sequence of local trace
+      // segments, like state snapshots, instead of one oversized package POST.
+      server.middlewares.use('/api/round-trace-segment/', (req, res) => {
+        const match = (req.url?.split('?')[0] ?? '').match(/^\/([^/]+)\/(\d{6})$/)
+        const packageId = match?.[1] ?? ''
+        const sequence = match?.[2] ?? ''
+        if (req.method !== 'POST' || !safePackageId(packageId) || !sequence) { rejectLocalApiRequest(res, 405, 'Method Not Allowed'); return }
+        if (!enforceProtectedLocalApi(req, res, security)) return
+        if (!isJsonRequest(req.headers)) { rejectLocalApiRequest(res, 415, 'Trace segment requires application/json.'); return }
+        let body = ''
+        const maxBytes = 5 * 1024 * 1024
+        req.setEncoding('utf8')
+        req.on('data', (chunk) => {
+          body += chunk
+          if (Buffer.byteLength(body, 'utf8') > maxBytes) req.destroy(new Error('过程快照超过 5MB 限制'))
+        })
+        req.on('error', (error) => { res.statusCode = 413; res.end(error.message) })
+        req.on('end', async () => {
+          try {
+            const events = JSON.parse(body)
+            if (!Array.isArray(events)) throw new Error('过程快照必须是事件数组')
+            const roundPath = resolve(roundsDir, packageId)
+            const segmentPath = resolve(roundPath, 'raw-trace-segments', `${sequence}.json.gz`)
+            await mkdir(dirname(segmentPath), { recursive: true })
+            await writeFile(segmentPath, gzipSync(Buffer.from(events.map((event) => JSON.stringify(event)).join('\n') + (events.length ? '\n' : ''), 'utf8')))
+            res.setHeader('content-type', 'application/json')
+            res.end(JSON.stringify({ ok: true }))
+          } catch (error) {
+            res.statusCode = 400
+            res.end(error instanceof Error ? error.message : String(error))
+          }
+        })
+      })
+
+      // A compact Package can itself be large when a long session contains
+      // substantial canvas evidence. Keep the 32MB single-request guard, but
+      // let the browser upload a bounded sequence that is reassembled locally.
+      server.middlewares.use('/api/prompt-package-segment/', (req, res) => {
+        const match = (req.url?.split('?')[0] ?? '').match(/^\/([^/]+)\/(\d{6})$/)
+        const packageId = match?.[1] ?? ''
+        const sequence = match?.[2] ?? ''
+        if (req.method !== 'POST' || !safePackageId(packageId) || !sequence) { rejectLocalApiRequest(res, 405, 'Method Not Allowed'); return }
+        if (!enforceProtectedLocalApi(req, res, security)) return
+        if (normalizedMediaType(req.headers['content-type']) !== 'application/octet-stream') { rejectLocalApiRequest(res, 415, 'Package segment requires application/octet-stream.'); return }
+        const chunks: Buffer[] = []
+        let total = 0
+        req.on('data', (chunk: Buffer) => {
+          total += chunk.length
+          if (total > MAX_PACKAGE_SEGMENT_BYTES) req.destroy(new Error('上下文检查点超过 5MB 限制'))
+          else chunks.push(chunk)
+        })
+        req.on('error', (error) => { res.statusCode = 413; res.end(error.message) })
+        req.on('end', async () => {
+          try {
+            const bytes = Buffer.concat(chunks)
+            if (bytes.length === 0) throw new Error('上下文检查点为空')
+            const segmentPath = resolve(roundsDir, packageId, 'package-segments', `${sequence}.part`)
+            await mkdir(dirname(segmentPath), { recursive: true })
+            await writeFile(segmentPath, bytes)
+            res.setHeader('content-type', 'application/json')
+            res.end(JSON.stringify({ ok: true }))
+          } catch (error) {
+            res.statusCode = 400
             res.end(error instanceof Error ? error.message : String(error))
           }
         })
@@ -396,7 +479,23 @@ function promptPackagePersistence(): Plugin {
         })
         req.on('end', async () => {
           try {
-            const received = JSON.parse(body) as { meta?: { package_id?: string; duration_ms?: number }; canvas_snapshot?: { final?: { url?: string } }; source?: { trace?: unknown[] } }
+            const envelope = JSON.parse(body) as { segmented_package?: boolean; package_id?: string }
+            let received = envelope as { meta?: { package_id?: string; duration_ms?: number }; canvas_snapshot?: { final?: { url?: string }, keyframes?: Array<{ timestamp_ms?: number }> }; source?: { trace?: unknown[], audio?: unknown } }
+            if (envelope.segmented_package === true) {
+              const packageId = envelope.package_id ?? ''
+              if (!safePackageId(packageId)) throw new Error('分段上下文缺少安全的 package_id。')
+              const segmentDir = resolve(roundsDir, packageId, 'package-segments')
+              const names = (await readdir(segmentDir, { withFileTypes: true }).catch(() => []))
+                .filter((entry) => entry.isFile() && /^\d{6}\.part$/.test(entry.name))
+                .map((entry) => entry.name)
+                .sort()
+              if (names.length === 0) throw new Error('未找到本轮上下文检查点。')
+              const parts = await Promise.all(names.map((name) => readFile(resolve(segmentDir, name))))
+              const total = parts.reduce((sum, part) => sum + part.byteLength, 0)
+              if (total > MAX_SEGMENTED_PACKAGE_BYTES) throw new Error('本轮上下文超过 256MB 本地归档上限。')
+              received = JSON.parse(Buffer.concat(parts).toString('utf8')) as typeof received
+              if (received.meta?.package_id !== packageId) throw new Error('上下文检查点与本轮标识不一致。')
+            }
             const rawTrace = received.source?.trace
             // The raw trace is a local replay artifact, never an input to the
             // compiler or MCP package reader. Keep the durable Prompt Package
@@ -439,7 +538,26 @@ function promptPackagePersistence(): Plugin {
               },
               retryHandoff,
               persistArchive: async (archived: { artifacts: { rawTraceManifest?: unknown } }) => {
-                await writeFile(resolve(roundPath, 'archive.json'), `${JSON.stringify({ schema_version: 1, storage: conversationScope.storageKind, conversation_binding: { source_thread_id: conversationScope.threadId, session_id: conversationScope.sessionId, thread_scope_key: conversationScope.threadScopeKey }, retention: 'kept_until_deleted_by_user', contents: ['prompt-package.json', 'canvas-snapshot.png', 'source-images/ when original images were imported', 'state-frames/ when captured', 'audio.* when recorded', 'raw-trace.ndjson.gz when available', 'raw-trace-manifest.json when available', 'engine/', 'handoff.json when sent'], raw_trace: archived.artifacts.rawTraceManifest ?? undefined, created_at: new Date().toISOString() }, null, 2)}\n`, 'utf8')
+                const checkpoints = (payload.canvas_snapshot?.keyframes ?? []).map((frame, index) => ({
+                  checkpoint_id: `state_${String(index + 1).padStart(3, '0')}`,
+                  timestamp_ms: Math.max(0, Math.round(frame.timestamp_ms ?? 0)),
+                  artifact: `state-frames/${String(index + 1).padStart(2, '0')}-${Math.max(0, Math.round(frame.timestamp_ms ?? 0))}ms.png`,
+                }))
+                const sessionManifest = {
+                  schema_version: 1,
+                  session_id: packageId,
+                  duration_ms: payload.meta?.duration_ms ?? null,
+                  continuity: 'single_continuous_session',
+                  checkpoints,
+                  artifacts: {
+                    audio: payload.source?.audio ? 'audio.*' : null,
+                    raw_trace: archived.artifacts.rawTraceManifest ?? null,
+                    package_transport: envelope.segmented_package === true ? 'segmented_and_reassembled_locally' : 'single_local_request',
+                  },
+                  created_at: new Date().toISOString(),
+                }
+                await writeFile(resolve(roundPath, 'session-manifest.json'), `${JSON.stringify(sessionManifest, null, 2)}\n`, 'utf8')
+                await writeFile(resolve(roundPath, 'archive.json'), `${JSON.stringify({ schema_version: 1, storage: conversationScope.storageKind, conversation_binding: { source_thread_id: conversationScope.threadId, session_id: conversationScope.sessionId, thread_scope_key: conversationScope.threadScopeKey }, retention: 'kept_until_deleted_by_user', contents: ['prompt-package.json', 'session-manifest.json', 'canvas-snapshot.png', 'source-images/ when original images were imported', 'state-frames/ when captured', 'audio.* when recorded', 'raw-trace.ndjson.gz or raw-trace-segments/ when available', 'raw-trace-manifest.json when available', 'engine/', 'handoff.json when sent'], raw_trace: archived.artifacts.rawTraceManifest ?? undefined, created_at: new Date().toISOString() }, null, 2)}\n`, 'utf8')
               },
               startHandoff: async (archived: { roundPackagePath: string; engine: EngineResult; artifacts: { snapshotPath?: string | null; keyframePaths?: string[]; sourceImagePaths?: string[] } | null }) => {
                 if (deliveryMode !== 'codex') {
@@ -450,6 +568,7 @@ function promptPackagePersistence(): Plugin {
               },
             })
             const { roundPackagePath, engine, handoff } = submitted
+            if (envelope.segmented_package === true) await rm(resolve(roundPath, 'package-segments'), { recursive: true, force: true })
             res.setHeader('content-type', 'application/json')
             res.end(JSON.stringify({ ok: engine.ok, path: latestPackagePath, roundPath, engine, handoff, reused: submitted.reused }))
           } catch (error) {

@@ -14,7 +14,8 @@ When a round is exported, Canvas Prompt writes local data under:
 
 Depending on the session, this can include:
 
-- the Prompt Package JSON and raw lifecycle trace;
+- the Prompt Package JSON and raw lifecycle trace. Large traces and Packages
+  are stored as bounded local segments and reassembled locally;
 - a PNG snapshot and selected state frames;
 - the original audio recording;
 - Process IR and Compact Package artifacts;
@@ -28,6 +29,11 @@ The in-app archive can inspect and permanently delete a local round. A deleted r
 Canvas Prompt requests microphone access when any round starts. If permission is denied or the microphone is unavailable, canvas events continue to be recorded without audio.
 
 Canvas Prompt's managed runtime sends completed audio windows to a local transcription service on `127.0.0.1`. Its exact port is selected by the launcher and exposed in the runtime identity; it is not fixed at `8080`. Canvas Prompt does not operate a transcription cloud service. If local ASR is not ready, the user can explicitly start a visual-only round; any saved recording is marked as lacking timestamped transcript evidence.
+
+Raw recordings, replay segments, and inline image bytes are local archive
+artifacts. They are excluded from the normal model-facing Package response;
+the host reads compact structured context and can request an archived artifact
+only when its integration explicitly supports that action.
 
 If you configure a remote or third-party ASR backend, that provider's privacy, retention, and regional processing terms apply. Do not record other people or confidential material without the necessary permission.
 

@@ -14,6 +14,8 @@ import { compactTraceToCognitiveEvents, buildPointerTrack } from './excalidraw-c
 import { compilePromptPackage, validatePromptPackage } from './prompt-package-compiler'
 import type { BaselineContext, CanvasObject, EditableSourceImage, Keyframe, PromptPackage, ViewTransformation } from './prompt-package-compiler'
 import { appendViewTransformation } from './view-transform'
+import { TRANSPORT_SEGMENT_BYTES } from './transport-budget'
+import { splitRawTraceSegments } from './raw-trace-segments'
 import { countIncludedBaselineObjects, projectFinalSnapshotElements, projectLiveRoundElementIds } from './baseline-projection'
 import { deriveExportReceiptStatus, isReceiptComplete } from './receipt-state'
 import type { ExportReceiptStatus, HandoffReceipt } from './receipt-state'
@@ -686,9 +688,14 @@ export default function App() {
     setExportStatus('exporting')
     setHandoffReceipt(null)
     setWorkflowMessage('正在归档本轮上下文…')
+    // Replay is a high-frequency local archive, while the Prompt Package is
+    // compact AI context. Upload replay in bounded checkpoint segments before
+    // the final package so a long continuous session never has to fit through
+    // the 32MB JSON request as one atomic body.
+    const rawTraceSegments = splitRawTraceSegments(trace.current)
     const payload = {
       ...packageToExport,
-      source: { canvas: 'excalidraw', trace: trace.current, audio: recordingToArchive ? { mime_type: recordingToArchive.blob.type, duration_ms: recordingToArchive.duration } : null },
+      source: { canvas: 'excalidraw', audio: recordingToArchive ? { mime_type: recordingToArchive.blob.type, duration_ms: recordingToArchive.duration } : null },
     }
 
     try {
@@ -708,12 +715,36 @@ export default function App() {
         })
         if (!audioResponse.ok) throw new Error('本轮录音未能保存到本地档案')
       }
+      for (const [index, segment] of rawTraceSegments.entries()) {
+        const traceResponse = await protectedLocalApiFetch(`/api/round-trace-segment/${packageToExport.meta.package_id}/${String(index + 1).padStart(6, '0')}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(segment),
+        })
+        if (!traceResponse.ok) throw new Error('本轮过程快照未能保存到本地档案')
+      }
+      const packageBody = new Blob([JSON.stringify(payload)], { type: 'application/json' })
+      const usesPackageSegments = packageBody.size > TRANSPORT_SEGMENT_BYTES
+      if (usesPackageSegments) {
+        let sequence = 1
+        for (let offset = 0; offset < packageBody.size; offset += TRANSPORT_SEGMENT_BYTES) {
+          const segmentResponse = await protectedLocalApiFetch(`/api/prompt-package-segment/${packageToExport.meta.package_id}/${String(sequence).padStart(6, '0')}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/octet-stream' },
+            body: packageBody.slice(offset, offset + TRANSPORT_SEGMENT_BYTES),
+          })
+          if (!segmentResponse.ok) throw new Error('本轮上下文检查点未能保存到本地档案')
+          sequence += 1
+        }
+      }
       const response = await protectedLocalApiFetch('/api/prompt-package', {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(retryHandoff ? { 'x-canvas-prompt-retry-handoff': '1' } : {}) },
         // Raw scene lifecycle is archived separately by the local service.
         // It is intentionally not retained inside the model-facing package.
-        body: JSON.stringify(payload),
+        body: usesPackageSegments
+          ? JSON.stringify({ segmented_package: true, package_id: packageToExport.meta.package_id })
+          : JSON.stringify(payload),
       })
       const result = await response.json().catch(() => null) as { ok?: boolean; error?: string; roundPath?: string; engine?: { error?: string }; handoff?: HandoffReceipt } | null
       if (!response.ok || !result?.ok) throw new Error(result?.error || result?.engine?.error || `本轮上下文未能归档（${response.status}）`)
