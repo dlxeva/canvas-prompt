@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, realpathSync, readFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, realpathSync, readFileSync, rmSync } from 'node:fs'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -18,18 +18,88 @@ const runWithEnvironment = (environment, ...args) => spawnSync(process.execPath,
 
 test('init emits MCP configuration with optional project provenance', () => {
   const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
-  const result = run('init', '--project', project)
+  const home = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-home-'))
+  const result = runWithEnvironment({ HOME: home }, 'init', '--project', project)
   assert.equal(result.status, 0, result.stderr)
   const parsed = JSON.parse(result.stdout)
   const canonicalProject = realpathSync(project)
   assert.equal(parsed.project_dir, canonicalProject)
   assert.equal(parsed.mcp_config.mcpServers.canvas_prompt.env.CANVAS_PROMPT_PROJECT_DIR, canonicalProject)
+  assert.equal(parsed.mcp_config.mcpServers.canvas_prompt.command, 'node')
+  assert.equal(parsed.mcp_config.mcpServers.canvas_prompt.args[0], join(home, '.canvas-prompt', 'runtime', 'mcp', 'server.mjs'))
+  assert.equal(existsSync(parsed.mcp_config.mcpServers.canvas_prompt.args[0]), true)
+  const handshake = spawnSync(process.execPath, [parsed.mcp_config.mcpServers.canvas_prompt.args[0]], {
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home },
+    input: `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'cli-test', version: '1' } } })}\n`,
+  })
+  assert.equal(handshake.status, 0, handshake.stderr)
+  assert.match(handshake.stdout, /ai-thinking-whiteboard-mcp/)
+})
+
+test('managed MCP runtime survives removal of the versioned plugin source', () => {
+  const source = mkdtempSync(join(tmpdir(), 'canvas-prompt-versioned-cache-'))
+  const home = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-home-'))
+  const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
+  mkdirSync(join(source, 'bin'), { recursive: true })
+  mkdirSync(join(source, 'app'), { recursive: true })
+  mkdirSync(join(source, 'mcp'), { recursive: true })
+  copyFileSync(cli, join(source, 'bin', 'canvas-prompt.mjs'))
+  for (const entry of readdirSync(resolve('app'))) {
+    if (entry.endsWith('.mjs')) copyFileSync(resolve('app', entry), join(source, 'app', entry))
+  }
+  copyFileSync(resolve('mcp', 'server.mjs'), join(source, 'mcp', 'server.mjs'))
+
+  const isolatedCli = join(source, 'bin', 'canvas-prompt.mjs')
+  const initialized = spawnSync(process.execPath, [isolatedCli, 'init', '--project', project], {
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home },
+  })
+  assert.equal(initialized.status, 0, initialized.stderr)
+  const runtimeServer = JSON.parse(initialized.stdout).mcp_config.mcpServers.canvas_prompt.args[0]
+  rmSync(source, { recursive: true, force: true })
+  assert.equal(existsSync(source), false)
+
+  const handshake = spawnSync(process.execPath, [runtimeServer], {
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home },
+    input: `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'cache-removal-test', version: '1' } } })}\n`,
+  })
+  assert.equal(handshake.status, 0, handshake.stderr)
+  assert.match(handshake.stdout, /ai-thinking-whiteboard-mcp/)
+})
+
+test('init refreshes an existing stale managed MCP runtime before emitting config', () => {
+  const home = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-home-'))
+  const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
+  const runtimeServer = join(home, '.canvas-prompt', 'runtime', 'mcp', 'server.mjs')
+  const runtimeScope = join(home, '.canvas-prompt', 'runtime', 'app', 'conversation-scope.mjs')
+  mkdirSync(join(runtimeServer, '..'), { recursive: true })
+  mkdirSync(join(runtimeScope, '..'), { recursive: true })
+  writeFileSync(runtimeServer, 'stale server\n')
+  writeFileSync(runtimeScope, 'stale scope\n')
+
+  const result = runWithEnvironment({ HOME: home }, 'init', '--project', project)
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(readFileSync(runtimeServer, 'utf8'), readFileSync(resolve('mcp', 'server.mjs'), 'utf8'))
+  assert.equal(readFileSync(runtimeScope, 'utf8'), readFileSync(resolve('app', 'conversation-scope.mjs'), 'utf8'))
+  const parsed = JSON.parse(result.stdout)
+  assert.equal(parsed.mcp_config.mcpServers.canvas_prompt.args[0], runtimeServer)
+
+  const handshake = spawnSync(process.execPath, [runtimeServer], {
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home },
+    input: `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'runtime-refresh-test', version: '1' } } })}\n`,
+  })
+  assert.equal(handshake.status, 0, handshake.stderr)
+  assert.match(handshake.stdout, /ai-thinking-whiteboard-mcp/)
 })
 
 test('init keeps a host thread as provenance but configures the single board', () => {
   const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
+  const home = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-home-'))
   const threadId = '019fa-codex-thread-12345678'
-  const result = run('init', '--project', project, '--thread-id', threadId)
+  const result = runWithEnvironment({ HOME: home }, 'init', '--project', project, '--thread-id', threadId)
   assert.equal(result.status, 0, result.stderr)
   const parsed = JSON.parse(result.stdout)
   assert.equal(parsed.storage_kind, 'single_board')
@@ -38,8 +108,8 @@ test('init keeps a host thread as provenance but configures the single board', (
 })
 
 test('init supports a project-less single board without a host thread ID', () => {
-  const threadId = '019fa-temporary-thread-12345678'
-  const result = run('init', '--conversation-only')
+  const home = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-home-'))
+  const result = runWithEnvironment({ HOME: home }, 'init', '--conversation-only')
   assert.equal(result.status, 0, result.stderr)
   const parsed = JSON.parse(result.stdout)
   assert.equal(parsed.project_dir, null)

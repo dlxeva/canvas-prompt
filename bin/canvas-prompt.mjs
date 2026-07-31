@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -26,21 +26,36 @@ const projectDir = ({ required = true } = {}) => {
   if (!existsSync(candidate)) throw new Error(`Project directory does not exist: ${candidate}`)
   return realpathSync(candidate)
 }
+// Plugin caches are replaced on update. The MCP reader must therefore live in
+// the managed user runtime, not in a versioned cache path recorded by another
+// host (for example Hermes).
+const runtimeDir = () => resolve(process.env.CANVAS_PROMPT_RUNTIME_DIR ?? resolve(homedir(), '.canvas-prompt', 'runtime'))
+const mcpRuntimeServerPath = () => resolve(runtimeDir(), 'mcp', 'server.mjs')
+const ensureMcpRuntime = async () => {
+  const targets = [
+    ['mcp/server.mjs', resolve(runtimeDir(), 'mcp', 'server.mjs')],
+    ['app/conversation-scope.mjs', resolve(runtimeDir(), 'app', 'conversation-scope.mjs')],
+  ]
+  await Promise.all(targets.map(async ([source, target]) => {
+    await mkdir(dirname(target), { recursive: true })
+    await copyFile(resolve(rootDir, source), target)
+  }))
+  return mcpRuntimeServerPath()
+}
 const mcpConfig = (project) => ({
   mcpServers: {
     canvas_prompt: {
-      command: 'bash',
-      args: [resolve(rootDir, 'scripts', 'start-mcp.sh')],
+      command: 'node',
+      args: [mcpRuntimeServerPath()],
       env: {
         ...(project ? { CANVAS_PROMPT_PROJECT_DIR: project } : {}),
       },
     },
   },
 })
-// Plugin caches are replaced on update. Keep the managed runtime outside the
-// cache so an installed ASR environment and model can be reused across plugin
-// versions without touching a user's global Python environment.
-const runtimeDir = () => resolve(process.env.CANVAS_PROMPT_RUNTIME_DIR ?? resolve(homedir(), '.canvas-prompt', 'runtime'))
+// Keep the managed runtime outside the cache so an installed ASR environment
+// and model can be reused across plugin versions without touching a user's
+// global Python environment.
 // This is a user interaction preference, not project or conversation state.
 // Keep it outside project archives so "do not show this again" means the same
 // thing when a person opens Canvas Prompt from another project.
@@ -192,11 +207,16 @@ try {
     if (suppliedSessionId && !validSessionId(suppliedSessionId)) throw new Error('Canvas Prompt received an invalid session capability.')
     const scope = resolveConversationScope({ projectDir: project, threadId: boundThreadId, sessionId: suppliedSessionId, singleBoard: true })
     if (command === 'setup') {
+      await ensureMcpRuntime()
       const result = runBootstrap(flag('--core-only') ? '--core-only' : '--with-asr')
       process.exitCode = result.status ?? 1
     }
-    else if (command === 'init') console.log(JSON.stringify({ project_dir: project, storage_kind: scope.storageKind, thread_scope_key: scope.threadScopeKey, mcp_config: mcpConfig(project, boundThreadId) }, null, 2))
+    else if (command === 'init') {
+      await ensureMcpRuntime()
+      console.log(JSON.stringify({ project_dir: project, storage_kind: scope.storageKind, thread_scope_key: scope.threadScopeKey, mcp_config: mcpConfig(project, boundThreadId) }, null, 2))
+    }
     else if (command === 'doctor') {
+      await ensureMcpRuntime()
       const asr = await probeAsr()
       console.log(JSON.stringify({
         ok: true,
@@ -228,6 +248,7 @@ try {
     } else if (command === 'open') {
       const hostFlag = flag('--host')
       const host = hostFlag === 'codex' ? 'codex' : hostFlag === 'workbuddy' ? 'workbuddy' : 'local'
+      await ensureMcpRuntime()
       const asrEnvironment = await asrEnvironmentForOpen(project)
       const environment = runtimeEnvironment(asrEnvironment)
       if (process.env.CANVAS_PROMPT_ASR !== 'disabled') {
