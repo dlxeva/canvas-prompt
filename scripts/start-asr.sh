@@ -3,7 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNTIME_DIR="${CANVAS_PROMPT_RUNTIME_DIR:-$ROOT_DIR/.canvas-prompt-runtime}"
-PORT="${CANVAS_PROMPT_ASR_PORT:-8080}"
+# 18080 is reserved for Canvas Prompt-managed ASR.  Do not default to 8080:
+# that is a common unrelated local-service port and forced every plugin
+# version to select a new fallback port instead of finding the shared runtime.
+PORT="${CANVAS_PROMPT_ASR_PORT:-18080}"
 ASR_URL="http://127.0.0.1:${PORT}"
 PID_FILE="$RUNTIME_DIR/asr.pid"
 LOG_FILE="$RUNTIME_DIR/asr.log"
@@ -28,7 +31,43 @@ except Exception:
   [[ "$compatible" == "yes" ]]
 }
 
+managed_asr_process() {
+  local pid command
+  pid="$1"
+  command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  [[ "$command" == *"canvas-prompt"* && "$command" == *"runtime/asr-server.py"* && "$command" == *"--host 127.0.0.1"* ]]
+}
+
+# One user has one local Canvas Prompt board, so there must be at most one
+# managed ASR daemon.  Old plugin versions used a cache-path-derived service
+# label and left compatible daemons behind on 18080-18099.  Stop only
+# positively identified Canvas Prompt processes; never touch another app that
+# happens to listen on one of these ports.
+reap_legacy_managed_asr() {
+  local candidate pid
+  for ((candidate = 18080; candidate < 18100; candidate++)); do
+    [[ "$candidate" == "$PORT" ]] && continue
+    if ! curl --silent --show-error --max-time 1 "http://127.0.0.1:${candidate}/health" 2>/dev/null | grep -q '"canvas_prompt_asr":true'; then
+      continue
+    fi
+    while IFS= read -r pid; do
+      [[ -n "$pid" ]] || continue
+      if managed_asr_process "$pid"; then
+        echo "Stopping stale Canvas Prompt ASR (PID ${pid}) on port ${candidate}." >&2
+        kill "$pid" 2>/dev/null || true
+      fi
+    done < <(lsof -nP -tiTCP:"$candidate" -sTCP:LISTEN 2>/dev/null || true)
+  done
+}
+
+# Lets the regression suite source the lifecycle helpers without starting a
+# daemon or touching the user's actual runtime.
+if [[ "${CANVAS_PROMPT_ASR_TEST_ONLY:-}" == "1" ]]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 if healthy_asr; then
+  reap_legacy_managed_asr
   echo "Reusing Canvas Prompt local ASR at $ASR_URL" >&2
   exit 0
 fi
@@ -46,7 +85,10 @@ if [[ "$(uname -s)" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
   # A process detached from a short-lived host command can be terminated with
   # that command on macOS. Keep ASR under the same user-service manager as the
   # canvas so a readiness gate remains true after the launcher returns.
-  service_id="$(printf '%s' "${ROOT_DIR}:${PORT}" | shasum -a 256 | cut -c1-12)"
+  # Runtime directory, unlike ROOT_DIR, survives plugin-cache updates.  Its
+  # stable identity makes launchctl replace the prior managed daemon instead
+  # of accumulating one daemon per installed plugin version.
+  service_id="$(printf '%s' "${RUNTIME_DIR}:${PORT}" | shasum -a 256 | cut -c1-12)"
   SERVICE_LABEL="com.canvas-prompt.asr.${service_id}"
   launchctl bootout "gui/$(id -u)/${SERVICE_LABEL}" >/dev/null 2>&1 || true
   if launchctl submit -l "$SERVICE_LABEL" -o "$LOG_FILE" -e "$LOG_FILE" -- \
@@ -71,6 +113,7 @@ for ((attempt = 0; attempt < STARTUP_TIMEOUT_SECONDS * 2; attempt++)); do
   if healthy_asr; then
     # Write the PID file from the port when $! was unavailable (double-fork).
     lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null >"$PID_FILE" || true
+    reap_legacy_managed_asr
     echo "Canvas Prompt local ASR is ready at $ASR_URL" >&2
     exit 0
   fi

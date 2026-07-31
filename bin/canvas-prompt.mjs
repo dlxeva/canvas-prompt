@@ -69,7 +69,10 @@ const writePreferences = async (preferences) => {
   await mkdir(dirname(path), { recursive: true })
   await writeFile(path, `${JSON.stringify(preferences, null, 2)}\n`, 'utf8')
 }
-const asrUrl = (environment = process.env) => environment.CANVAS_PROMPT_ASR_URL ?? `http://127.0.0.1:${environment.CANVAS_PROMPT_ASR_PORT ?? '8080'}`
+const MANAGED_ASR_PORT_START = 18080
+const MANAGED_ASR_PORT_END = 18100
+const DEFAULT_MANAGED_ASR_PORT = String(MANAGED_ASR_PORT_START)
+const asrUrl = (environment = process.env) => environment.CANVAS_PROMPT_ASR_URL ?? `http://127.0.0.1:${environment.CANVAS_PROMPT_ASR_PORT ?? DEFAULT_MANAGED_ASR_PORT}`
 const runtimeEnvironment = (overrides = {}) => ({ ...process.env, ...overrides, CANVAS_PROMPT_RUNTIME_DIR: runtimeDir() })
 const runBootstrap = (mode) => spawnSync('bash', [resolve(rootDir, 'scripts', 'bootstrap-runtime.sh'), mode], { stdio: 'inherit', env: runtimeEnvironment() })
 const allowsExternalAsr = (environment = process.env) => environment.CANVAS_PROMPT_ALLOW_EXTERNAL_ASR === '1' || Boolean(environment.CANVAS_PROMPT_ASR_URL)
@@ -88,8 +91,18 @@ const probeAsr = async (environment = process.env) => {
 }
 const portInUse = (port) => spawnSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN'], { stdio: 'ignore' }).status === 0
 const firstOpenAsrPort = () => {
-  for (let port = 18080; port < 18100; port += 1) if (!portInUse(port)) return port
+  for (let port = MANAGED_ASR_PORT_START; port < MANAGED_ASR_PORT_END; port += 1) if (!portInUse(port)) return port
   throw new Error('Canvas Prompt could not find a free local ASR port between 18080 and 18099.')
+}
+const existingManagedAsrPort = async () => {
+  const probes = await Promise.all(Array.from(
+    { length: MANAGED_ASR_PORT_END - MANAGED_ASR_PORT_START },
+    (_, index) => {
+      const port = MANAGED_ASR_PORT_START + index
+      return probeAsr({ CANVAS_PROMPT_ASR_PORT: String(port) }).then((result) => ({ port, ready: result.ready }))
+    },
+  ))
+  return probes.find((probe) => probe.ready)?.port ?? null
 }
 const existingCanvasRuntime = async (project) => {
   for (let port = 43223; port < 43243; port += 1) {
@@ -125,8 +138,12 @@ const asrEnvironmentForOpen = async (project) => {
   const existing = await existingCanvasRuntime(project)
   const existingPort = localAsrPort(existing?.asr_url)
   if (existingPort) return { CANVAS_PROMPT_ASR_PORT: existingPort }
-  const current = await probeAsr()
-  if (current.ready || !portInUse(Number(process.env.CANVAS_PROMPT_ASR_PORT ?? '8080'))) return {}
+  if (process.env.CANVAS_PROMPT_ASR_PORT) return {}
+  // The managed runtime is shared across plugin-cache versions. Discover it
+  // before picking a free port; otherwise each update leaks another ASR.
+  const managedPort = await existingManagedAsrPort()
+  if (managedPort) return { CANVAS_PROMPT_ASR_PORT: String(managedPort) }
+  if (!portInUse(MANAGED_ASR_PORT_START)) return {}
   return { CANVAS_PROMPT_ASR_PORT: String(firstOpenAsrPort()) }
 }
 const help = () => console.log(`Canvas Prompt host-neutral entrypoint

@@ -38,7 +38,7 @@ const latestPackagePath = conversationScope.latestPackagePath
 const roundsDir = conversationScope.roundsDir
 const runCommand = promisify(execFile)
 const deliveryMode = process.env.CANVAS_PROMPT_DELIVERY_MODE === 'codex' ? 'codex' : process.env.CANVAS_PROMPT_DELIVERY_MODE === 'workbuddy' ? 'workbuddy' : 'local'
-const configuredAsrUrl = process.env.CANVAS_PROMPT_ASR_URL ?? `http://127.0.0.1:${process.env.CANVAS_PROMPT_ASR_PORT ?? '8080'}`
+const configuredAsrUrl = process.env.CANVAS_PROMPT_ASR_URL ?? `http://127.0.0.1:${process.env.CANVAS_PROMPT_ASR_PORT ?? '18080'}`
 
 function localAsrUrl() {
   try {
@@ -59,7 +59,7 @@ async function runtimeIdentity() {
     conversation_bound: false,
     thread_scope_key: conversationScope.threadScopeKey,
     session_scope_key: null,
-    service_version: '0.1.31',
+    service_version: '0.1.32',
     delivery_mode: deliveryMode,
     asr_url: localAsrUrl(),
     asr_enabled: process.env.CANVAS_PROMPT_ASR !== 'disabled',

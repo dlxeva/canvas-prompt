@@ -86,8 +86,9 @@ test('a legal large raw package is readable before image data is stripped for MC
   await mkdir(canvasDir, { recursive: true });
   const large = JSON.stringify({
     meta: { package_id: 'pp_large' },
-    canvas_snapshot: { final: { url: `data:image/png;base64,${'A'.repeat(6 * 1024 * 1024)}`, format: 'png', width: 100, height: 100 } },
+    canvas_snapshot: { final: { url: `data:image/png;base64,${'A'.repeat(35 * 1024 * 1024)}`, format: 'png', width: 100, height: 100 } },
   });
+  assert.ok(Buffer.byteLength(large, 'utf8') > 32 * 1024 * 1024);
   const filePath = resolve(canvasDir, 'latest-prompt-package.json');
   await writeFile(filePath, large);
   const trusted = await readTrustedCanvasArtifact(filePath, ['latest-prompt-package.json'], { canvasPromptDir: canvasDir, maxBytes: 256 * 1024 * 1024 });

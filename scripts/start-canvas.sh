@@ -17,7 +17,7 @@ else
   exit 1
 fi
 PORT="${CANVAS_PROMPT_PORT:-43223}"
-ASR_URL="${CANVAS_PROMPT_ASR_URL:-http://127.0.0.1:${CANVAS_PROMPT_ASR_PORT:-8080}}"
+ASR_URL="${CANVAS_PROMPT_ASR_URL:-http://127.0.0.1:${CANVAS_PROMPT_ASR_PORT:-18080}}"
 ASR_ENABLED="${CANVAS_PROMPT_ASR:-enabled}"
 DELIVERY_MODE="${CANVAS_PROMPT_DELIVERY_MODE:-local}"
 CORE_APP_DIR="$ROOT_DIR/app"
@@ -179,7 +179,10 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 NODE_BIN="$(command -v node)"
-SERVICE_ID="$(printf '%s' "${ROOT_DIR}:${PROJECT_DIR}:${THREAD_SCOPE_KEY}:${PORT}" | shasum -a 256 | cut -c1-12)"
+# The service is the user's single board, not a plugin-cache checkout or a
+# project/thread binding.  A stable label lets a newer plugin revision replace
+# a crashed service instead of leaving launchctl jobs behind per cache path.
+SERVICE_ID="$(printf '%s' "${HOME}/.canvas-prompt/board:${PORT}" | shasum -a 256 | cut -c1-12)"
 SERVICE_LABEL="com.canvas-prompt.${SERVICE_ID}"
 SERVICE_LOG="${TMPDIR:-/tmp}/${SERVICE_LABEL}.log"
 

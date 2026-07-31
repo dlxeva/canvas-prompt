@@ -8,7 +8,7 @@
 <h1 align="center">Canvas Prompt</h1>
 
 <p align="center">
-  <a href="https://github.com/dlxeva/canvas-prompt/blob/main/.codex-plugin/plugin.json"><img src="https://img.shields.io/badge/release-v0.1.31-C8462B" alt="release v0.1.31"></a>
+  <a href="https://github.com/dlxeva/canvas-prompt/blob/main/.codex-plugin/plugin.json"><img src="https://img.shields.io/badge/release-v0.1.32-C8462B" alt="release v0.1.32"></a>
   <a href="https://github.com/dlxeva/canvas-prompt/actions/workflows/verify.yml"><img src="https://github.com/dlxeva/canvas-prompt/actions/workflows/verify.yml/badge.svg?branch=main" alt="CI status"></a>
   <img src="https://img.shields.io/badge/runtime-local--first-3A7D44" alt="local-first runtime">
   <img src="https://img.shields.io/badge/verified-macOS%20arm64-147E9E" alt="verified on macOS arm64">
@@ -76,13 +76,6 @@ the conversation reads it only when you explicitly ask it to continue.
 
 ## Two useful starting points
 
-### Think through a problem before you can phrase it
-
-Make a rough structure, branch an idea, cross something out, move a part, and
-say what changed your mind. The package carries the final canvas together with
-the time-ordered evidence behind it, so the conversation can start with a
-grounded reading instead of asking you to reconstruct the whole thought.
-
 ### Review an image without translating every mark into prose
 
 Paste the original image, circle the parts that matter, and explain only what
@@ -93,6 +86,13 @@ fidelity matters instead of treating a small screenshot as the source file.
 
 When Codex produces a revised image, copy it from the conversation and press
 `⌘V` on the canvas to make it the substrate for the next review round.
+
+### Think through a problem before you can phrase it
+
+Make a rough structure, branch an idea, cross something out, move a part, and
+say what changed your mind. The package carries the final canvas together with
+the time-ordered evidence behind it, so the conversation can start with a
+grounded reading instead of asking you to reconstruct the whole thought.
 
 ## What the AI receives
 

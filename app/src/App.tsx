@@ -247,7 +247,7 @@ export default function App() {
   const [asrProgress, setAsrProgress] = useState<AsrWindowProgress>({ completed: 0, pending: 0, failed: 0, active: 0 })
   const [asrAvailable, setAsrAvailable] = useState(false)
   const [asrPreparing, setAsrPreparing] = useState(true)
-  const [asrEndpoint, setAsrEndpoint] = useState('http://127.0.0.1:8080')
+  const [asrEndpoint, setAsrEndpoint] = useState('http://127.0.0.1:18080')
   // Do not probe the default port before runtime identity tells us which
   // isolated ASR instance this canvas owns. Otherwise a cold start can briefly
   // look like "audio only" (or accidentally observe another app's ASR).
