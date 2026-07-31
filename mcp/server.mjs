@@ -250,7 +250,7 @@ async function handleGetRoundArtifact(args = {}) {
 
 const SERVER_INFO = {
   name: 'ai-thinking-whiteboard-mcp',
-  version: '0.1.30',
+  version: '0.1.31',
 };
 
 // Mirror the official MCP SDK negotiation policy. Codex Desktop now starts
