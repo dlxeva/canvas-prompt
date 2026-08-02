@@ -176,16 +176,20 @@ export class VoiceRecorder {
   private currentPauseStart: number = 0;
   private selectedDeviceId: string | undefined;
   private levelDataArray: Float32Array<ArrayBuffer> | null = null;
+  private pendingStopReject: ((reason?: unknown) => void) | null = null;
+  private readonly deviceChangeHandler: () => void;
 
   constructor(config: RecorderConfig = {}, events: RecorderEvents = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.events = events;
 
     // 监听设备变化
+    this.deviceChangeHandler = () => {
+      this.events.onDeviceChange?.();
+    };
+
     if (typeof navigator !== 'undefined' && navigator.mediaDevices) {
-      navigator.mediaDevices.addEventListener('devicechange', () => {
-        this.events.onDeviceChange?.();
-      });
+      navigator.mediaDevices.addEventListener('devicechange', this.deviceChangeHandler);
     }
   }
 
@@ -317,11 +321,13 @@ export class VoiceRecorder {
       });
     }
 
-    return new Promise<RecordingResult>((resolve, _reject) => {
+    return new Promise<RecordingResult>((resolve, reject) => {
       const endTime = Date.now();
+      const recorder = this.mediaRecorder!;
+      this.pendingStopReject = reject;
 
-      this.mediaRecorder!.onstop = () => {
-        const mimeType = this.mediaRecorder!.mimeType || 'audio/webm';
+      recorder.onstop = () => {
+        const mimeType = recorder.mimeType || 'audio/webm';
         const blob = new Blob(this.chunks, { type: mimeType });
         const url = URL.createObjectURL(blob);
 
@@ -336,6 +342,8 @@ export class VoiceRecorder {
           pauseSegments: [...this.pauseSegments],
         };
 
+        this.pendingStopReject = null;
+        this.detachMediaRecorderHandlers(recorder);
         this.stopLevelMonitoring();
         this.cleanup();
         this.setState('inactive');
@@ -344,7 +352,11 @@ export class VoiceRecorder {
         resolve(result);
       };
 
-      this.mediaRecorder!.stop();
+      try {
+        recorder.stop();
+      } catch (error) {
+        this.handleRecorderError(error);
+      }
     });
   }
 
@@ -422,6 +434,10 @@ export class VoiceRecorder {
    */
   dispose(): void {
     this.stopLevelMonitoring();
+    if (this.pendingStopReject) this.finishWithError(new Error('Recorder disposed while stopping.'));
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices) {
+      navigator.mediaDevices.removeEventListener('devicechange', this.deviceChangeHandler);
+    }
     this.cleanup();
   }
 
@@ -559,7 +575,7 @@ export class VoiceRecorder {
     };
 
     this.mediaRecorder.onerror = (e) => {
-      this.handleError(new Error(`MediaRecorder error: ${(e as ErrorEvent).message || 'Unknown error'}`));
+      this.handleRecorderError(new Error(`MediaRecorder error: ${(e as ErrorEvent).message || 'Unknown error'}`));
     };
   }
 
@@ -594,6 +610,8 @@ export class VoiceRecorder {
   // ----------------------------------------------------------
 
   private cleanup(): void {
+    this.detachMediaRecorderHandlers(this.mediaRecorder);
+
     // 停止所有轨道
     if (this.stream) {
       this.stream.getTracks().forEach(t => t.stop());
@@ -615,6 +633,28 @@ export class VoiceRecorder {
     this.analyserNode = null;
     this.levelDataArray = null;
     this.mediaRecorder = null;
+  }
+
+  private detachMediaRecorderHandlers(recorder: MediaRecorder | null): void {
+    if (!recorder) return;
+    recorder.ondataavailable = null;
+    recorder.onerror = null;
+    recorder.onstop = null;
+  }
+
+  private handleRecorderError(error: unknown): void {
+    const normalized = error instanceof Error ? error : new Error(String(error));
+    this.handleError(normalized);
+    this.finishWithError(normalized);
+  }
+
+  private finishWithError(error: Error): void {
+    const reject = this.pendingStopReject;
+    this.pendingStopReject = null;
+    this.stopLevelMonitoring();
+    this.cleanup();
+    this.setState('inactive');
+    reject?.(error);
   }
 
   private setState(newState: RecordingState): void {

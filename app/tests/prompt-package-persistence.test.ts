@@ -60,4 +60,17 @@ describe('Prompt Package persistence handoff contract', () => {
     expect(appSource).toContain('本轮会保留画布过程；尚未就绪的语音不会转写。')
     expect(appSource).toContain('audio: recordingToArchive ?')
   })
+
+  it('keeps compile retries and late media writes inside the package identity boundary', async () => {
+    const source = await readFile(viteConfigPath, 'utf8')
+    const archiveSource = await readFile(fileURLToPath(new URL('../round-archive.mjs', import.meta.url)), 'utf8')
+    const storeSource = await readFile(fileURLToPath(new URL('../round-store.mjs', import.meta.url)), 'utf8')
+
+    expect(source).toContain('assertRoundMutable(packageId)')
+    expect(source).toContain("code === 'ROUND_COMMITTED' ? 409")
+    expect(source).toContain("code === 'ROUND_GONE' ? 410")
+    expect(archiveSource).toContain('retryable: !engine.ok')
+    expect(archiveSource).toContain('compileFailed')
+    expect(storeSource).toContain('withRoundLock')
+  })
 })
