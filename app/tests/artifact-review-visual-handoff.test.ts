@@ -10,4 +10,3 @@ describe('Artifact Review visual handoff selection', () => {
     })).toEqual([1, 3])
   })
 })
-

@@ -100,4 +100,3 @@ export async function archiveArtifactReviewVisualEvidence(input: {
   if (!response.ok || !result?.ok) throw new Error(result?.error || `页面视觉证据未能归档（${response.status}）`)
   return { archivedPageCount: pages.length }
 }
-

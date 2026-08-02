@@ -119,4 +119,3 @@ export function handleArtifactReviewVisualEvidence(req: IncomingMessage, res: Se
     }
   })
 }
-
