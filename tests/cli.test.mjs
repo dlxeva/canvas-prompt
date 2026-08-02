@@ -49,6 +49,7 @@ test('managed MCP runtime survives removal of the versioned plugin source', () =
     if (entry.endsWith('.mjs')) copyFileSync(resolve('app', entry), join(source, 'app', entry))
   }
   copyFileSync(resolve('mcp', 'server.mjs'), join(source, 'mcp', 'server.mjs'))
+  copyFileSync(resolve('mcp', 'stdio-framer.mjs'), join(source, 'mcp', 'stdio-framer.mjs'))
 
   const isolatedCli = join(source, 'bin', 'canvas-prompt.mjs')
   const initialized = spawnSync(process.execPath, [isolatedCli, 'init', '--project', project], {

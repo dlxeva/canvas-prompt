@@ -14,6 +14,7 @@ PIP_TIMEOUT_SECONDS="${CANVAS_PROMPT_PIP_TIMEOUT_SECONDS:-120}"
 NPM_INSTALL_ATTEMPTS="${CANVAS_PROMPT_NPM_INSTALL_ATTEMPTS:-3}"
 NPM_FETCH_RETRIES="${CANVAS_PROMPT_NPM_FETCH_RETRIES:-3}"
 NPM_FETCH_TIMEOUT_MS="${CANVAS_PROMPT_NPM_FETCH_TIMEOUT_MS:-90000}"
+DEPENDENCY_RECEIPT="$ROOT_DIR/app/node_modules/.canvas-prompt-dependency-fingerprint"
 
 if [[ "$MODE" != "--core-only" && "$MODE" != "--with-asr" ]]; then
   echo "Usage: $0 [--core-only|--with-asr]" >&2
@@ -36,7 +37,12 @@ PYTHON_VERSION="$($PYTHON_BIN -c 'import sys; print(".".join(map(str, sys.versio
 [[ -n "$PYTHON_VERSION" ]] || { echo "Canvas Prompt requires Python 3.11 or newer for its compiler." >&2; exit 1; }
 require_version "$PYTHON_VERSION" "3.11.0" "Python"
 
-if [[ ! -x "$ROOT_DIR/app/node_modules/.bin/vite" ]]; then
+dependency_fingerprint() {
+  shasum -a 256 "$ROOT_DIR/app/package.json" "$ROOT_DIR/app/package-lock.json" | shasum -a 256 | awk '{print $1}'
+}
+
+EXPECTED_DEPENDENCY_FINGERPRINT="$(dependency_fingerprint)"
+if [[ ! -x "$ROOT_DIR/app/node_modules/.bin/vite" ]] || [[ ! -f "$DEPENDENCY_RECEIPT" ]] || [[ "$(cat "$DEPENDENCY_RECEIPT")" != "$EXPECTED_DEPENDENCY_FINGERPRINT" ]]; then
   echo "Installing Canvas Prompt app dependencies…" >&2
   # A clean install is intentionally networked. Retry the whole `npm ci`
   # command a small, bounded number of times because registry idle timeouts
@@ -59,6 +65,7 @@ if [[ ! -x "$ROOT_DIR/app/node_modules/.bin/vite" ]]; then
     sleep $((npm_attempt * 5))
     npm_attempt=$((npm_attempt + 1))
   done
+  printf '%s\n' "$EXPECTED_DEPENDENCY_FINGERPRINT" > "$DEPENDENCY_RECEIPT"
 else
   echo "Reusing Canvas Prompt app dependencies." >&2
 fi

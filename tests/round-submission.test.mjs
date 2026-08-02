@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import test from 'node:test'
@@ -41,6 +41,34 @@ test('same immutable package is idempotent and never starts a second Codex turn'
   assert.equal(second.reused, true)
   assert.equal(second.handoff.status, 'accepted')
   assert.equal(turns, 1)
+})
+
+test('a failed compile stays retryable and preserves independently archived audio', async (t) => {
+  const root = await mkdtemp(resolve(tmpdir(), 'canvas-round-retry-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const options = await fixture(root, 'round_retry')
+  let compiles = 0
+  options.persistArtifacts = async () => {
+    await writeFile(resolve(options.roundPath, 'audio.webm'), 'authoritative audio')
+    return { snapshotPath: null, keyframePaths: [], rawTraceManifest: null }
+  }
+  options.compileCore = async () => compiles++ === 0
+    ? { ok: false, error: 'compiler unavailable' }
+    : { ok: true, process_ir_path: 'engine/process-ir.json' }
+  const startHandoff = async () => ({ status: 'archived', attempted: false, accepted: false, delivered: false })
+
+  const failed = await submit(options, startHandoff)
+  assert.equal(failed.engine.ok, false)
+  assert.equal(failed.manifest.retryable, true)
+  assert.equal(await readFile(resolve(options.roundPath, 'audio.webm'), 'utf8'), 'authoritative audio')
+  assert.equal(await readFile(options.latestPackagePath).catch(() => null), null)
+
+  const retried = await submit(options, startHandoff)
+  assert.equal(retried.reused, false)
+  assert.equal(retried.engine.ok, true)
+  assert.equal(compiles, 2)
+  assert.equal(await readFile(resolve(options.roundPath, 'audio.webm'), 'utf8'), 'authoritative audio')
+  assert.deepEqual(JSON.parse(await readFile(options.latestPackagePath)), { meta: { package_id: 'round_retry' }, value: 1 })
 })
 
 test('concurrent duplicate POSTs coalesce before the immutable archive exists', async (t) => {
