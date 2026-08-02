@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -70,13 +71,108 @@ test('latest package response exposes an archived editable original only from it
 });
 
 test('public MCP schema exposes only fixed-scope round reads, never caller paths', () => {
-  assert.deepEqual(TOOLS.map((tool) => tool.name), ['get_latest_prompt_package', 'get_round_artifact']);
+  assert.deepEqual(TOOLS.map((tool) => tool.name), ['get_latest_prompt_package', 'get_latest_artifact_review', 'get_artifact_review_page_visual', 'get_round_artifact']);
   const schema = JSON.stringify(TOOLS);
   assert.equal(schema.includes('events_path'), false);
   assert.equal(schema.includes('transcript_path'), false);
   assert.equal(schema.includes('Optional absolute replacement path'), false);
   assert.equal(schema.includes('"path"'), false);
   assert.match(schema, /package_id/);
+});
+
+test('latest Artifact Review uses progressive disclosure and omits dense gesture points', async (t) => {
+  const home = await mkdtemp(resolve(tmpdir(), 'canvas-mcp-artifact-review-home-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const board = resolve(home, '.canvas-prompt', 'board');
+  const packageId = 'arp_reader_fixture';
+  const round = resolve(board, 'artifact-review-rounds', packageId);
+  const visualDir = resolve(round, 'visual-evidence');
+  await mkdir(visualDir, { recursive: true });
+  const rawPackage = {
+    schema_version: 'artifact-review/0.2-draft', package_id: packageId,
+    artifact: { artifact_kind: 'pdf', source_sha256: 'a'.repeat(64), page_count: 1, read_only: true },
+    pages: [{ page_id: 'page_fixture_1', page_number: 1 }],
+    annotations: [{ annotation_id: 'ann_fixture', page_id: 'page_fixture_1', kind: 'ink', gesture_points: [{ x_ratio: 0.1, y_ratio: 0.2 }] }],
+    voice_segments: [{ segment_id: 'voice_fixture', start_ms: 1, end_ms: 2, text: '这里要改' }],
+    page_visits: [{ page_number: 1, at_ms: 0 }], review_state: { interpretation_status: 'clarification_required', execution_authorized: false },
+  };
+  await writeFile(resolve(board, 'latest-artifact-review-package.json'), JSON.stringify(rawPackage));
+  await writeFile(resolve(round, 'artifact-review-package.json'), JSON.stringify(rawPackage));
+  await writeFile(resolve(round, 'review-brief.json'), JSON.stringify({ schema_version: 'artifact-review-proposal/0.1-draft', execution_authorized: false }));
+  const visualBytes = Buffer.from('89504e470d0a1a0a0000000d494844520000000100000001', 'hex');
+  const renderRef = `vre_${'b'.repeat(36)}`;
+  await writeFile(resolve(visualDir, `${renderRef}.png`), visualBytes);
+  await writeFile(resolve(visualDir, 'manifest.json'), JSON.stringify({
+    schema_version: 'artifact-review-visual-evidence/0.1-draft', package_id: packageId,
+    total_byte_length: visualBytes.byteLength,
+    pages: [{ page_id: 'page_fixture_1', render_ref: renderRef, media_type: 'image/png', width: 1, height: 1, byte_length: visualBytes.byteLength, sha256: createHash('sha256').update(visualBytes).digest('hex') }],
+  }));
+  const previousHome = process.env.HOME;
+  process.env.HOME = home;
+  const scoped = await import(`./server.mjs?artifact-review-reader=${Date.now()}`);
+  try {
+    const result = await scoped.handleGetLatestArtifactReview();
+    assert.equal(result.isError, undefined);
+    const parsed = JSON.parse(result.content[0].text);
+    assert.equal(parsed.package.package_id, packageId);
+    assert.deepEqual(parsed.package.page_summary, [{ page_number: 1, annotation_count: 1, kinds: { ink: 1 } }]);
+    assert.equal('gesture_points' in parsed.package.annotations[0], false);
+    assert.equal(parsed.source.source_file_included, false);
+    assert.equal(parsed.source.local_paths_included, false);
+    assert.equal(parsed.source.storage_scope, 'single_board_local_archive');
+    assert.equal(result.content[0].text.includes(home), false);
+    assert.equal(result.content[0].text.includes('latest-artifact-review-package.json'), false);
+    assert.equal(result.content[0].text.includes('review-brief.json'), false);
+    assert.equal(result.content[0].text.includes('manifest.json'), false);
+    assert.equal(parsed.delivery.mode, 'progressive_disclosure');
+    assert.deepEqual(parsed.visual_evidence.pages, [{
+      page_id: 'page_fixture_1', media_type: 'image/png', width: 1, height: 1,
+      byte_length: visualBytes.byteLength, sha256: createHash('sha256').update(visualBytes).digest('hex'),
+    }]);
+    assert.equal(JSON.stringify(parsed.visual_evidence).includes(renderRef), false);
+
+    const visual = await scoped.handleGetArtifactReviewPageVisual({ package_id: packageId, page_id: 'page_fixture_1' });
+    assert.equal(visual.isError, undefined);
+    assert.deepEqual(visual.content.map((item) => item.type), ['text', 'image']);
+    assert.equal(visual.content[1].data, visualBytes.toString('base64'));
+    assert.equal(visual.content[1].mimeType, 'image/png');
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
+});
+
+test('Artifact Review page visual fails closed on missing pages and integrity mismatch', async (t) => {
+  const home = await mkdtemp(resolve(tmpdir(), 'canvas-mcp-artifact-visual-integrity-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const board = resolve(home, '.canvas-prompt', 'board');
+  const packageId = 'arp_visual_integrity';
+  const round = resolve(board, 'artifact-review-rounds', packageId);
+  const visualDir = resolve(round, 'visual-evidence');
+  await mkdir(visualDir, { recursive: true });
+  const rawPackage = { schema_version: 'artifact-review/0.2-draft', package_id: packageId, pages: [{ page_id: 'page_one', page_number: 1 }] };
+  await writeFile(resolve(round, 'artifact-review-package.json'), JSON.stringify(rawPackage));
+  const bytes = Buffer.from('not-the-declared-image');
+  const renderRef = `vre_${'c'.repeat(36)}`;
+  await writeFile(resolve(visualDir, `${renderRef}.png`), bytes);
+  await writeFile(resolve(visualDir, 'manifest.json'), JSON.stringify({
+    schema_version: 'artifact-review-visual-evidence/0.1-draft', package_id: packageId, total_byte_length: bytes.byteLength,
+    pages: [{ page_id: 'page_one', render_ref: renderRef, media_type: 'image/png', width: 1, height: 1, byte_length: bytes.byteLength, sha256: 'd'.repeat(64) }],
+  }));
+  const previousHome = process.env.HOME;
+  process.env.HOME = home;
+  const scoped = await import(`./server.mjs?artifact-review-visual-integrity=${Date.now()}`);
+  try {
+    const missing = await scoped.handleGetArtifactReviewPageVisual({ package_id: packageId, page_id: 'page_missing' });
+    assert.equal(missing.isError, true);
+    assert.match(missing.content[0].text, /not archived for this page/);
+    const corrupt = await scoped.handleGetArtifactReviewPageVisual({ package_id: packageId, page_id: 'page_one' });
+    assert.equal(corrupt.isError, true);
+    assert.match(corrupt.content[0].text, /integrity check/);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
 });
 
 test('a legal large raw package is readable before image data is stripped for MCP', async (t) => {

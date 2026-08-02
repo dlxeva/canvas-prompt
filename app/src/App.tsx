@@ -20,8 +20,8 @@ import { countIncludedBaselineObjects, projectFinalSnapshotElements, projectLive
 import { deriveExportReceiptStatus, isReceiptComplete } from './receipt-state'
 import type { ExportReceiptStatus, HandoffReceipt } from './receipt-state'
 import { protectedLocalApiFetch } from './protected-local-api'
-import { resolveInitialLocale, saveLocalePreference } from './locale'
 import type { Locale } from './locale'
+import { isArtifactReviewFile } from './artifact-review-entry'
 
 type CanvasTool = 'selection' | 'freedraw' | 'line' | 'arrow' | 'rectangle' | 'ellipse' | 'eraser'
 type HistoryAction = 'undo' | 'redo'
@@ -37,8 +37,8 @@ const tools: Array<{ id: CanvasTool; zh: string; en: string }> = [
 const CANONICAL_CONTINUATION_COMMAND = '根据画布内容推进'
 
 const ui = {
-  zh: { importImage: '导入图片', importing: '正在导入…', more: '更多功能', archive: '本地档案', recording: '录音中', asrPreparing: '语音准备中', asrUnavailable: '语音不转写', finish: '结束推演', processing: '处理中', export: '整理本轮', retryExport: '重新整理本轮', sending: '正在整理…', archived: '✓ 本轮已整理', accepted: '✓ 本轮已整理', deliveredReceipt: '✓ 本轮已整理', failedReceipt: '✓ 本轮已整理', next: '开始下一轮', start: '开始推演', startVisualOnly: '不等语音，开始画', preparing: '准备中…', canvasTools: '画布工具', expandTools: '展开画布工具', collapseTools: '收起画布工具', undo: '撤销（⌘Z）', redo: '重做（⇧⌘Z）', zoomOut: '缩小', zoomIn: '放大', color: '颜色', weight: '粗细', releaseToImport: '松开以导入图片', archiveDescription: '保存在这台设备上。', archiveDescriptionEnd: '不自动上传云端；删除后无法恢复。', closeArchive: '关闭本地档案', loadingArchive: '正在读取本地档案…', noArchive: '还没有已归档的推演。', seconds: '秒', unknownDuration: '时长未知', snapshot: '画布快照', noSnapshot: '无快照', audio: '录音', noAudio: '无录音', delivered: '已整理', sent: '已整理', sendFailed: '已整理', local: '已整理', delete: '删除' },
-  en: { importImage: 'Import image', importing: 'Importing…', more: 'More', archive: 'Local archive', recording: 'Recording', asrPreparing: 'Speech preparing', asrUnavailable: 'Speech not transcribed', finish: 'Finish session', processing: 'Processing', export: 'Finish this round', retryExport: 'Try again', sending: 'Finishing…', archived: '✓ Round ready · Continue in this conversation', accepted: '✓ Round ready · Continue in this conversation', deliveredReceipt: '✓ Round ready · Continue in this conversation', failedReceipt: '✓ Round ready · Continue in this conversation', next: 'Start next round', start: 'Start session', startVisualOnly: 'Start without speech', preparing: 'Preparing…', canvasTools: 'Canvas tools', expandTools: 'Expand tools', collapseTools: 'Collapse tools', undo: 'Undo (⌘Z)', redo: 'Redo (⇧⌘Z)', zoomOut: 'Zoom out', zoomIn: 'Zoom in', color: 'Color', weight: 'Weight', releaseToImport: 'Release to import image', archiveDescription: 'Stored on this device. ', archiveDescriptionEnd: 'Nothing is uploaded automatically; deleted rounds cannot be recovered.', closeArchive: 'Close local archive', loadingArchive: 'Loading local archive…', noArchive: 'No saved rounds yet.', seconds: 'sec', unknownDuration: 'duration unknown', snapshot: 'canvas snapshot', noSnapshot: 'no snapshot', audio: 'audio', noAudio: 'no audio', delivered: 'ready', sent: 'ready', sendFailed: 'ready', local: 'ready', delete: 'Delete' },
+  zh: { importImage: '导入文件', importing: '正在导入…', more: '更多功能', archive: '本地档案', recording: '录音中', asrPreparing: '语音准备中', asrUnavailable: '语音不转写', finish: '结束推演', processing: '处理中', export: '整理本轮', retryExport: '重新整理本轮', sending: '正在整理…', archived: '✓ 本轮已整理', accepted: '✓ 本轮已整理', deliveredReceipt: '✓ 本轮已整理', failedReceipt: '✓ 本轮已整理', next: '开始下一轮', start: '开始推演', startVisualOnly: '不等语音，开始画', preparing: '准备中…', canvasTools: '画布工具', expandTools: '展开画布工具', collapseTools: '收起画布工具', undo: '撤销（⌘Z）', redo: '重做（⇧⌘Z）', zoomOut: '缩小', zoomIn: '放大', color: '颜色', weight: '粗细', releaseToImport: '松开以导入图片', archiveDescription: '保存在这台设备上。', archiveDescriptionEnd: '不自动上传云端；删除后无法恢复。', closeArchive: '关闭本地档案', loadingArchive: '正在读取本地档案…', noArchive: '还没有已归档的推演。', seconds: '秒', unknownDuration: '时长未知', snapshot: '画布快照', noSnapshot: '无快照', audio: '录音', noAudio: '无录音', delivered: '已整理', sent: '已整理', sendFailed: '已整理', local: '已整理', delete: '删除' },
+  en: { importImage: 'Import file', importing: 'Importing…', more: 'More', archive: 'Local archive', recording: 'Recording', asrPreparing: 'Speech preparing', asrUnavailable: 'Speech not transcribed', finish: 'Finish session', processing: 'Processing', export: 'Finish this round', retryExport: 'Try again', sending: 'Finishing…', archived: '✓ Round ready · Continue in this conversation', accepted: '✓ Round ready · Continue in this conversation', deliveredReceipt: '✓ Round ready · Continue in this conversation', failedReceipt: '✓ Round ready · Continue in this conversation', next: 'Start next round', start: 'Start session', startVisualOnly: 'Start without speech', preparing: 'Preparing…', canvasTools: 'Canvas tools', expandTools: 'Expand tools', collapseTools: 'Collapse tools', undo: 'Undo (⌘Z)', redo: 'Redo (⇧⌘Z)', zoomOut: 'Zoom out', zoomIn: 'Zoom in', color: 'Color', weight: 'Weight', releaseToImport: 'Release to import image', archiveDescription: 'Stored on this device. ', archiveDescriptionEnd: 'Nothing is uploaded automatically; deleted rounds cannot be recovered.', closeArchive: 'Close local archive', loadingArchive: 'Loading local archive…', noArchive: 'No saved rounds yet.', seconds: 'sec', unknownDuration: 'duration unknown', snapshot: 'canvas snapshot', noSnapshot: 'no snapshot', audio: 'audio', noAudio: 'no audio', delivered: 'ready', sent: 'ready', sendFailed: 'ready', local: 'ready', delete: 'Delete' },
 } as const
 
 function visibleWorkflowMessage(message: string, locale: Locale) {
@@ -227,8 +227,7 @@ function baselineAnchorFromElement(element: CanvasElement): CanvasObject {
   }
 }
 
-export default function App() {
-  const [locale, setLocale] = useState<Locale>(() => resolveInitialLocale(window.localStorage, window.navigator.languages, window.navigator.language))
+export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCaptureStateChange }: { locale: Locale, onLocaleChange: (next: Locale) => void, onOpenArtifactReview?: (file?: File, captureBusy?: boolean) => void, onCaptureStateChange?: (busy: boolean) => void }) {
   const text = ui[locale]
   const [recording, setRecording] = useState(false)
   const [startedAt, setStartedAt] = useState<number | null>(null)
@@ -265,6 +264,7 @@ export default function App() {
   const [imageImporting, setImageImporting] = useState(false)
   const [imageNotice, setImageNotice] = useState<string | null>(null)
   const [imageDropActive, setImageDropActive] = useState(false)
+  const captureBusy = recording || sessionStage === 'starting' || sessionStage === 'compiling'
   const versions = useRef(new Map<string, {
     version: number
     isDeleted: boolean
@@ -301,6 +301,10 @@ export default function App() {
   useEffect(() => {
     document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en'
   }, [locale])
+
+  useEffect(() => {
+    onCaptureStateChange?.(captureBusy)
+  }, [captureBusy, onCaptureStateChange])
 
   useEffect(() => {
     void fetch('/api/runtime-identity', { cache: 'no-store' })
@@ -633,11 +637,11 @@ export default function App() {
       setWorkflowMessage(transcript?.text
         ? '正在整理画布和标记…'
         : '正在整理画布和标记…')
-      setSessionStage('ready')
       // `setLastRecording(audio)` does not synchronously update React state.
       // Pass this round's finished recording explicitly so the durable archive
       // cannot accidentally omit it while its transcript is retained.
       await exportPromptPackage({ packageToExport: pkg, recordingToArchive: audio, editableSourceImages })
+      setSessionStage('ready')
     } catch (error) {
       setWorkflowMessage(`整理失败：${error instanceof Error ? error.message : '请重试'}`)
       setSessionStage('error')
@@ -805,6 +809,11 @@ export default function App() {
   const importImageFile = async (file: File | undefined) => {
     const canvasApi = apiRef.current ?? api
     if (!file) return
+    if (isArtifactReviewFile(file)) {
+      if (onOpenArtifactReview) onOpenArtifactReview(file, captureBusy)
+      else setImageNotice('当前入口无法打开 PDF/PPTX 交互审阅，请重新打开 Canvas Prompt 后再试。')
+      return
+    }
     if (!canvasApi) {
       setImageNotice('画布尚未准备好，请等一秒后重试。')
       return
@@ -1145,7 +1154,7 @@ export default function App() {
         ref={imageInputRef}
         className="image-file-input"
         type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,image/bmp,image/x-icon,image/avif,image/jfif"
+        accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,image/bmp,image/x-icon,image/avif,image/jfif,application/pdf,.pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,.pptx"
         onChange={importImage}
       />
       <header className="spike-header">
@@ -1153,6 +1162,10 @@ export default function App() {
           <img className="brand-mark" src="/favicon.svg" alt="" aria-hidden="true" />
           <p className="eyebrow">canvas_prompt<span>_</span></p>
         </div>
+        <nav className="workspace-switch" aria-label={locale === 'zh' ? '工作入口' : 'Workspace'}>
+          <button type="button" className="active" aria-current="page">{locale === 'zh' ? '自由推演' : 'Freeform'}</button>
+          <button type="button" onClick={() => onOpenArtifactReview?.(undefined, captureBusy)}>{locale === 'zh' ? '交互审阅' : 'Interactive review'}</button>
+        </nav>
         <div className="header-actions">
           {recording ? <span className="recording-state" aria-live="polite"><i />{text.recording} {elapsed}</span> : null}
           {!recording && asrPreparing ? <span className="quiet-state" title={locale === 'zh' ? '正在准备本地语音模型；准备完成前不会开始会丢失转写的推演。' : 'The local speech model is preparing; a session stays disabled until timestamped transcription is ready.'}>{text.asrPreparing}</span> : null}
@@ -1186,11 +1199,7 @@ export default function App() {
             <button className="button icon-button more-button" type="button" onClick={() => setMoreOpen((open) => !open)} aria-expanded={moreOpen} aria-label={text.more} title={text.more}>•••</button>
             {moreOpen && <div className="more-popover"><button type="button" onClick={() => void openStorage()}>{text.archive}</button></div>}
           </div>
-          <button className="language-toggle" type="button" onClick={() => setLocale((current) => {
-            const next = current === 'zh' ? 'en' : 'zh'
-            saveLocalePreference(window.localStorage, next)
-            return next
-          })} aria-label={locale === 'zh' ? 'Switch to English' : '切换至中文'}>
+          <button className="language-toggle" type="button" onClick={() => onLocaleChange(locale === 'zh' ? 'en' : 'zh')} aria-label={locale === 'zh' ? 'Switch to English' : '切换至中文'} title={locale === 'zh' ? 'Switch to English' : '切换至中文'}>
             <span className={locale === 'zh' ? 'active' : ''}>中</span><span className={locale === 'en' ? 'active' : ''}>EN</span>
           </button>
         </div>
