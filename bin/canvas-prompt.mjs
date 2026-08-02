@@ -34,6 +34,7 @@ const mcpRuntimeServerPath = () => resolve(runtimeDir(), 'mcp', 'server.mjs')
 const ensureMcpRuntime = async () => {
   const targets = [
     ['mcp/server.mjs', resolve(runtimeDir(), 'mcp', 'server.mjs')],
+    ['mcp/stdio-framer.mjs', resolve(runtimeDir(), 'mcp', 'stdio-framer.mjs')],
     ['app/conversation-scope.mjs', resolve(runtimeDir(), 'app', 'conversation-scope.mjs')],
   ]
   await Promise.all(targets.map(async ([source, target]) => {

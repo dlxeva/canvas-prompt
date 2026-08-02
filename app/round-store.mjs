@@ -7,6 +7,33 @@ function temporaryPath(path) {
   return `${path}.${process.pid}.${randomUUID()}.tmp`
 }
 
+const roundLocks = new Map()
+const latestLocks = new Map()
+
+/** Serialize writes for one package ID across upload, compile, retry, and delete requests. */
+export async function withRoundLock(packageId, task) {
+  const previous = roundLocks.get(packageId) ?? Promise.resolve()
+  const current = previous.catch(() => undefined).then(task)
+  roundLocks.set(packageId, current)
+  try {
+    return await current
+  } finally {
+    if (roundLocks.get(packageId) === current) roundLocks.delete(packageId)
+  }
+}
+
+/** Serialize latest-pointer replacement across independent round submissions. */
+export async function withLatestLock(latestPackagePath, task) {
+  const previous = latestLocks.get(latestPackagePath) ?? Promise.resolve()
+  const current = previous.catch(() => undefined).then(task)
+  latestLocks.set(latestPackagePath, current)
+  try {
+    return await current
+  } finally {
+    if (latestLocks.get(latestPackagePath) === current) latestLocks.delete(latestPackagePath)
+  }
+}
+
 export async function writeFileAtomically(path, contents) {
   const temporary = temporaryPath(path)
   await writeFile(temporary, contents, 'utf8')

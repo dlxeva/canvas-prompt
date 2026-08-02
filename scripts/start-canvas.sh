@@ -22,6 +22,8 @@ ASR_ENABLED="${CANVAS_PROMPT_ASR:-enabled}"
 DELIVERY_MODE="${CANVAS_PROMPT_DELIVERY_MODE:-local}"
 CORE_APP_DIR="$ROOT_DIR/app"
 RUNNER="$ROOT_DIR/scripts/run-canvas-service.sh"
+LOCK_KEY="$(printf '%s:%s' "$ROOT_DIR" "$PORT" | shasum -a 256 | cut -c1-16)"
+LAUNCH_LOCK="${TMPDIR:-/tmp}/canvas-prompt-launch-${LOCK_KEY}.lock"
 WORKING_DIR="$(cd "$WORKING_DIR" && pwd -P)"
 if [[ -n "$PROJECT_DIR" ]]; then
   PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd -P)"
@@ -97,6 +99,31 @@ is_reusable_canvas() {
   [[ "$running_storage_kind" == "single_board" ]]
 }
 
+release_launch_lock() {
+  rm -f "$LAUNCH_LOCK/pid"
+  rmdir "$LAUNCH_LOCK" 2>/dev/null || true
+}
+
+acquire_launch_lock() {
+  local owner attempts=0
+  while ! mkdir "$LAUNCH_LOCK" 2>/dev/null; do
+    owner="$(cat "$LAUNCH_LOCK/pid" 2>/dev/null || true)"
+    if [[ -z "$owner" ]] || ! kill -0 "$owner" 2>/dev/null; then
+      rm -f "$LAUNCH_LOCK/pid"
+      rmdir "$LAUNCH_LOCK" 2>/dev/null || true
+      continue
+    fi
+    if [[ "$attempts" -ge 200 ]]; then
+      echo "Another Canvas Prompt launcher is still preparing this port: PID ${owner}." >&2
+      exit 1
+    fi
+    sleep 0.1
+    attempts=$((attempts + 1))
+  done
+  printf '%s\n' "$$" > "$LAUNCH_LOCK/pid"
+  trap release_launch_lock EXIT INT TERM
+}
+
 stop_stale_canvas() {
   local candidate="$1"
   local pid command identity
@@ -126,6 +153,17 @@ stop_stale_canvas() {
 select_port() {
   local candidate="$PORT"
   local attempts=0
+  while [[ "$attempts" -lt 20 ]]; do
+    if is_reusable_canvas "$candidate"; then
+      echo "Canvas Prompt is already running at http://127.0.0.1:${candidate}/" >&2
+      printf 'reuse:%s' "$candidate"
+      return 0
+    fi
+    candidate=$((candidate + 1))
+    attempts=$((attempts + 1))
+  done
+  candidate="$PORT"
+  attempts=0
   while [ "$attempts" -lt 20 ]; do
     if [ -z "$(port_pids "$candidate")" ]; then
       printf '%s' "$candidate"
@@ -160,6 +198,8 @@ if [[ "${CANVAS_PROMPT_TEST_ONLY:-}" == "1" ]]; then
   return 0 2>/dev/null || exit 0
 fi
 
+acquire_launch_lock
+
 if [ ! -f "$CORE_APP_DIR/package.json" ]; then
   echo "Canvas Prompt core app was not found: $CORE_APP_DIR/package.json" >&2
   exit 1
@@ -175,6 +215,8 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "Starting Canvas Prompt on http://127.0.0.1:${PORT}"
   echo "Canvas core: ${CORE_APP_DIR}"
   echo "Prompt Package: ${PROMPT_PACKAGE_PATH}"
+  release_launch_lock
+  trap - EXIT INT TERM
   exec npm run dev -- --host 127.0.0.1 --port "$PORT"
 fi
 

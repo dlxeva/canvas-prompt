@@ -1,7 +1,7 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
-import { writeFileAtomically } from './round-store.mjs'
+import { withLatestLock, writeFileAtomically } from './round-store.mjs'
 
 export class RoundSubmissionError extends Error {
   constructor(code, message) {
@@ -73,17 +73,34 @@ export async function archiveCompiledRound(options) {
       ? existingManifest.content_sha256
       : contentSha256(existingPackage)
     if (existingSha !== contentSha) throw new RoundSubmissionError('ROUND_CONTENT_CONFLICT', '同一轮的内容已变化。请开始新一轮后重新发送。')
-    return { roundPackagePath, engine: existingManifest.engine, artifacts: null, manifest: existingManifest, reused: true }
+    const compileFailed = existingManifest.engine?.ok !== true
+    if (!compileFailed) return { roundPackagePath, engine: existingManifest.engine, artifacts: null, manifest: existingManifest, reused: true }
+    // A failed compile is retryable. Preserve the package and independent
+    // audio/source artifacts while rebuilding only the engine on retry.
+    await rm(resolve(roundPath, 'engine'), { recursive: true, force: true })
+    const artifacts = await persistArtifacts()
+    const engine = await compileCore(roundPackagePath)
+    const manifest = { package_id: packageId, content_sha256: contentSha, exported_at: now(), duration_ms: durationMs, status: engine.ok ? 'engine_compiled' : 'engine_compile_failed', retryable: !engine.ok, engine }
+    await writeFileAtomically(resolve(roundPath, 'round.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+    if (engine.ok) {
+      await withLatestLock(latestPackagePath, async () => {
+        await mkdir(dirname(latestPackagePath), { recursive: true })
+        await writeFileAtomically(latestPackagePath, serializedPackage)
+      })
+    }
+    return { roundPackagePath, engine, artifacts, manifest, reused: false }
   }
   await mkdir(roundPath, { recursive: true })
   await writeFileAtomically(roundPackagePath, serializedPackage)
   const artifacts = await persistArtifacts()
   const engine = await compileCore(roundPackagePath)
-  const manifest = { package_id: packageId, content_sha256: contentSha, exported_at: now(), duration_ms: durationMs, status: engine.ok ? 'engine_compiled' : 'engine_compile_failed', engine }
+  const manifest = { package_id: packageId, content_sha256: contentSha, exported_at: now(), duration_ms: durationMs, status: engine.ok ? 'engine_compiled' : 'engine_compile_failed', retryable: !engine.ok, engine }
   await writeFileAtomically(resolve(roundPath, 'round.json'), `${JSON.stringify(manifest, null, 2)}\n`)
   if (engine.ok) {
-    await mkdir(dirname(latestPackagePath), { recursive: true })
-    await writeFileAtomically(latestPackagePath, serializedPackage)
+    await withLatestLock(latestPackagePath, async () => {
+      await mkdir(dirname(latestPackagePath), { recursive: true })
+      await writeFileAtomically(latestPackagePath, serializedPackage)
+    })
   }
   return { roundPackagePath, engine, artifacts, manifest, reused: false }
 }

@@ -9,7 +9,7 @@ import type { Plugin } from 'vite'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { handoffToMainThread } from './codex-main-thread-handoff.mjs'
-import { deleteRoundAndUpdateLatest, writeFileAtomically } from './round-store.mjs'
+import { deleteRoundAndUpdateLatest, withRoundLock, writeFileAtomically } from './round-store.mjs'
 import { submitImmutableRound } from './round-submission.mjs'
 import { resolveConversationScope } from './conversation-scope.mjs'
 import {
@@ -122,6 +122,7 @@ type RoundManifest = {
   exported_at?: string
   duration_ms?: number | null
   status?: string
+  engine?: EngineResult
   handoff?: Pick<HandoffResult, 'status' | 'accepted' | 'delivered'>
 }
 
@@ -130,6 +131,28 @@ const MAX_SEGMENTED_PACKAGE_BYTES = 256 * 1024 * 1024
 
 function safePackageId(packageId: string) {
   return /^[a-zA-Z0-9_-]+$/.test(packageId)
+}
+
+async function pathExists(path: string) {
+  try {
+    await stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function assertRoundMutable(packageId: string) {
+  const tombstonePath = resolve(roundsDir, '..', 'deleted-rounds', `${packageId}.json`)
+  if (await pathExists(tombstonePath)) throw Object.assign(new Error('本轮已删除。请开始新一轮后重新发送。'), { code: 'ROUND_GONE' })
+  try {
+    const manifest = JSON.parse(await readFile(resolve(roundsDir, packageId, 'round.json'), 'utf8')) as RoundManifest
+    if (manifest.engine?.ok === true) throw Object.assign(new Error('本轮已提交，不能再追加素材。请开始新一轮。'), { code: 'ROUND_COMMITTED' })
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ROUND_COMMITTED') throw error
+    // Missing or malformed manifests remain mutable so a compile retry can
+    // recover the package and its original local media.
+  }
 }
 
 function decodePngDataUrl(value: unknown) {
@@ -271,15 +294,19 @@ function promptPackagePersistence(): Plugin {
         req.on('error', (error) => { res.statusCode = 413; res.end(error.message) })
         req.on('end', async () => {
           try {
-            const roundPath = resolve(roundsDir, packageId)
-            await mkdir(roundPath, { recursive: true })
-            const contentType = normalizedMediaType(req.headers['content-type'])
-            const extension = contentType === 'audio/ogg' ? 'ogg' : contentType === 'audio/mp4' ? 'm4a' : 'webm'
-            await writeFile(resolve(roundPath, `audio.${extension}`), Buffer.concat(chunks))
+            await withRoundLock(packageId, async () => {
+              await assertRoundMutable(packageId)
+              const roundPath = resolve(roundsDir, packageId)
+              await mkdir(roundPath, { recursive: true })
+              const contentType = normalizedMediaType(req.headers['content-type'])
+              const extension = contentType === 'audio/ogg' ? 'ogg' : contentType === 'audio/mp4' ? 'm4a' : 'webm'
+              await writeFile(resolve(roundPath, `audio.${extension}`), Buffer.concat(chunks))
+            })
             res.setHeader('content-type', 'application/json')
             res.end(JSON.stringify({ ok: true }))
           } catch (error) {
-            res.statusCode = 500
+            const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+            res.statusCode = code === 'ROUND_GONE' ? 410 : code === 'ROUND_COMMITTED' ? 409 : 500
             res.end(error instanceof Error ? error.message : String(error))
           }
         })
@@ -307,10 +334,13 @@ function promptPackagePersistence(): Plugin {
           try {
             const events = JSON.parse(body)
             if (!Array.isArray(events)) throw new Error('过程快照必须是事件数组')
-            const roundPath = resolve(roundsDir, packageId)
-            const segmentPath = resolve(roundPath, 'raw-trace-segments', `${sequence}.json.gz`)
-            await mkdir(dirname(segmentPath), { recursive: true })
-            await writeFile(segmentPath, gzipSync(Buffer.from(events.map((event) => JSON.stringify(event)).join('\n') + (events.length ? '\n' : ''), 'utf8')))
+            await withRoundLock(packageId, async () => {
+              await assertRoundMutable(packageId)
+              const roundPath = resolve(roundsDir, packageId)
+              const segmentPath = resolve(roundPath, 'raw-trace-segments', `${sequence}.json.gz`)
+              await mkdir(dirname(segmentPath), { recursive: true })
+              await writeFile(segmentPath, gzipSync(Buffer.from(events.map((event) => JSON.stringify(event)).join('\n') + (events.length ? '\n' : ''), 'utf8')))
+            })
             res.setHeader('content-type', 'application/json')
             res.end(JSON.stringify({ ok: true }))
           } catch (error) {
@@ -342,9 +372,12 @@ function promptPackagePersistence(): Plugin {
           try {
             const bytes = Buffer.concat(chunks)
             if (bytes.length === 0) throw new Error('上下文检查点为空')
-            const segmentPath = resolve(roundsDir, packageId, 'package-segments', `${sequence}.part`)
-            await mkdir(dirname(segmentPath), { recursive: true })
-            await writeFile(segmentPath, bytes)
+            await withRoundLock(packageId, async () => {
+              await assertRoundMutable(packageId)
+              const segmentPath = resolve(roundsDir, packageId, 'package-segments', `${sequence}.part`)
+              await mkdir(dirname(segmentPath), { recursive: true })
+              await writeFile(segmentPath, bytes)
+            })
             res.setHeader('content-type', 'application/json')
             res.end(JSON.stringify({ ok: true }))
           } catch (error) {
@@ -380,13 +413,17 @@ function promptPackagePersistence(): Plugin {
           try {
             const bytes = Buffer.concat(chunks)
             if (bytes.length === 0) throw new Error('原图为空')
-            const sourceDir = resolve(roundsDir, packageId, 'source-images')
-            await mkdir(sourceDir, { recursive: true })
-            await writeFile(resolve(sourceDir, `${artifactObjectId.slice(4)}.${extension}`), bytes)
+            await withRoundLock(packageId, async () => {
+              await assertRoundMutable(packageId)
+              const sourceDir = resolve(roundsDir, packageId, 'source-images')
+              await mkdir(sourceDir, { recursive: true })
+              await writeFile(resolve(sourceDir, `${artifactObjectId.slice(4)}.${extension}`), bytes)
+            })
             res.setHeader('content-type', 'application/json')
             res.end(JSON.stringify({ ok: true }))
           } catch (error) {
-            res.statusCode = 500
+            const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+            res.statusCode = code === 'ROUND_GONE' ? 410 : code === 'ROUND_COMMITTED' ? 409 : 500
             res.end(error instanceof Error ? error.message : String(error))
           }
         })
@@ -399,7 +436,7 @@ function promptPackagePersistence(): Plugin {
             if (!enforceProtectedLocalApi(req, res, security)) return
             const packageId = match[1]
             if (!safePackageId(packageId)) throw new Error('非法轮次标识')
-            await deleteRoundAndUpdateLatest({ roundsDir, latestPackagePath, packageId })
+            await withRoundLock(packageId, () => deleteRoundAndUpdateLatest({ roundsDir, latestPackagePath, packageId }))
             res.setHeader('content-type', 'application/json')
             res.end(JSON.stringify({ ok: true }))
             return

@@ -1,7 +1,7 @@
 import { mkdir, readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { archiveCompiledRound, updateRoundManifest } from './round-archive.mjs'
-import { writeFileAtomically } from './round-store.mjs'
+import { withRoundLock, writeFileAtomically } from './round-store.mjs'
 
 const inFlightSubmissions = new Map()
 
@@ -72,7 +72,7 @@ export async function submitImmutableRound(options) {
   const key = resolve(options.archiveOptions.roundPath)
   const active = inFlightSubmissions.get(key)
   if (active) return await active
-  const work = submitImmutableRoundOnce(options)
+  const work = withRoundLock(key, () => submitImmutableRoundOnce(options))
   inFlightSubmissions.set(key, work)
   try {
     return await work

@@ -530,8 +530,10 @@ export default function App() {
       }
       // Do not export a partial timeline just because some windows succeeded.
       // The raw archival recording is the authoritative recovery source.
-      if (asrAvailableRef.current && (!transcript?.text || backgroundSession?.hasFailures()) && audio?.blob) {
-        if (backgroundSession?.hasFailures()) setWorkflowMessage('少量语音片段需要回退补齐…')
+      const requiresFullAsrRecovery = Boolean(backgroundSession?.hasFailures())
+      if (requiresFullAsrRecovery) transcript = null
+      if (asrAvailableRef.current && (!transcript?.text || requiresFullAsrRecovery) && audio?.blob) {
+        if (requiresFullAsrRecovery) setWorkflowMessage('少量语音片段需要回退补齐…')
         try {
           const result = await asrClient.transcribe(audio.blob, sessionLocale.current)
           transcript = {
@@ -543,6 +545,7 @@ export default function App() {
           }
         } catch {
           // Audio is kept with the export even when a local ASR service is absent.
+          transcript = null
         }
       }
       setTranscription(transcript)
