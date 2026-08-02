@@ -22,6 +22,13 @@ Depending on the session, this can include:
 - round metadata, local artifact paths, and a host handoff receipt when the host supports one;
 - the originating project path when one exists, as provenance rather than a routing key.
 
+An Interactive Review round can additionally store a compact PDF/PPTX review
+package, a review brief, page annotations, timestamped speech segments, and PNG
+visual evidence for marked pages. The source PDF or PPTX bytes are not copied
+into the immutable review archive. For PPTX, the locally rendered PDF
+derivative is used only as the review substrate; the package records source and
+derivative identity separately.
+
 The in-app archive can inspect and permanently delete a local round. A deleted round cannot be restored from Canvas Prompt.
 
 ## Microphone and transcription
@@ -34,6 +41,12 @@ Raw recordings, replay segments, and inline image bytes are local archive
 artifacts. They are excluded from the normal model-facing Package response;
 the host reads compact structured context and can request an archived artifact
 only when its integration explicitly supports that action.
+
+Interactive Review follows the same progressive-disclosure boundary. The host
+first reads compact page, annotation, and speech evidence. It can request one
+archived page image by its immutable package and page identity when that page's
+compact evidence is insufficient; the complete document and source file bytes
+are not returned through the normal MCP review response.
 
 If you configure a remote or third-party ASR backend, that provider's privacy, retention, and regional processing terms apply. Do not record other people or confidential material without the necessary permission.
 

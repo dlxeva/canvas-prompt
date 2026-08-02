@@ -74,7 +74,28 @@ the conversation reads it only when you explicitly ask it to continue.
    round from your single local board, then responds to the work rather than a
    hand-written summary of it.
 
-## Two useful starting points
+## Three useful starting points
+
+### Review a PDF or PPTX page by page
+
+Choose **Interactive Review** at the top of Canvas Prompt, then open a local
+PDF or PPTX. Move through the pages, draw directly over the rendered page, and
+explain the changes aloud. When the review is complete, return to the
+conversation and ask the AI to read your latest interactive review.
+
+Canvas Prompt keeps the source document read-only. PDFs render locally in the
+app; PPTX files are converted locally into a review-only PDF derivative with
+LibreOffice while the original file hash, derivative hash, version, and page
+numbers remain distinct. A missing local font can change the derivative's
+appearance, so the app reports that limitation instead of claiming
+pixel-perfect fidelity.
+
+The AI first receives a compact review with the overall request, page anchors,
+marks, and speech. It requests an archived page image only when the compact
+evidence is insufficient. Before any file is changed, it restates the overall
+goal, global and page-specific changes, items to preserve, unresolved
+ambiguities, and expected output for confirmation. A completed review does not
+authorize execution by itself.
 
 ### Review an image without translating every mark into prose
 
@@ -146,7 +167,14 @@ does **not** modify global Node/Python installs.
 | Compiler | Python `3.11+` | Required from the host machine; the current Process IR compiler uses only the Python standard library. |
 | Speech transcription | Canvas Prompt local ASR runtime | Installed into `~/.canvas-prompt/runtime/asr-venv` (or `CANVAS_PROMPT_RUNTIME_DIR`); first start downloads the selected `faster-whisper` model to the local cache. No private project, global Whisper, or manually-installed `ffmpeg` is assumed. |
 | Voice capture | Browser microphone permission | Required only to record audio. |
+| PDF review | Bundled PDF.js runtime | Renders the selected PDF locally; the source file remains read-only. |
+| PPTX review | Local LibreOffice `soffice` executable | Converts the selected PPTX into an isolated review-only PDF derivative. Canvas Prompt does not install LibreOffice or edit the source presentation. |
 | AI continuation | Single-board MCP | The explicit continuation command reads the latest completed single-board round; users never supply a project path or manage a chat binding. |
+
+PPTX review is available when `soffice` is discoverable on `PATH`, or when
+`CANVAS_PROMPT_SOFFICE_BIN` points to the executable. If no compatible local
+renderer is available, the app reports that PPTX review is unavailable; PDF
+review continues to work.
 
 Default `setup` prepares local ASR; it is not a hidden optional prerequisite.
 The isolated runtime measured about **235 MB** in the current macOS arm64
