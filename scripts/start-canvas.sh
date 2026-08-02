@@ -221,6 +221,15 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 NODE_BIN="$(command -v node)"
+SOFFICE_BIN="${CANVAS_PROMPT_SOFFICE_BIN:-}"
+if [[ -z "$SOFFICE_BIN" ]]; then
+  SOFFICE_BIN="$(command -v soffice 2>/dev/null || true)"
+fi
+if [[ -n "$SOFFICE_BIN" ]]; then
+  export CANVAS_PROMPT_SOFFICE_BIN="$SOFFICE_BIN"
+else
+  unset CANVAS_PROMPT_SOFFICE_BIN
+fi
 # The service is the user's single board, not a plugin-cache checkout or a
 # project/thread binding.  A stable label lets a newer plugin revision replace
 # a crashed service instead of leaving launchctl jobs behind per cache path.
@@ -232,7 +241,7 @@ SERVICE_LOG="${TMPDIR:-/tmp}/${SERVICE_LABEL}.log"
 launchctl bootout "gui/$(id -u)/${SERVICE_LABEL}" >/dev/null 2>&1 || true
 LAUNCHCTL_OK=false
 if launchctl submit -l "$SERVICE_LABEL" -o "$SERVICE_LOG" -e "$SERVICE_LOG" -- \
-  "$RUNNER" "$CORE_APP_DIR" "$WORKING_DIR" "$PROJECT_DIR" "$PORT" "$NODE_BIN" "$ASR_URL" "$ASR_ENABLED" "$DELIVERY_MODE" "$THREAD_ID" "$SESSION_ID" 2>/dev/null; then
+  "$RUNNER" "$CORE_APP_DIR" "$WORKING_DIR" "$PROJECT_DIR" "$PORT" "$NODE_BIN" "$ASR_URL" "$ASR_ENABLED" "$DELIVERY_MODE" "$THREAD_ID" "$SESSION_ID" "$SOFFICE_BIN" 2>/dev/null; then
   LAUNCHCTL_OK=true
 fi
 
@@ -243,7 +252,7 @@ if [[ "$LAUNCHCTL_OK" == "false" ]]; then
   # immediately, orphaning the grandchild which is reparented to launchd.
   # The readiness polling below confirms the server is up before the script
   # exits.
-  ( "$RUNNER" "$CORE_APP_DIR" "$WORKING_DIR" "$PROJECT_DIR" "$PORT" "$NODE_BIN" "$ASR_URL" "$ASR_ENABLED" "$DELIVERY_MODE" "$THREAD_ID" "$SESSION_ID" >"$SERVICE_LOG" 2>&1 & )
+  ( "$RUNNER" "$CORE_APP_DIR" "$WORKING_DIR" "$PROJECT_DIR" "$PORT" "$NODE_BIN" "$ASR_URL" "$ASR_ENABLED" "$DELIVERY_MODE" "$THREAD_ID" "$SESSION_ID" "$SOFFICE_BIN" >"$SERVICE_LOG" 2>&1 & )
 fi
 
 for _ in {1..20}; do

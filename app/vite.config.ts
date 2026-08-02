@@ -5,9 +5,11 @@ import { createHash, randomBytes } from 'node:crypto'
 import { gzipSync, gunzipSync } from 'node:zlib'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import type { Plugin } from 'vite'
+import type { Plugin, ViteDevServer } from 'vite'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { registerArtifactReviewPersistence } from './artifact-review-persistence'
+import { registerInteractionReviewPersistence } from './interaction-review-persistence'
 import { handoffToMainThread } from './codex-main-thread-handoff.mjs'
 import { deleteRoundAndUpdateLatest, withRoundLock, writeFileAtomically } from './round-store.mjs'
 import { submitImmutableRound } from './round-submission.mjs'
@@ -59,7 +61,7 @@ async function runtimeIdentity() {
     conversation_bound: false,
     thread_scope_key: conversationScope.threadScopeKey,
     session_scope_key: null,
-    service_version: '0.1.33',
+    service_version: '0.1.34',
     delivery_mode: deliveryMode,
     asr_url: localAsrUrl(),
     asr_enabled: process.env.CANVAS_PROMPT_ASR !== 'disabled',
@@ -616,6 +618,27 @@ function promptPackagePersistence(): Plugin {
           }
         })
       })
+
+      registerArtifactReviewPersistence(server, canvasDir, security)
+      registerInteractionReviewPersistence(server, canvasDir, security)
+    },
+    configurePreviewServer(server) {
+      const port = Number(server.config.preview.port ?? 4173)
+      const security: LocalApiSecurity = {
+        expectedHost: `127.0.0.1:${port}`,
+        expectedOrigin: `http://127.0.0.1:${port}`,
+        token: runtimeToken,
+      }
+      server.middlewares.use('/api/runtime-session', (req, res) => {
+        if (req.method !== 'POST') { rejectLocalApiRequest(res, 405, 'Method Not Allowed'); return }
+        if (!enforceRuntimeSession(req, res, security)) return
+        res.setHeader('cache-control', 'no-store')
+        res.setHeader('content-type', 'application/json; charset=utf-8')
+        res.setHeader('x-content-type-options', 'nosniff')
+        res.end(JSON.stringify({ token: runtimeToken }))
+      })
+      registerArtifactReviewPersistence(server as unknown as ViteDevServer, canvasDir, security)
+      registerInteractionReviewPersistence(server as unknown as ViteDevServer, canvasDir, security)
     },
   }
 }

@@ -14,6 +14,7 @@
 
 import { existsSync } from 'node:fs';
 import { readFile, realpath, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { resolve, dirname, basename, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,6 +47,8 @@ const PROJECT_SCOPE_ERROR = null;
 const CANVAS_PROMPT_DIR = configuredConversationScope?.canvasDir ?? null;
 const MAX_LATEST_PACKAGE_TEXT_BYTES = 1_500_000;
 const MAX_ARTIFACT_BYTES = 4 * 1024 * 1024;
+const MAX_ARTIFACT_REVIEW_BYTES = 8 * 1024 * 1024;
+const MAX_ARTIFACT_REVIEW_VISUAL_BYTES = 4 * 1024 * 1024;
 // Large local Packages can be reconstructed from bounded browser checkpoints.
 // This controls only trusted local artifact reading; latestPackageResponse
 // still strips inline media and caps model-facing text at 1.5MB.
@@ -103,6 +106,17 @@ async function readTrustedCanvasArtifact(candidatePath, allowedNames, { canvasPr
   if (!info.isFile()) throw new Error('Requested artifact is not a file.');
   if (info.size > maxBytes) throw new Error(`Requested artifact exceeds ${maxBytes} byte read limit.`);
   return { path: candidate, contents: await readFile(candidate, 'utf8') };
+}
+
+async function readTrustedCanvasBinary(candidatePath, allowedNames, { canvasPromptDir = CANVAS_PROMPT_DIR, maxBytes = MAX_ARTIFACT_BYTES } = {}) {
+  const [root, candidate] = await Promise.all([realpath(canvasPromptDir), realpath(candidatePath)]);
+  if (!pathIsInside(root, candidate) || !allowedNames.includes(basename(candidate))) {
+    throw new Error('Requested artifact is outside the active project canvas storage.');
+  }
+  const info = await stat(candidate);
+  if (!info.isFile()) throw new Error('Requested artifact is not a file.');
+  if (info.size > maxBytes) throw new Error(`Requested artifact exceeds ${maxBytes} byte read limit.`);
+  return { path: candidate, contents: await readFile(candidate) };
 }
 
 async function resolveRoundArtifact(packageId, artifact, canvasPromptDir) {
@@ -235,6 +249,178 @@ async function handleGetLatestPromptPackage(args = {}) {
   }
 }
 
+function validateVisualEvidenceManifest(value, rawPackage) {
+  const packagePageIds = new Set((Array.isArray(rawPackage?.pages) ? rawPackage.pages : []).map((page) => page.page_id));
+  if (value?.schema_version !== 'artifact-review-visual-evidence/0.1-draft' || value.package_id !== rawPackage.package_id || !Array.isArray(value.pages)) {
+    throw new Error('Artifact Review visual evidence manifest is invalid.');
+  }
+  const seen = new Set();
+  for (const page of value.pages) {
+    if (!packagePageIds.has(page?.page_id) || seen.has(page.page_id)
+      || typeof page.render_ref !== 'string' || !/^vre_[a-f0-9]{36}$/.test(page.render_ref)
+      || page.media_type !== 'image/png' || !Number.isInteger(page.width) || page.width < 1
+      || !Number.isInteger(page.height) || page.height < 1 || Math.max(page.width, page.height) > 1600
+      || !Number.isInteger(page.byte_length) || page.byte_length < 1 || page.byte_length > MAX_ARTIFACT_REVIEW_VISUAL_BYTES
+      || typeof page.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(page.sha256)) {
+      throw new Error('Artifact Review visual evidence page entry is invalid.');
+    }
+    seen.add(page.page_id);
+  }
+  return value;
+}
+
+async function readVisualEvidenceManifest(scope, rawPackage) {
+  const manifestPath = resolve(scope.canvasDir, 'artifact-review-rounds', rawPackage.package_id, 'visual-evidence', 'manifest.json');
+  if (!existsSync(manifestPath)) return { manifest: null, manifestPath: null };
+  const trusted = await readTrustedCanvasArtifact(manifestPath, ['manifest.json'], { canvasPromptDir: scope.canvasDir });
+  return { manifest: validateVisualEvidenceManifest(JSON.parse(trusted.contents), rawPackage), manifestPath: trusted.path };
+}
+
+function artifactReviewResponse(rawPackage, reviewBrief, visualManifest = null) {
+  const annotations = Array.isArray(rawPackage?.annotations) ? rawPackage.annotations : [];
+  const pageNumberById = new Map((Array.isArray(rawPackage?.pages) ? rawPackage.pages : []).map((page) => [page.page_id, page.page_number]));
+  const pageSummary = [...annotations.reduce((summary, annotation) => {
+    const pageNumber = pageNumberById.get(annotation.page_id);
+    if (!Number.isInteger(pageNumber)) return summary;
+    const current = summary.get(pageNumber) ?? { page_number: pageNumber, annotation_count: 0, kinds: {} };
+    current.annotation_count += 1;
+    current.kinds[annotation.kind] = (current.kinds[annotation.kind] ?? 0) + 1;
+    summary.set(pageNumber, current);
+    return summary;
+  }, new Map()).values()].sort((left, right) => left.page_number - right.page_number);
+
+  return JSON.stringify({
+    package: {
+      schema_version: rawPackage.schema_version,
+      package_id: rawPackage.package_id,
+      artifact: rawPackage.artifact,
+      review_state: rawPackage.review_state,
+      privacy: rawPackage.privacy,
+      page_summary: pageSummary,
+      annotations: annotations.map(({ gesture_points: _gesturePoints, ...annotation }) => annotation),
+      voice_segments: rawPackage.voice_segments ?? [],
+      page_visits: rawPackage.page_visits ?? [],
+      reference_resolutions: rawPackage.reference_resolutions ?? [],
+    },
+    review_brief: reviewBrief,
+    visual_evidence: visualManifest ? {
+      availability: 'archived',
+      schema_version: visualManifest.schema_version,
+      total_byte_length: visualManifest.total_byte_length,
+      pages: visualManifest.pages.map(({ render_ref: _renderRef, ...page }) => page),
+    } : { availability: 'not_archived', pages: [] },
+    source: {
+      storage_scope: 'single_board_local_archive',
+      source_file_included: false,
+      local_paths_included: false,
+    },
+    delivery: {
+      mode: 'progressive_disclosure',
+      omitted_fields: ['annotations.gesture_points', 'source_file_bytes', 'page_render_bytes'],
+      next_evidence: visualManifest
+        ? 'Call get_artifact_review_page_visual for only the page whose compact evidence is insufficient.'
+        : 'No page render was archived for this round; continue from compact evidence only.',
+    },
+  });
+}
+
+async function handleGetLatestArtifactReview(args = {}) {
+  try {
+    const scope = await resolveReadScope(args);
+    const packagePath = resolve(scope.canvasDir, 'latest-artifact-review-package.json');
+    if (!existsSync(packagePath)) {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          error: 'Artifact Review package not found for this Canvas Prompt board.',
+          hint: 'Finish the PDF or PPTX review and choose the AI handoff action first.',
+        }) }],
+        isError: true,
+      };
+    }
+    const trustedPackage = await readTrustedCanvasArtifact(packagePath, ['latest-artifact-review-package.json'], {
+      canvasPromptDir: scope.canvasDir,
+      maxBytes: MAX_ARTIFACT_REVIEW_BYTES,
+    });
+    const rawPackage = JSON.parse(trustedPackage.contents);
+    if (rawPackage?.schema_version !== 'artifact-review/0.2-draft' || !safePackageId(rawPackage?.package_id)) {
+      throw new Error('Latest Artifact Review package has an unsupported schema or package ID.');
+    }
+    const briefPath = resolve(scope.canvasDir, 'artifact-review-rounds', rawPackage.package_id, 'review-brief.json');
+    const trustedBrief = await readTrustedCanvasArtifact(briefPath, ['review-brief.json'], { canvasPromptDir: scope.canvasDir });
+    const reviewBrief = JSON.parse(trustedBrief.contents);
+    const { manifest } = await readVisualEvidenceManifest(scope, rawPackage);
+    return { content: [{ type: 'text', text: artifactReviewResponse(rawPackage, reviewBrief, manifest) }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: JSON.stringify({ error: err.message }) }], isError: true };
+  }
+}
+
+async function handleGetLatestInteractionReview(args = {}) {
+  try {
+    const scope = await resolveReadScope(args);
+    const packagePath = resolve(scope.canvasDir, 'latest-interaction-review-package.json');
+    if (!existsSync(packagePath)) return {
+      content: [{ type: 'text', text: JSON.stringify({
+        error: 'Interaction Review package not found for this Canvas Prompt board.',
+        hint: 'Upload a local HTML prototype, start a review, and finish the session first.',
+      }) }],
+      isError: true,
+    };
+    const trusted = await readTrustedCanvasArtifact(packagePath, ['latest-interaction-review-package.json'], {
+      canvasPromptDir: scope.canvasDir,
+      maxBytes: MAX_ARTIFACT_REVIEW_BYTES,
+    });
+    const rawPackage = JSON.parse(trusted.contents);
+    if (rawPackage?.schema_version !== 'interaction-review/0.1-draft' || !safePackageId(rawPackage?.package_id)
+      || rawPackage?.execution_authorized !== false || rawPackage?.source?.source_bytes_in_export !== false) {
+      throw new Error('Latest Interaction Review package has an unsupported schema or privacy boundary.');
+    }
+    return { content: [{ type: 'text', text: JSON.stringify({
+      package: rawPackage,
+      source: { storage_scope: 'single_board_local_archive', source_file_included: false, local_paths_included: false },
+      delivery: {
+        mode: 'progressive_disclosure',
+        interpretation_required: true,
+        execution_authorized: false,
+        next_step: 'Restate the user journey, element-level feedback, requested changes, preserved behavior, and unresolved ambiguity. Wait for confirmation before editing source code.',
+      },
+    }) }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: JSON.stringify({ error: err.message }) }], isError: true };
+  }
+}
+
+async function handleGetArtifactReviewPageVisual(args = {}) {
+  try {
+    const scope = await resolveReadScope(args);
+    if (!safePackageId(args.package_id) || typeof args.page_id !== 'string' || !/^page_[A-Za-z0-9_-]+$/.test(args.page_id)) {
+      throw new Error('Artifact Review package_id or page_id is invalid.');
+    }
+    const roundPath = resolve(scope.canvasDir, 'artifact-review-rounds', args.package_id);
+    const packagePath = resolve(roundPath, 'artifact-review-package.json');
+    const trustedPackage = await readTrustedCanvasArtifact(packagePath, ['artifact-review-package.json'], { canvasPromptDir: scope.canvasDir, maxBytes: MAX_ARTIFACT_REVIEW_BYTES });
+    const rawPackage = JSON.parse(trustedPackage.contents);
+    if (rawPackage?.schema_version !== 'artifact-review/0.2-draft' || rawPackage.package_id !== args.package_id) {
+      throw new Error('Artifact Review immutable package identity does not match the request.');
+    }
+    const { manifest } = await readVisualEvidenceManifest(scope, rawPackage);
+    if (!manifest) throw new Error('Artifact Review visual evidence is not archived for this round.');
+    const page = manifest.pages.find((entry) => entry.page_id === args.page_id);
+    if (!page) throw new Error('Artifact Review visual evidence is not archived for this page.');
+    const visualPath = resolve(roundPath, 'visual-evidence', `${page.render_ref}.png`);
+    const trustedVisual = await readTrustedCanvasBinary(visualPath, [`${page.render_ref}.png`], { canvasPromptDir: scope.canvasDir, maxBytes: MAX_ARTIFACT_REVIEW_VISUAL_BYTES });
+    if (trustedVisual.contents.byteLength !== page.byte_length || createHash('sha256').update(trustedVisual.contents).digest('hex') !== page.sha256) {
+      throw new Error('Artifact Review visual evidence failed its integrity check.');
+    }
+    return { content: [
+      { type: 'text', text: JSON.stringify({ package_id: args.package_id, page_id: args.page_id, width: page.width, height: page.height, sha256: page.sha256, source_file_included: false }) },
+      { type: 'image', data: trustedVisual.contents.toString('base64'), mimeType: 'image/png' },
+    ] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: JSON.stringify({ error: err.message }) }], isError: true };
+  }
+}
+
 async function handleGetRoundArtifact(args = {}) {
   try {
     const scope = await resolveReadScope(args);
@@ -250,7 +436,7 @@ async function handleGetRoundArtifact(args = {}) {
 
 const SERVER_INFO = {
   name: 'ai-thinking-whiteboard-mcp',
-  version: '0.1.33',
+  version: '0.1.34',
 };
 
 // Mirror the official MCP SDK negotiation policy. Codex Desktop now starts
@@ -326,6 +512,28 @@ const TOOLS = [
     },
   },
   {
+    name: 'get_latest_artifact_review',
+    description: 'Read the latest completed PDF or PPTX review from the single active Canvas Prompt board using progressive disclosure.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_latest_interaction_review',
+    description: 'Read the latest completed local HTML prototype review with element-level interactions, annotations, and speech. Reading never authorizes source changes.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_artifact_review_page_visual',
+    description: 'Read one archived page render from an immutable Artifact Review round after inspecting the compact latest review.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        package_id: { type: 'string', description: 'Immutable Artifact Review package ID returned by get_latest_artifact_review.' },
+        page_id: { type: 'string', description: 'Exact page ID listed in visual_evidence.pages.' },
+      },
+      required: ['package_id', 'page_id'],
+    },
+  },
+  {
     name: 'get_round_artifact',
     description: 'Read one bounded artifact from an immutable round in the user\'s single active Canvas Prompt board.',
     inputSchema: {
@@ -382,6 +590,15 @@ async function handleRequest(req) {
       switch (name) {
         case 'get_latest_prompt_package':
           response = await handleGetLatestPromptPackage(args);
+          break;
+        case 'get_latest_artifact_review':
+          response = await handleGetLatestArtifactReview(args);
+          break;
+        case 'get_latest_interaction_review':
+          response = await handleGetLatestInteractionReview(args);
+          break;
+        case 'get_artifact_review_page_visual':
+          response = await handleGetArtifactReviewPageVisual(args);
           break;
         case 'get_round_artifact':
           response = await handleGetRoundArtifact(args);
@@ -442,6 +659,10 @@ function startServer() {
 if (process.env.CANVAS_PROMPT_MCP_TEST !== '1') startServer();
 
 export {
+  artifactReviewResponse,
+  handleGetLatestArtifactReview,
+  handleGetLatestInteractionReview,
+  handleGetArtifactReviewPageVisual,
   handleGetLatestPromptPackage,
   handleGetRoundArtifact,
   latestPackageResponse,

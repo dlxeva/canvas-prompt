@@ -8,7 +8,7 @@
 <h1 align="center">Canvas Prompt</h1>
 
 <p align="center">
-  <a href="https://github.com/dlxeva/canvas-prompt/blob/main/.codex-plugin/plugin.json"><img src="https://img.shields.io/badge/release-v0.1.33-C8462B" alt="发布版本 v0.1.33"></a>
+  <a href="https://github.com/dlxeva/canvas-prompt/blob/main/.codex-plugin/plugin.json"><img src="https://img.shields.io/badge/release-v0.1.34-C8462B" alt="发布版本 v0.1.34"></a>
   <a href="https://github.com/dlxeva/canvas-prompt/actions/workflows/verify.yml"><img src="https://github.com/dlxeva/canvas-prompt/actions/workflows/verify.yml/badge.svg?branch=main" alt="持续集成状态"></a>
   <img src="https://img.shields.io/badge/runtime-local--first-3A7D44" alt="本地优先运行时">
   <img src="https://img.shields.io/badge/verified-macOS%20arm64-147E9E" alt="已验证 macOS arm64">
@@ -40,6 +40,10 @@ codex plugin add canvas-prompt@canvas-prompt
 2. 画、粘贴图片、圈出区域，或边操作边讲。完成后结束这一轮。
 3. 回到主对话，输入 **“根据画布内容推进”**。
 
+如果要审阅本地 PDF 或 PPTX，请点击顶部工作入口里的**交互审阅**，也可以把
+文档直接拖到画布上。PDF 在本机渲染；PPTX 需要本机能找到 LibreOffice 的
+`soffice`，原始演示文稿保持只读，审阅使用隔离的 PDF 衍生文件。
+
 ## 一轮内容如何进入对话
 
 ```text
@@ -62,7 +66,28 @@ codex plugin add canvas-prompt@canvas-prompt
 2. **结束这一轮。** 画布保留在原处，同时保存本轮不可变记录；它不会悄悄清空你的画布。
 3. **在你选择的主对话继续。** 在 Codex Desktop 输入固定指令 **“根据画布内容推进”**。Codex 会读取唯一活动画布的最新已完成轮次，再基于你的实际过程继续，而不用你重新把想法翻译成一大段文字。
 
-## 两个最适合开始的场景
+## 三个最适合开始的场景
+
+### 逐页审阅 PDF 或 PPTX
+
+在 Canvas Prompt 顶部选择**交互审阅**，再打开本地 PDF 或 PPTX。你可以逐页
+翻动，直接在页面上手写、圈选或画箭头，同时说出修改要求。完成审阅后回到
+主对话，请 AI 读取最近一次交互审阅。
+
+原文件始终只读。PDF 在应用内本地渲染；PPTX 由本地 LibreOffice 转换为仅供
+审阅的 PDF 衍生文件，原件哈希、衍生文件哈希、版本和页码分别保留。缺少
+原稿字体时，衍生画面的外观可能变化；应用会明确提示这项限制，不把它包装成
+像素级一致。
+
+AI 首先读取包含整体要求、页码锚点、批注和语音的紧凑审阅包；只有紧凑证据
+不足时，才按需读取某一页的归档画面。真正修改文件前，AI 必须先复述整体目标、
+全局与逐页修改、保持不变的内容、未决歧义和预期输出，等待你确认。完成审阅
+本身不代表已经授权执行。
+
+在文档入口下方，**交互原型审阅**会打开一个内置的四步合成网页流程。你可以
+实际操作页面，把文字反馈绑定到点击和状态变化，也可以观看固定的可见 Agent
+演示。这个实验入口不会打开任意网址或用户项目，不采集语音，生成的建议始终
+停留在待确认提案。
 
 ### 批阅图片时，不必把每一笔都翻译成文字
 
@@ -110,7 +135,13 @@ Canvas Prompt 是本地优先产品，不是“零依赖网页”。干净机器
 | 编译器 | Python `3.11+` | 宿主机器必须提供；当前 Process IR 编译器只使用 Python 标准库。 |
 | 语音转写 | Canvas Prompt 本地 ASR 运行时 | 安装到 `~/.canvas-prompt/runtime/asr-venv`（或 `CANVAS_PROMPT_RUNTIME_DIR`）；首次启动下载并缓存 `faster-whisper` 模型。无需私有项目、全局 Whisper 或手装 `ffmpeg`。 |
 | 录音 | 浏览器麦克风权限 | 仅在需要录音时要求。 |
+| PDF 审阅 | 随应用提供的 PDF.js 运行时 | 在本机渲染所选 PDF，源文件保持只读。 |
+| PPTX 审阅 | 本地 LibreOffice `soffice` 可执行文件 | 把所选 PPTX 隔离转换为仅供审阅的 PDF 衍生文件；Canvas Prompt 不安装 LibreOffice，也不修改原演示文稿。 |
 | AI 继续对话 | 单活跃画布 MCP | 用户输入续接指令后读取唯一画布的最新已完成轮次；不需要提供项目路径或维护对话绑定。 |
+
+当 `soffice` 可从 `PATH` 找到，或 `CANVAS_PROMPT_SOFFICE_BIN` 指向对应可执行
+文件时，PPTX 审阅可用。没有兼容的本地渲染器时，应用会明确提示 PPTX 审阅
+不可用；PDF 审阅仍可继续使用。
 
 默认 `setup` 会准备本地 ASR，而不是把它藏成可选前提。当前 macOS arm64 实测隔离运行时约 **235 MB**；首次启动还会下载约 **148 MB** 的 base 语音模型到本机缓存，后续复用。实际体积和首次启动时间会随平台与网络变化，冷缓存下模型准备可能需要数分钟；画布会先打开并明确显示“语音准备中”。用户可以等待转写就绪，也可以明确选择“不等语音，开始画”：该轮只保证视觉过程，未就绪的语音不会被伪装成已转写。若只需画布视觉上下文，也可显式使用 `setup --core-only` 或设置 `CANVAS_PROMPT_ASR=disabled`；浏览器语音识别不是默认或静默回退。
 

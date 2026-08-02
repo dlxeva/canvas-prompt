@@ -168,6 +168,8 @@ Usage:
   canvas-prompt setup [--core-only]
   canvas-prompt open [--project <dir>] [--conversation-only] [--host codex|workbuddy|local]
   canvas-prompt read [--project <dir>]
+  canvas-prompt read-artifact-review [--project <dir>]
+  canvas-prompt read-interaction-review [--project <dir>]
   canvas-prompt init [--project <dir>] [--thread-id <id>] [--conversation-only]
   canvas-prompt doctor [--project <dir>] [--thread-id <id>] [--conversation-only]
   canvas-prompt migrate --from <legacy-project-or-.canvas-prompt-dir>
@@ -178,8 +180,10 @@ reuses validated existing dependencies. The local ASR model downloads on first
 start. A supplied thread ID is provenance only, never inferred from project
 history. init prints the single-board MCP configuration. migrate copies complete
 legacy archives without deleting or scanning any source. read prints the latest
-completed prompt package from the single active board, using the same code path
-as the canvas_prompt MCP server's get_latest_prompt_package tool.`)
+completed prompt package from the single active board. read-artifact-review
+prints the latest compact PDF/PPTX review. read-interaction-review prints the
+latest local HTML prototype review. All use the same code paths as their
+canvas_prompt MCP tools.`)
 
 try {
   if (command === 'help' || command === '--help' || command === '-h') help()
@@ -231,14 +235,18 @@ try {
         asr,
         mcp_config: mcpConfig(project, boundThreadId),
       }, null, 2))
-    } else if (command === 'read') {
+    } else if (command === 'read' || command === 'read-artifact-review' || command === 'read-interaction-review') {
       // Maintained CLI fallback for get_latest_prompt_package. Uses the exact
       // same code path as the canvas_prompt MCP server. This is NOT a
       // temporary Bash/Python read — it is a first-class CLI command that
       // imports and calls the MCP server's handler directly.
       process.env.CANVAS_PROMPT_MCP_TEST = '1'
-      const { handleGetLatestPromptPackage } = await import('../mcp/server.mjs')
-      const response = await handleGetLatestPromptPackage({})
+      const { handleGetLatestPromptPackage, handleGetLatestArtifactReview, handleGetLatestInteractionReview } = await import('../mcp/server.mjs')
+      const response = command === 'read'
+        ? await handleGetLatestPromptPackage({})
+        : command === 'read-artifact-review'
+          ? await handleGetLatestArtifactReview({})
+          : await handleGetLatestInteractionReview({})
       const text = response.content?.[0]?.text
       if (response.isError) {
         console.error(text)

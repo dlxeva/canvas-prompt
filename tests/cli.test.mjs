@@ -228,6 +228,54 @@ test('read reports an error when no prompt package exists on the board', () => {
   assert.ok(parsed.error.includes('not found'), `unexpected error: ${result.stderr}`)
 })
 
+test('read-artifact-review returns compact review evidence through the formal MCP handler', () => {
+  const root = mkdtempSync(join(tmpdir(), 'canvas-prompt-artifact-read-'))
+  const home = join(root, 'home')
+  const project = join(root, 'project')
+  const board = join(home, '.canvas-prompt', 'board')
+  const packageId = 'arp_cli_reader'
+  const round = join(board, 'artifact-review-rounds', packageId)
+  mkdirSync(project, { recursive: true })
+  mkdirSync(round, { recursive: true })
+  writeFileSync(join(board, 'latest-artifact-review-package.json'), JSON.stringify({
+    schema_version: 'artifact-review/0.2-draft', package_id: packageId,
+    artifact: { artifact_kind: 'pptx', source_sha256: 'b'.repeat(64), page_count: 1, read_only: true },
+    pages: [{ page_id: 'page_cli_1', page_number: 1 }], annotations: [], voice_segments: [], page_visits: [],
+    review_state: { interpretation_status: 'clarification_required', execution_authorized: false },
+  }))
+  writeFileSync(join(round, 'review-brief.json'), JSON.stringify({ schema_version: 'artifact-review-proposal/0.1-draft', execution_authorized: false }))
+
+  const result = runWithEnvironment({ HOME: home }, 'read-artifact-review', '--project', project)
+  assert.equal(result.status, 0, result.stderr)
+  const parsed = JSON.parse(result.stdout)
+  assert.equal(parsed.package.package_id, packageId)
+  assert.equal(parsed.package.artifact.artifact_kind, 'pptx')
+  assert.equal(parsed.delivery.mode, 'progressive_disclosure')
+})
+
+test('read-interaction-review returns the latest element-level HTML review through the formal MCP handler', () => {
+  const root = mkdtempSync(join(tmpdir(), 'canvas-prompt-interaction-read-'))
+  const home = join(root, 'home')
+  const project = join(root, 'project')
+  const board = join(home, '.canvas-prompt', 'board')
+  mkdirSync(project, { recursive: true })
+  mkdirSync(board, { recursive: true })
+  writeFileSync(join(board, 'latest-interaction-review-package.json'), JSON.stringify({
+    schema_version: 'interaction-review/0.1-draft', package_id: 'irp_cli_reader',
+    source: { kind: 'local-static-html', name: 'index.html', entry_path: 'index.html', sha256: 'c'.repeat(64), source_bytes_in_export: false },
+    session: { started_at: new Date(0).toISOString(), duration_ms: 1234, capture_scope: 'explicit-session-only' },
+    events: [{ id: 'evt_1', kind: 'click', at_ms: 10, route: '/', viewport: { width: 390, height: 844, scroll_x: 0, scroll_y: 0 }, target: { element_id: 'continue-button', tag: 'button', role: null, label: '继续', rect: { x: 10, y: 20, width: 100, height: 40 } }, state: { route: '/', title: 'Demo', scroll_x: 0, scroll_y: 0 }, detail: {} }],
+    annotations: [], transcript: [], privacy: { processing: 'local_only', sensitive_input_values: 'excluded', external_network: 'blocked-by-frame-policy', full_screen_video: false }, execution_authorized: false,
+  }))
+
+  const result = runWithEnvironment({ HOME: home }, 'read-interaction-review', '--project', project)
+  assert.equal(result.status, 0, result.stderr)
+  const parsed = JSON.parse(result.stdout)
+  assert.equal(parsed.package.package_id, 'irp_cli_reader')
+  assert.equal(parsed.package.events[0].target.element_id, 'continue-button')
+  assert.equal(parsed.delivery.execution_authorized, false)
+})
+
 test('workbuddy plugin manifest exists and is valid', () => {
   const manifestPath = resolve('.workbuddy-plugin', 'plugin.json')
   assert.equal(existsSync(manifestPath), true)
