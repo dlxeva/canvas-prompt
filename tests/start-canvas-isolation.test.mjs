@@ -253,12 +253,14 @@ test('macOS canvas service receives the configured ASR identity instead of rever
         CANVAS_PROMPT_ASR_PORT: '18081',
         CANVAS_PROMPT_ASR: 'disabled',
         CANVAS_PROMPT_DELIVERY_MODE: 'codex',
+        CANVAS_PROMPT_SOFFICE_BIN: '/private/test/soffice',
       },
     })
     const args = await (await import('node:fs/promises')).readFile(submission, 'utf8')
     assert.match(args, /http:\/\/127\.0\.0\.1:18081/)
     assert.match(args, /^disabled$/m)
     assert.match(args, /^codex$/m)
+    assert.match(args, /^\/private\/test\/soffice$/m)
   } finally {
     await rm(temp, { recursive: true, force: true })
   }
