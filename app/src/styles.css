@@ -190,8 +190,14 @@ h1 { font-size: 18px; font-weight: 720; letter-spacing: -.035em; }
 .artifact-review-primary { min-height: 34px; border: 1px solid #171512; border-radius: 4px; padding: 0 13px; color: #f6f1e7; background: #171512; font-weight: 700; cursor: pointer; }
 .artifact-review-primary:hover:not(:disabled) { border-color: #c8462b; background: #c8462b; }
 .artifact-review-primary:disabled { opacity: .55; cursor: wait; }
-.artifact-review-entry-card { display: grid; max-width: 680px; justify-items: start; gap: 12px; margin: 76px auto 0; padding: 28px; border: 1px solid #d9d0be; border-radius: 7px; background: #fffdf7; box-shadow: 8px 10px 0 rgba(200,70,43,.08); }
+.artifact-review-entry-options { display: grid; max-width: 680px; gap: 14px; margin: 52px auto 0; }
+.artifact-review-entry-options > .artifact-review-mode-notice { margin-bottom: 2px; }
+.artifact-review-entry-card { display: grid; justify-items: start; gap: 12px; padding: 28px; border: 1px solid #d9d0be; border-radius: 7px; background: #fffdf7; box-shadow: 8px 10px 0 rgba(200,70,43,.08); }
+.artifact-review-entry-card h2 { margin: 0; font-size: 18px; }
 .artifact-review-entry-card p { max-width: 540px; margin: 0 0 6px; color: #736d62; font-size: 14px; line-height: 1.6; }
+.artifact-review-prototype-card { border-color: #cfc3af; box-shadow: 8px 10px 0 rgba(38,63,54,.08); }
+.artifact-review-entry-badge { padding: 3px 6px; border-radius: 3px; color: #6b3427; background: #f9e5df; font: 10px "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .03em; text-transform: uppercase; }
+.artifact-review-entry-card a.artifact-review-primary { display: inline-flex; align-items: center; text-decoration: none; }
 .artifact-review-mode-notice { display: inline-flex; align-items: center; gap: 8px; color: #6b3427; font-size: 13px; font-weight: 700; }
 .artifact-review-mode-notice i { width: 7px; height: 7px; border-radius: 50%; background: #c8462b; }
 .artifact-review-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
@@ -245,7 +251,8 @@ h1 { font-size: 18px; font-weight: 720; letter-spacing: -.035em; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; clip-path: inset(50%); }
 
 @media (max-width: 700px) {
-  .artifact-review-entry-card { margin-top: 32px; padding: 22px; }
+  .artifact-review-entry-options { margin-top: 32px; }
+  .artifact-review-entry-card { padding: 22px; }
   .artifact-review-toolbar { align-items: stretch; flex-direction: column; }
   .artifact-review-tools { width: 100%; overflow-x: auto; }
   .artifact-review-toolbar-actions { width: 100%; flex-wrap: wrap; justify-content: space-between; }

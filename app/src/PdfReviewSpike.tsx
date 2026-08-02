@@ -67,13 +67,15 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
   const ui = locale === 'zh' ? {
     canvas: '自由推演', review: '交互审阅', workspace: '工作入口', switched: '已切换到交互审阅',
     intro: '像在白板上一样审阅：边看、边说、边标记，AI 会结合页码和批注理解你的反馈；标记始终与原 PDF 或 PPTX 分离。',
-    entry: '选择一份本地 PDF 或 PPTX，进入逐页标记与语音审阅。原文件不会被修改。', choose: '选择本地 PDF / PPTX', reading: '正在读取…',
+    entryTitle: 'PDF / PPTX 审阅', entry: '选择一份本地 PDF 或 PPTX，进入逐页标记与语音审阅。原文件不会被修改。', choose: '选择本地 PDF / PPTX', reading: '正在读取…',
+    prototypeTitle: '交互原型审阅', prototypeBadge: '实验功能', prototypeEntry: '体验一个可点击的网页流程，边操作边记录反馈，也可以观看 AI 如何一步步完成操作。', prototypeOpen: '体验原型审阅',
     tools: '批注工具', ink: '手写', circle: '圈选', arrow: '箭头', undo: '撤销最近一笔', more: '更多审阅操作', clear: '清除本页笔迹', export: '导出审阅记录', replace: '更换文件', close: '关闭当前文件',
     start: '开始审阅', finish: '结束审阅', pageJump: '快速跳转页面', page: (current: number, total: number) => `第 ${current} / ${total} 页`, zoom: '页面缩放', zoomOut: '缩小', zoomIn: '放大',
   } : {
     canvas: 'Freeform', review: 'Interactive review', workspace: 'Workspace', switched: 'Switched to Interactive Review',
     intro: 'Review as you would on a canvas: look, speak, and mark while AI keeps feedback anchored to pages and annotations. Your source file is never modified.',
-    entry: 'Choose a local PDF or PPTX for page-by-page voice and visual review. The original file remains unchanged.', choose: 'Choose PDF / PPTX', reading: 'Opening…',
+    entryTitle: 'PDF / PPTX review', entry: 'Choose a local PDF or PPTX for page-by-page voice and visual review. The original file remains unchanged.', choose: 'Choose PDF / PPTX', reading: 'Opening…',
+    prototypeTitle: 'Interactive prototype review', prototypeBadge: 'Experimental', prototypeEntry: 'Try a clickable web flow, record feedback as you use it, and watch AI walk through the interaction step by step.', prototypeOpen: 'Try prototype review',
     tools: 'Annotation tools', ink: 'Draw', circle: 'Circle', arrow: 'Arrow', undo: 'Undo last mark', more: 'More review actions', clear: 'Clear marks on this page', export: 'Export review record', replace: 'Replace file', close: 'Close current file',
     start: 'Start review', finish: 'Finish review', pageJump: 'Jump to page', page: (current: number, total: number) => `Page ${current} of ${total}`, zoom: 'Page zoom', zoomOut: 'Zoom out', zoomIn: 'Zoom in',
   }
@@ -526,12 +528,21 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
           {!documentHandle && <p>{ui.intro}</p>}
         </div>
         <input ref={inputRef} type="file" accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,.pptx" hidden onChange={(event) => void chooseFile(event.target.files?.[0])} />
-        {!documentHandle && <div className="artifact-review-entry-card">
+        {!documentHandle && <div className="artifact-review-entry-options">
           <div className="artifact-review-mode-notice" role="status"><i />{ui.switched}</div>
-          <p>{ui.entry}</p>
-          <button className="artifact-review-primary" type="button" onClick={() => inputRef.current?.click()} disabled={loading} title={loading ? ui.reading : ui.choose}>
-            {loading ? ui.reading : ui.choose}
-          </button>
+          <div className="artifact-review-entry-card">
+            <h2>{ui.entryTitle}</h2>
+            <p>{ui.entry}</p>
+            <button className="artifact-review-primary" type="button" onClick={() => inputRef.current?.click()} disabled={loading} title={loading ? ui.reading : ui.choose}>
+              {loading ? ui.reading : ui.choose}
+            </button>
+          </div>
+          <div className="artifact-review-entry-card artifact-review-prototype-card">
+            <span className="artifact-review-entry-badge">{ui.prototypeBadge}</span>
+            <h2>{ui.prototypeTitle}</h2>
+            <p>{ui.prototypeEntry}</p>
+            <a className="artifact-review-primary" href="/interaction-review-i0/index.html" title={ui.prototypeOpen}>{ui.prototypeOpen}</a>
+          </div>
         </div>}
 
         {error && <p role="alert" style={{ padding: 12, borderRadius: 8, background: '#fff1f1', color: '#a61b1b' }}>{error}</p>}

@@ -97,6 +97,12 @@ goal, global and page-specific changes, items to preserve, unresolved
 ambiguities, and expected output for confirmation. A completed review does not
 authorize execution by itself.
 
+Below the document entry, **Interactive prototype review** opens a built-in
+four-step synthetic web flow. You can use the flow, attach text feedback to its
+clicks and state changes, and watch a fixed visible Agent walkthrough. This
+experimental preview does not open arbitrary URLs or user projects, does not
+capture audio, and keeps every generated suggestion proposal-only.
+
 ### Review an image without translating every mark into prose
 
 Paste the original image, circle the parts that matter, and explain only what
