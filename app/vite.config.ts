@@ -9,6 +9,7 @@ import type { Plugin, ViteDevServer } from 'vite'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { registerArtifactReviewPersistence } from './artifact-review-persistence'
+import { registerInteractionReviewPersistence } from './interaction-review-persistence'
 import { handoffToMainThread } from './codex-main-thread-handoff.mjs'
 import { deleteRoundAndUpdateLatest, writeFileAtomically } from './round-store.mjs'
 import { submitImmutableRound } from './round-submission.mjs'
@@ -582,6 +583,7 @@ function promptPackagePersistence(): Plugin {
       })
 
       registerArtifactReviewPersistence(server, canvasDir, security)
+      registerInteractionReviewPersistence(server, canvasDir, security)
     },
     configurePreviewServer(server) {
       const port = Number(server.config.preview.port ?? 4173)
@@ -599,6 +601,7 @@ function promptPackagePersistence(): Plugin {
         res.end(JSON.stringify({ token: runtimeToken }))
       })
       registerArtifactReviewPersistence(server as unknown as ViteDevServer, canvasDir, security)
+      registerInteractionReviewPersistence(server as unknown as ViteDevServer, canvasDir, security)
     },
   }
 }

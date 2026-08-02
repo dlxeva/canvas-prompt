@@ -355,6 +355,41 @@ async function handleGetLatestArtifactReview(args = {}) {
   }
 }
 
+async function handleGetLatestInteractionReview(args = {}) {
+  try {
+    const scope = await resolveReadScope(args);
+    const packagePath = resolve(scope.canvasDir, 'latest-interaction-review-package.json');
+    if (!existsSync(packagePath)) return {
+      content: [{ type: 'text', text: JSON.stringify({
+        error: 'Interaction Review package not found for this Canvas Prompt board.',
+        hint: 'Upload a local HTML prototype, start a review, and finish the session first.',
+      }) }],
+      isError: true,
+    };
+    const trusted = await readTrustedCanvasArtifact(packagePath, ['latest-interaction-review-package.json'], {
+      canvasPromptDir: scope.canvasDir,
+      maxBytes: MAX_ARTIFACT_REVIEW_BYTES,
+    });
+    const rawPackage = JSON.parse(trusted.contents);
+    if (rawPackage?.schema_version !== 'interaction-review/0.1-draft' || !safePackageId(rawPackage?.package_id)
+      || rawPackage?.execution_authorized !== false || rawPackage?.source?.source_bytes_in_export !== false) {
+      throw new Error('Latest Interaction Review package has an unsupported schema or privacy boundary.');
+    }
+    return { content: [{ type: 'text', text: JSON.stringify({
+      package: rawPackage,
+      source: { storage_scope: 'single_board_local_archive', source_file_included: false, local_paths_included: false },
+      delivery: {
+        mode: 'progressive_disclosure',
+        interpretation_required: true,
+        execution_authorized: false,
+        next_step: 'Restate the user journey, element-level feedback, requested changes, preserved behavior, and unresolved ambiguity. Wait for confirmation before editing source code.',
+      },
+    }) }] };
+  } catch (err) {
+    return { content: [{ type: 'text', text: JSON.stringify({ error: err.message }) }], isError: true };
+  }
+}
+
 async function handleGetArtifactReviewPageVisual(args = {}) {
   try {
     const scope = await resolveReadScope(args);
@@ -482,6 +517,11 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
   {
+    name: 'get_latest_interaction_review',
+    description: 'Read the latest completed local HTML prototype review with element-level interactions, annotations, and speech. Reading never authorizes source changes.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'get_artifact_review_page_visual',
     description: 'Read one archived page render from an immutable Artifact Review round after inspecting the compact latest review.',
     inputSchema: {
@@ -553,6 +593,9 @@ async function handleRequest(req) {
           break;
         case 'get_latest_artifact_review':
           response = await handleGetLatestArtifactReview(args);
+          break;
+        case 'get_latest_interaction_review':
+          response = await handleGetLatestInteractionReview(args);
           break;
         case 'get_artifact_review_page_visual':
           response = await handleGetArtifactReviewPageVisual(args);
@@ -672,6 +715,7 @@ if (process.env.CANVAS_PROMPT_MCP_TEST !== '1') startServer();
 export {
   artifactReviewResponse,
   handleGetLatestArtifactReview,
+  handleGetLatestInteractionReview,
   handleGetArtifactReviewPageVisual,
   handleGetLatestPromptPackage,
   handleGetRoundArtifact,

@@ -7,11 +7,13 @@ describe('Interactive prototype review entry', () => {
 
   it('places the controlled prototype entry after the PDF/PPTX entry', () => {
     const documentEntry = reviewSource.indexOf("entryTitle: 'PDF / PPTX 审阅'")
-    const prototypeEntry = reviewSource.indexOf("prototypeTitle: '交互原型审阅'")
+    const prototypeEntry = reviewSource.indexOf("prototypeTitle: '网页原型审阅'")
     expect(documentEntry).toBeGreaterThan(-1)
     expect(prototypeEntry).toBeGreaterThan(documentEntry)
-    expect(reviewSource).toContain('href="/interaction-review-i0/index.html"')
+    expect(reviewSource).toContain('setWebPrototypeOpen(true)')
+    expect(reviewSource).toContain('WebPrototypeReview')
     expect(reviewSource).toContain("prototypeBadge: '实验功能'")
+    expect(reviewSource).toContain("prototypeOpen: '上传网页原型'")
   })
 
   it('ships the complete controlled I0 browser runtime with the app', () => {

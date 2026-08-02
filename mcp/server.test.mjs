@@ -71,7 +71,7 @@ test('latest package response exposes an archived editable original only from it
 });
 
 test('public MCP schema exposes only fixed-scope round reads, never caller paths', () => {
-  assert.deepEqual(TOOLS.map((tool) => tool.name), ['get_latest_prompt_package', 'get_latest_artifact_review', 'get_artifact_review_page_visual', 'get_round_artifact']);
+  assert.deepEqual(TOOLS.map((tool) => tool.name), ['get_latest_prompt_package', 'get_latest_artifact_review', 'get_latest_interaction_review', 'get_artifact_review_page_visual', 'get_round_artifact']);
   const schema = JSON.stringify(TOOLS);
   assert.equal(schema.includes('events_path'), false);
   assert.equal(schema.includes('transcript_path'), false);

@@ -18,6 +18,7 @@ import { reviewPageScale } from './pdf-review-scale'
 import { VoiceRecorder } from './voice-recorder'
 import { archiveArtifactReviewVisualEvidence } from './artifact-review-visual-handoff'
 import type { Locale } from './locale'
+import WebPrototypeReview from './WebPrototypeReview'
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
@@ -62,20 +63,22 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
   const [handoffStatus, setHandoffStatus] = useState<string | null>(null)
   const [asrBaseUrl, setAsrBaseUrl] = useState(DEFAULT_LOCAL_ASR_BASE_URL)
   const [draftMark, setDraftMark] = useState<ReviewMark | null>(null)
+  const [webPrototypeOpen, setWebPrototypeOpen] = useState(false)
+  const [webPrototypeCaptureBusy, setWebPrototypeCaptureBusy] = useState(false)
   const draggingMarkRef = useRef<ReviewMark | null>(null)
   const initialFileHandledRef = useRef<File | null>(null)
   const ui = locale === 'zh' ? {
     canvas: '自由推演', review: '交互审阅', workspace: '工作入口', switched: '已切换到交互审阅',
     intro: '像在白板上一样审阅：边看、边说、边标记，AI 会结合页码和批注理解你的反馈；标记始终与原 PDF 或 PPTX 分离。',
     entryTitle: 'PDF / PPTX 审阅', entry: '选择一份本地 PDF 或 PPTX，进入逐页标记与语音审阅。原文件不会被修改。', choose: '选择本地 PDF / PPTX', reading: '正在读取…',
-    prototypeTitle: '交互原型审阅', prototypeBadge: '实验功能', prototypeEntry: '体验一个可点击的网页流程，边操作边记录反馈，也可以观看 AI 如何一步步完成操作。', prototypeOpen: '体验原型审阅',
+    prototypeTitle: '网页原型审阅', prototypeBadge: '实验功能', prototypeEntry: '上传你做好的 HTML 网页或静态网页文件夹，在画布中真实操作、口述并圈画反馈。', prototypeOpen: '上传网页原型',
     tools: '批注工具', ink: '手写', circle: '圈选', arrow: '箭头', undo: '撤销最近一笔', more: '更多审阅操作', clear: '清除本页笔迹', export: '导出审阅记录', replace: '更换文件', close: '关闭当前文件',
     start: '开始审阅', finish: '结束审阅', pageJump: '快速跳转页面', page: (current: number, total: number) => `第 ${current} / ${total} 页`, zoom: '页面缩放', zoomOut: '缩小', zoomIn: '放大',
   } : {
     canvas: 'Freeform', review: 'Interactive review', workspace: 'Workspace', switched: 'Switched to Interactive Review',
     intro: 'Review as you would on a canvas: look, speak, and mark while AI keeps feedback anchored to pages and annotations. Your source file is never modified.',
     entryTitle: 'PDF / PPTX review', entry: 'Choose a local PDF or PPTX for page-by-page voice and visual review. The original file remains unchanged.', choose: 'Choose PDF / PPTX', reading: 'Opening…',
-    prototypeTitle: 'Interactive prototype review', prototypeBadge: 'Experimental', prototypeEntry: 'Try a clickable web flow, record feedback as you use it, and watch AI walk through the interaction step by step.', prototypeOpen: 'Try prototype review',
+    prototypeTitle: 'Web prototype review', prototypeBadge: 'Experimental', prototypeEntry: 'Upload a standalone HTML file or built static folder, then use, speak, and mark feedback directly on the canvas.', prototypeOpen: 'Upload web prototype',
     tools: 'Annotation tools', ink: 'Draw', circle: 'Circle', arrow: 'Arrow', undo: 'Undo last mark', more: 'More review actions', clear: 'Clear marks on this page', export: 'Export review record', replace: 'Replace file', close: 'Close current file',
     start: 'Start review', finish: 'Finish review', pageJump: 'Jump to page', page: (current: number, total: number) => `Page ${current} of ${total}`, zoom: 'Page zoom', zoomOut: 'Zoom out', zoomIn: 'Zoom in',
   }
@@ -88,8 +91,8 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
   }, [active, ui.review])
 
   useEffect(() => {
-    onCaptureStateChange?.(captureBusy)
-  }, [captureBusy, onCaptureStateChange])
+    onCaptureStateChange?.(captureBusy || webPrototypeCaptureBusy)
+  }, [captureBusy, onCaptureStateChange, webPrototypeCaptureBusy])
 
   useLayoutEffect(() => {
     const stage = stageScrollRef.current
@@ -523,12 +526,12 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
       </header>
 
       <section className="artifact-review-content">
-        <div className={`artifact-review-intro${documentHandle ? ' artifact-review-intro-compact' : ''}`}>
+        <div className={`artifact-review-intro${documentHandle || webPrototypeOpen ? ' artifact-review-intro-compact' : ''}`}>
           <div><p className="artifact-review-kicker">INTERACTIVE REVIEW</p><h1>{ui.review}</h1></div>
-          {!documentHandle && <p>{ui.intro}</p>}
+          {!documentHandle && !webPrototypeOpen && <p>{ui.intro}</p>}
         </div>
         <input ref={inputRef} type="file" accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,.pptx" hidden onChange={(event) => void chooseFile(event.target.files?.[0])} />
-        {!documentHandle && <div className="artifact-review-entry-options">
+        {!documentHandle && !webPrototypeOpen && <div className="artifact-review-entry-options">
           <div className="artifact-review-mode-notice" role="status"><i />{ui.switched}</div>
           <div className="artifact-review-entry-card">
             <h2>{ui.entryTitle}</h2>
@@ -541,9 +544,11 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
             <span className="artifact-review-entry-badge">{ui.prototypeBadge}</span>
             <h2>{ui.prototypeTitle}</h2>
             <p>{ui.prototypeEntry}</p>
-            <a className="artifact-review-primary" href="/interaction-review-i0/index.html" title={ui.prototypeOpen}>{ui.prototypeOpen}</a>
+            <button className="artifact-review-primary" type="button" onClick={() => setWebPrototypeOpen(true)} title={ui.prototypeOpen}>{ui.prototypeOpen}</button>
           </div>
         </div>}
+
+        {!documentHandle && webPrototypeOpen && <WebPrototypeReview locale={locale} onClose={() => setWebPrototypeOpen(false)} onCaptureStateChange={setWebPrototypeCaptureBusy} />}
 
         {error && <p role="alert" style={{ padding: 12, borderRadius: 8, background: '#fff1f1', color: '#a61b1b' }}>{error}</p>}
         {recoveryNotice && <p className="artifact-review-recovery" role="status">{recoveryNotice}</p>}
