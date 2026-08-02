@@ -8,7 +8,7 @@
 <h1 align="center">Canvas Prompt</h1>
 
 <p align="center">
-  <a href="https://github.com/dlxeva/canvas-prompt/blob/main/.codex-plugin/plugin.json"><img src="https://img.shields.io/badge/release-v0.1.33-C8462B" alt="release v0.1.33"></a>
+  <a href="https://github.com/dlxeva/canvas-prompt/blob/main/.codex-plugin/plugin.json"><img src="https://img.shields.io/badge/release-v0.1.34-C8462B" alt="release v0.1.34"></a>
   <a href="https://github.com/dlxeva/canvas-prompt/actions/workflows/verify.yml"><img src="https://github.com/dlxeva/canvas-prompt/actions/workflows/verify.yml/badge.svg?branch=main" alt="CI status"></a>
   <img src="https://img.shields.io/badge/runtime-local--first-3A7D44" alt="local-first runtime">
   <img src="https://img.shields.io/badge/verified-macOS%20arm64-147E9E" alt="verified on macOS arm64">
@@ -45,6 +45,11 @@ Open a new Codex task, then:
 2. Draw, paste an image, mark a region, or explain your idea aloud. Finish the
    session when the round is complete.
 3. Back in the conversation, type **“Continue with the canvas context”**.
+
+To review a local PDF or PPTX, click **Interactive Review** in the top workspace
+switcher, or drop the document onto the canvas. PDF pages render locally. PPTX
+review requires a discoverable local LibreOffice `soffice`; the original
+presentation remains read-only and the review uses an isolated PDF derivative.
 
 ## How one round travels
 

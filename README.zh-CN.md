@@ -8,7 +8,7 @@
 <h1 align="center">Canvas Prompt</h1>
 
 <p align="center">
-  <a href="https://github.com/dlxeva/canvas-prompt/blob/main/.codex-plugin/plugin.json"><img src="https://img.shields.io/badge/release-v0.1.33-C8462B" alt="发布版本 v0.1.33"></a>
+  <a href="https://github.com/dlxeva/canvas-prompt/blob/main/.codex-plugin/plugin.json"><img src="https://img.shields.io/badge/release-v0.1.34-C8462B" alt="发布版本 v0.1.34"></a>
   <a href="https://github.com/dlxeva/canvas-prompt/actions/workflows/verify.yml"><img src="https://github.com/dlxeva/canvas-prompt/actions/workflows/verify.yml/badge.svg?branch=main" alt="持续集成状态"></a>
   <img src="https://img.shields.io/badge/runtime-local--first-3A7D44" alt="本地优先运行时">
   <img src="https://img.shields.io/badge/verified-macOS%20arm64-147E9E" alt="已验证 macOS arm64">
@@ -39,6 +39,10 @@ codex plugin add canvas-prompt@canvas-prompt
 1. 请 Codex 打开 Canvas Prompt，并开始一轮。
 2. 画、粘贴图片、圈出区域，或边操作边讲。完成后结束这一轮。
 3. 回到主对话，输入 **“根据画布内容推进”**。
+
+如果要审阅本地 PDF 或 PPTX，请点击顶部工作入口里的**交互审阅**，也可以把
+文档直接拖到画布上。PDF 在本机渲染；PPTX 需要本机能找到 LibreOffice 的
+`soffice`，原始演示文稿保持只读，审阅使用隔离的 PDF 衍生文件。
 
 ## 一轮内容如何进入对话
 

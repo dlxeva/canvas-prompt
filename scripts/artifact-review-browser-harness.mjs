@@ -219,9 +219,12 @@ async function main() {
       await page.getByRole('button', { name: '交互审阅' }).click();
       await page.getByRole('heading', { name: '交互审阅' }).waitFor({ state: 'visible', timeout: 15_000 });
       await page.getByText('已切换到交互审阅', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
-      const prototypeEntry = page.getByRole('link', { name: '体验原型审阅' });
+      const prototypeEntry = page.getByRole('button', { name: '上传网页原型' });
       await prototypeEntry.waitFor({ state: 'visible', timeout: 15_000 });
-      if (await prototypeEntry.getAttribute('href') !== '/interaction-review-i0/index.html') throw new Error('Controlled prototype entry does not point to the bundled I0 runtime.');
+      await prototypeEntry.click();
+      const prototypeDemo = page.getByRole('link', { name: '查看自动演示' });
+      await prototypeDemo.waitFor({ state: 'visible', timeout: 15_000 });
+      if (await prototypeDemo.getAttribute('href') !== '/interaction-review-i0/index.html') throw new Error('Controlled prototype entry does not point to the bundled I0 runtime.');
       const prototypePage = await context.newPage();
       const prototypeErrors = [];
       prototypePage.on('pageerror', (error) => prototypeErrors.push(`pageerror: ${error.message}`));
@@ -243,6 +246,7 @@ async function main() {
       await prototypePage.getByRole('button', { name: '导出本轮记录' }).waitFor({ state: 'visible', timeout: 15_000 });
       if (prototypeErrors.length > 0) throw new Error(`Prototype browser errors: ${prototypeErrors.join(' | ')}`);
       await prototypePage.close();
+      await page.goto(`${origin}/?artifact-review-spike=1`);
       await page.locator('.artifact-review-shell input[type=file]').setInputFiles(pdfPath);
       await page.locator('canvas[aria-label="PDF 第 1 页"]').waitFor({ state: 'visible', timeout: 15_000 });
       await page.getByRole('button', { name: '自由推演' }).click();
