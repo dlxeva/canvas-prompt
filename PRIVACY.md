@@ -48,12 +48,6 @@ archived page image by its immutable package and page identity when that page's
 compact evidence is insufficient; the complete document and source file bytes
 are not returned through the normal MCP review response.
 
-The built-in Interactive prototype review uses synthetic content only. Its
-events, state snapshots, text feedback, and proposals remain in browser memory
-until explicit discard or page close; an exported JSON copy is user-managed.
-The preview excludes sensitive input values, captures no audio, performs no
-network egress, and cannot open an arbitrary URL or user project.
-
 If you configure a remote or third-party ASR backend, that provider's privacy, retention, and regional processing terms apply. Do not record other people or confidential material without the necessary permission.
 
 ## Host reading and handoff

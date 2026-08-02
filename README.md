@@ -8,7 +8,7 @@
 <h1 align="center">Canvas Prompt</h1>
 
 <p align="center">
-  <a href="https://github.com/dlxeva/canvas-prompt/blob/main/.codex-plugin/plugin.json"><img src="https://img.shields.io/badge/release-v0.1.34-C8462B" alt="release v0.1.34"></a>
+  <a href="https://github.com/dlxeva/canvas-prompt/blob/main/.codex-plugin/plugin.json"><img src="https://img.shields.io/badge/release-v0.1.35-C8462B" alt="release v0.1.35"></a>
   <a href="https://github.com/dlxeva/canvas-prompt/actions/workflows/verify.yml"><img src="https://github.com/dlxeva/canvas-prompt/actions/workflows/verify.yml/badge.svg?branch=main" alt="CI status"></a>
   <img src="https://img.shields.io/badge/runtime-local--first-3A7D44" alt="local-first runtime">
   <img src="https://img.shields.io/badge/verified-macOS%20arm64-147E9E" alt="verified on macOS arm64">
@@ -101,12 +101,6 @@ evidence is insufficient. Before any file is changed, it restates the overall
 goal, global and page-specific changes, items to preserve, unresolved
 ambiguities, and expected output for confirmation. A completed review does not
 authorize execution by itself.
-
-Below the document entry, **Interactive prototype review** opens a built-in
-four-step synthetic web flow. You can use the flow, attach text feedback to its
-clicks and state changes, and watch a fixed visible Agent walkthrough. This
-experimental preview does not open arbitrary URLs or user projects, does not
-capture audio, and keeps every generated suggestion proposal-only.
 
 ### Review an image without translating every mark into prose
 

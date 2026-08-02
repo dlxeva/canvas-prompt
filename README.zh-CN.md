@@ -8,7 +8,7 @@
 <h1 align="center">Canvas Prompt</h1>
 
 <p align="center">
-  <a href="https://github.com/dlxeva/canvas-prompt/blob/main/.codex-plugin/plugin.json"><img src="https://img.shields.io/badge/release-v0.1.34-C8462B" alt="发布版本 v0.1.34"></a>
+  <a href="https://github.com/dlxeva/canvas-prompt/blob/main/.codex-plugin/plugin.json"><img src="https://img.shields.io/badge/release-v0.1.35-C8462B" alt="发布版本 v0.1.35"></a>
   <a href="https://github.com/dlxeva/canvas-prompt/actions/workflows/verify.yml"><img src="https://github.com/dlxeva/canvas-prompt/actions/workflows/verify.yml/badge.svg?branch=main" alt="持续集成状态"></a>
   <img src="https://img.shields.io/badge/runtime-local--first-3A7D44" alt="本地优先运行时">
   <img src="https://img.shields.io/badge/verified-macOS%20arm64-147E9E" alt="已验证 macOS arm64">
@@ -83,11 +83,6 @@ AI 首先读取包含整体要求、页码锚点、批注和语音的紧凑审�
 不足时，才按需读取某一页的归档画面。真正修改文件前，AI 必须先复述整体目标、
 全局与逐页修改、保持不变的内容、未决歧义和预期输出，等待你确认。完成审阅
 本身不代表已经授权执行。
-
-在文档入口下方，**交互原型审阅**会打开一个内置的四步合成网页流程。你可以
-实际操作页面，把文字反馈绑定到点击和状态变化，也可以观看固定的可见 Agent
-演示。这个实验入口不会打开任意网址或用户项目，不采集语音，生成的建议始终
-停留在待确认提案。
 
 ### 批阅图片时，不必把每一笔都翻译成文字
 
