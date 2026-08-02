@@ -113,9 +113,15 @@ describe('Artifact Review process package', () => {
           points: [{ x: 0.1, y: 0.1 }, { x: 0.3, y: 0.3 }],
           voiceWindow: { startMs: 2_100, endMs: 3_000, transcriptSegmentIds: ['voice_001'] },
           bindingStatus: 'confirmed',
+          confirmedAtMs: 3_100,
         }],
       },
       voiceSegments: [{ segmentId: 'voice_001', startMs: 2_100, endMs: 3_000, text: '这个地方要改', confidence: 0.9 }],
+      confirmationLedger: {
+        schema_version: 'artifact-review-confirmation-ledger/0.1-draft',
+        candidates: [{ candidateId: 'candidate_002', pageNumber: 1, annotationId: 'ann_mark_002', transcriptSegmentIds: ['voice_001'], text: '这个地方要改' }],
+        actions: [{ actionId: 'action_confirm_002', candidateId: 'candidate_002', kind: 'confirm', atMs: 3_100 }],
+      },
     })
 
     expect(result.review_state).toEqual({ interpretation_status: 'user_confirmed', execution_authorized: false })
@@ -125,6 +131,46 @@ describe('Artifact Review process package', () => {
 
     const validate = new Ajv2020({ strict: false }).compile(artifactReviewSchema)
     expect(validate(result), JSON.stringify(validate.errors)).toBe(true)
+  })
+
+  it('downgrades a claimed confirmation when it has no replayable ledger credential', () => {
+    const result = buildArtifactReviewPackage({
+      sourceHash: '3'.repeat(64),
+      pages: [{ pageNumber: 1, width: 595, height: 842, rotationDegrees: 0 }],
+      marksByPage: { 1: [{
+        id: 'ann_unproven', kind: 'circle', pageNumber: 1, createdAtMs: 1_000,
+        points: [{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.2 }], bindingStatus: 'confirmed',
+      }] },
+    })
+
+    expect(result.annotations[0]).toEqual(expect.objectContaining({ binding_status: 'clarification_required' }))
+    expect(result.review_state).toEqual({ interpretation_status: 'clarification_required', execution_authorized: false })
+    expect(result.evidence).not.toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'clarification_response' })]))
+  })
+
+  it('does not rebind voice evidence to a confirmed mark on another page', () => {
+    const result = buildArtifactReviewPackage({
+      sourceHash: '4'.repeat(64),
+      pages: [
+        { pageNumber: 1, width: 595, height: 842, rotationDegrees: 0 },
+        { pageNumber: 2, width: 595, height: 842, rotationDegrees: 0 },
+      ],
+      pageVisits: [{ pageNumber: 1, atMs: 0 }],
+      marksByPage: {
+        1: [{ id: 'ann_page_one', kind: 'circle', pageNumber: 1, createdAtMs: 1_000, points: [{ x: 0.1, y: 0.1 }, { x: 0.2, y: 0.2 }] }],
+        2: [{
+          id: 'ann_page_two', kind: 'circle', pageNumber: 2, createdAtMs: 1_000,
+          points: [{ x: 0.3, y: 0.3 }, { x: 0.4, y: 0.4 }], bindingStatus: 'confirmed', confirmedAtMs: 2_000,
+          voiceWindow: { startMs: 1_100, endMs: 1_500, transcriptSegmentIds: ['voice_page_one'] },
+        }],
+      },
+      voiceSegments: [{ segmentId: 'voice_page_one', startMs: 1_100, endMs: 1_500, text: '这个地方要改' }],
+    })
+
+    expect(result.reference_resolutions[0]).toEqual(expect.objectContaining({
+      page_number: 1, annotation_id: 'ann_page_one',
+    }))
+    expect(result.reference_resolutions[0]).not.toEqual(expect.objectContaining({ annotation_id: 'ann_page_two' }))
   })
 
   it('keeps the whole package in clarification when any other mark is unresolved', () => {
@@ -170,6 +216,11 @@ describe('Artifact Review process package', () => {
         { id: 'ann_other', kind: 'circle', pageNumber: 2, createdAtMs: 4_100, points: [{ x: 0.4, y: 0.4 }, { x: 0.5, y: 0.5 }] },
       ] },
       voiceSegments: [{ segmentId: 'voice_ambiguous', startMs: 4_500, endMs: 5_000, text: '这个地方需要调整' }],
+      confirmationLedger: {
+        schema_version: 'artifact-review-confirmation-ledger/0.1-draft',
+        candidates: [{ candidateId: 'candidate_chosen', pageNumber: 2, annotationId: 'ann_chosen', transcriptSegmentIds: ['voice_ambiguous'], text: '这个地方需要调整' }],
+        actions: [{ actionId: 'action_confirm_chosen', candidateId: 'candidate_chosen', kind: 'confirm', atMs: 8_000 }],
+      },
     })
 
     expect(result.reference_resolutions).toEqual([expect.objectContaining({

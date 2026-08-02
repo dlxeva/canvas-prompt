@@ -12,6 +12,7 @@
   "dependencies": {
     "@excalidraw/excalidraw": "^0.18.0",
     "@paddleocr/paddleocr-js": "^0.4.2",
+    "lucide-react": "1.28.0",
     "pdfjs-dist": "6.2.108",
     "perfect-freehand": "1.2.0",
     "react": "18.3.1",

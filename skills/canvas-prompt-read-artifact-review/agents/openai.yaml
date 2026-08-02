@@ -1,0 +1,4 @@
+interface:
+  display_name: "Read Artifact Review"
+  short_description: "Read PDF and PPTX review evidence progressively"
+  default_prompt: "Use $canvas-prompt-read-artifact-review to retrieve and understand the latest PDF or PPTX review."

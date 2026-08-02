@@ -30,6 +30,14 @@ describe('PDF deictic reference resolver', () => {
     ], [{ pageNumber: 1, atMs: 0 }])[0]).toEqual(expect.objectContaining({ status: 'clarification_required' }))
   })
 
+  it('requires clarification when the user changes page during one voice segment', () => {
+    expect(resolvePdfDeicticReferences(marks, [
+      { segmentId: 'voice_cross_page', startMs: 10_500, endMs: 12_500, text: '这个地方要改' },
+    ], [{ pageNumber: 1, atMs: 0 }, { pageNumber: 2, atMs: 11_500 }])[0]).toEqual(expect.objectContaining({
+      status: 'clarification_required', pageNumber: 1,
+    }))
+  })
+
   it('requires clarification instead of reaching back to an old mark', () => {
     expect(resolvePdfDeicticReferences(marks, [
       { segmentId: 'voice_four', startMs: 30_000, endMs: 30_400, text: '这个需要改' },

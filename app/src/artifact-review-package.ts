@@ -1,3 +1,9 @@
+import {
+  replaySerializedReviewConfirmationLedger,
+  type SerializedReviewConfirmationLedger,
+} from './artifact-review-confirmation-ledger'
+import { resolvePdfDeicticReferences } from './artifact-review-reference-resolver'
+
 export type ReviewTool = 'ink' | 'circle' | 'arrow'
 export type ArtifactReviewKind = 'pdf' | 'pptx'
 
@@ -49,6 +55,8 @@ type BuildOptions = {
   marksByPage: Record<number, ReviewMark[]>
   voiceSegments?: ArtifactReviewVoiceSegment[]
   pageVisits?: ArtifactReviewPageVisit[]
+  /** A replayable explicit-user-action credential; mark flags alone are not trusted. */
+  confirmationLedger?: SerializedReviewConfirmationLedger
   createdAt?: Date
 }
 
@@ -80,7 +88,7 @@ function regionFromPoints(points: PagePoint[]) {
  * Unique spatial evidence remains a candidate. A target becomes confirmed
  * only after an explicit user action recorded on the mark itself.
  */
-export function buildArtifactReviewPackage({ sourceHash, artifactKind = 'pdf', renderDerivative, pages, marksByPage, voiceSegments = [], pageVisits = [], createdAt = new Date() }: BuildOptions) {
+export function buildArtifactReviewPackage({ sourceHash, artifactKind = 'pdf', renderDerivative, pages, marksByPage, voiceSegments = [], pageVisits = [], confirmationLedger, createdAt = new Date() }: BuildOptions) {
   if (renderDerivative && artifactKind !== 'pptx') {
     throw new Error('只有 PPTX 批阅可以声明本地 PDF 渲染衍生物。')
   }
@@ -88,10 +96,29 @@ export function buildArtifactReviewPackage({ sourceHash, artifactKind = 'pdf', r
     throw new Error('PPTX 渲染页数必须与批阅页面数量一致。')
   }
   const marks = Object.values(marksByPage).flat()
+  const markById = new Map(marks.map((mark) => [mark.id, mark]))
+  const voiceIds = new Set(voiceSegments.map((segment) => segment.segmentId))
+  const confirmationActionByMarkId = new Map<string, { actionId: string; atMs: number }>()
+  if (confirmationLedger) {
+    const replay = replaySerializedReviewConfirmationLedger(confirmationLedger)
+    const actionById = new Map(replay.effectiveActions.map((action) => [action.actionId, action]))
+    for (const candidate of Object.values(replay.candidates)) {
+      if (candidate.status !== 'confirmed' || !candidate.annotationId || !candidate.lastActionId) continue
+      const action = actionById.get(candidate.lastActionId)
+      const mark = markById.get(candidate.annotationId)
+      if (
+        !action || action.kind !== 'confirm' || action.candidateId !== candidate.candidateId
+        || !mark || mark.pageNumber !== candidate.pageNumber
+        || candidate.transcriptSegmentIds.some((segmentId) => !voiceIds.has(segmentId))
+      ) throw new Error(`确认账本凭据无法验证候选 ${candidate.candidateId}。`)
+      confirmationActionByMarkId.set(mark.id, { actionId: action.actionId, atMs: action.atMs })
+    }
+  }
+  const isExplicitlyConfirmed = (mark: ReviewMark) => confirmationActionByMarkId.has(mark.id)
   const referenceResolutions = resolvePdfDeicticReferences(marks, voiceSegments, pageVisits).map((resolution) => {
     const confirmedMark = marks.find((mark) => (
-      mark.bindingStatus === 'confirmed'
-      && mark.confirmedAtMs !== undefined
+      isExplicitlyConfirmed(mark)
+      && mark.pageNumber === resolution.pageNumber
       && mark.voiceWindow?.transcriptSegmentIds.includes(resolution.voiceSegmentId)
     ))
     if (!confirmedMark) return resolution
@@ -121,7 +148,11 @@ export function buildArtifactReviewPackage({ sourceHash, artifactKind = 'pdf', r
     region: regionFromPoints(mark.points),
     gesture_points: mark.points.map((point) => ({ x_ratio: point.x, y_ratio: point.y })),
     created_at_ms: mark.createdAtMs,
-    binding_status: mark.bindingStatus ?? (linkedSegments.length > 0 ? 'candidate' : 'clarification_required'),
+    binding_status: isExplicitlyConfirmed(mark)
+      ? 'confirmed'
+      : mark.bindingStatus === 'confirmed'
+        ? 'clarification_required'
+        : mark.bindingStatus ?? (linkedSegments.length > 0 ? 'candidate' : 'clarification_required'),
     ...(voiceWindow ? {
       voice_window: {
         start_ms: voiceWindow.startMs,
@@ -132,7 +163,7 @@ export function buildArtifactReviewPackage({ sourceHash, artifactKind = 'pdf', r
     evidence_ids: [
       `ev_${mark.id.slice(4)}`,
       ...(voiceWindow?.transcriptSegmentIds.map((segmentId) => `ev_${segmentId}`) ?? []),
-      ...(mark.bindingStatus === 'confirmed' && mark.confirmedAtMs !== undefined ? [`ev_confirm_${mark.id.slice(4)}`] : []),
+      ...(isExplicitlyConfirmed(mark) ? [`ev_confirm_${mark.id.slice(4)}`] : []),
     ],
   }})
 
@@ -201,12 +232,15 @@ export function buildArtifactReviewPackage({ sourceHash, artifactKind = 'pdf', r
         assertion_level: 'raw',
         time_window_ms: { start_ms: segment.startMs, end_ms: segment.endMs },
       })),
-      ...marks.flatMap((mark) => mark.bindingStatus === 'confirmed' && mark.confirmedAtMs !== undefined ? [{
+      ...marks.flatMap((mark) => isExplicitlyConfirmed(mark) ? [{
         evidence_id: `ev_confirm_${mark.id.slice(4)}`,
         kind: 'clarification_response',
         annotation_id: mark.id,
         assertion_level: 'explicit_user_assertion',
-        time_window_ms: { start_ms: mark.confirmedAtMs, end_ms: mark.confirmedAtMs },
+        time_window_ms: {
+          start_ms: confirmationActionByMarkId.get(mark.id)!.atMs,
+          end_ms: confirmationActionByMarkId.get(mark.id)!.atMs,
+        },
       }] : []),
     ],
     privacy: {
@@ -221,4 +255,3 @@ export function buildArtifactReviewPackage({ sourceHash, artifactKind = 'pdf', r
     },
   }
 }
-import { resolvePdfDeicticReferences } from './artifact-review-reference-resolver'

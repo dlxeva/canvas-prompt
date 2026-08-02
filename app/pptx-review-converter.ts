@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 
@@ -23,9 +24,32 @@ export type PptxReviewConversion = {
 
 type ConvertOptions = {
   sofficePath?: string
+  fontconfigFile?: string | false
   maxBytes?: number
   timeoutMs?: number
   temporaryRoot?: string
+}
+
+const MACOS_FONTCONFIG_CANDIDATES = [
+  '/opt/homebrew/etc/fonts/fonts.conf',
+  '/usr/local/etc/fonts/fonts.conf',
+]
+
+function resolveFontconfigFile(configured: string | false | undefined) {
+  if (configured === false) return undefined
+  if (configured) return configured
+  if (process.env.CANVAS_PROMPT_FONTCONFIG_FILE) return process.env.CANVAS_PROMPT_FONTCONFIG_FILE
+  if (process.platform !== 'darwin') return undefined
+  return MACOS_FONTCONFIG_CANDIDATES.find((candidate) => existsSync(candidate))
+}
+
+function rendererEnvironment(fontconfigFile: string | undefined) {
+  if (!fontconfigFile) return process.env
+  return {
+    ...process.env,
+    FONTCONFIG_FILE: fontconfigFile,
+    FONTCONFIG_PATH: dirname(fontconfigFile),
+  }
 }
 
 function sha256(bytes: Uint8Array) {
@@ -66,7 +90,7 @@ function validatePptxContainer(bytes: Uint8Array) {
       throw new Error('PPTX ZIP 目录损坏。')
     }
     const flags = view.getUint16(cursor + 8, true)
-    if ((flags & 0x0001) !== 0) throw new Error('PPTX 文件已加密，当前无法本地批阅。')
+    if ((flags & 0x0001) !== 0) throw new Error('PPTX 文件已加密，当前无法进行交互审阅。')
     const fileNameLength = view.getUint16(cursor + 28, true)
     const extraLength = view.getUint16(cursor + 30, true)
     const commentLength = view.getUint16(cursor + 32, true)
@@ -80,7 +104,7 @@ function validatePptxContainer(bytes: Uint8Array) {
     throw new Error('ZIP 容器不包含有效的 PPTX 结构。')
   }
   if (![...entryNames].some((name) => /^ppt\/slides\/slide[1-9]\d*\.xml$/.test(name))) {
-    throw new Error('PPTX 不包含可批阅页面。')
+    throw new Error('PPTX 不包含可审阅页面。')
   }
 }
 
@@ -115,6 +139,7 @@ export async function convertPptxForReview(
   sourceBytes: Uint8Array,
   {
     sofficePath = process.env.CANVAS_PROMPT_SOFFICE_BIN || 'soffice',
+    fontconfigFile,
     maxBytes = DEFAULT_MAX_PPTX_BYTES,
     timeoutMs = DEFAULT_PPTX_CONVERSION_TIMEOUT_MS,
     temporaryRoot = tmpdir(),
@@ -128,6 +153,7 @@ export async function convertPptxForReview(
   const sourcePath = join(workDir, 'source.pptx')
   const profilePath = join(workDir, 'profile')
   const expectedPdfPath = join(workDir, 'source.pdf')
+  const resolvedFontconfigFile = resolveFontconfigFile(fontconfigFile)
   try {
     await writeFile(sourcePath, sourceBytes)
     try {
@@ -142,6 +168,7 @@ export async function convertPptxForReview(
       ], {
         timeout: timeoutMs,
         maxBuffer: 1024 * 1024,
+        env: rendererEnvironment(resolvedFontconfigFile),
       })
     } catch (error) {
       throw normalizeRendererFailure(error)

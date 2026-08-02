@@ -21,6 +21,12 @@ function activePageAt(pageVisits: PdfPageVisit[], atMs: number) {
     .at(-1)?.pageNumber
 }
 
+function changesPageDuring(pageVisits: PdfPageVisit[], startMs: number, endMs: number, startPage: number) {
+  return pageVisits.some((visit) => (
+    visit.atMs > startMs && visit.atMs <= endMs && visit.pageNumber !== startPage
+  ))
+}
+
 /** The candidate set is evidence, never an implicit choice. */
 export function findPdfReferenceCandidates(
   marks: ReviewMark[],
@@ -51,6 +57,15 @@ export function resolvePdfDeicticReferences(
       const { pageNumber, marks: candidates } = findPdfReferenceCandidates(marks, pageVisits, segment)
       if (pageNumber === undefined) return []
       const evidenceIds = [`ev_${segment.segmentId}`]
+      if (changesPageDuring(pageVisits, segment.startMs, segment.endMs, pageNumber)) {
+        return {
+          resolutionId: `ref_${segment.segmentId.slice('voice_'.length)}`,
+          voiceSegmentId: segment.segmentId,
+          pageNumber,
+          status: 'clarification_required' as const,
+          evidenceIds,
+        }
+      }
       if (candidates.length === 1 && pageNumber !== undefined) {
         const annotation = candidates[0]
         return {

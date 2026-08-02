@@ -50,7 +50,7 @@ function syntheticPptx({
   return Buffer.concat([...localParts, centralDirectory, eocd])
 }
 
-async function fakeSoffice(root: string, mode: 'success' | 'no-output' | 'failure' | 'slow' | 'echo-source' = 'success') {
+async function fakeSoffice(root: string, mode: 'success' | 'no-output' | 'failure' | 'slow' | 'echo-source' | 'echo-fontconfig' = 'success') {
   const script = join(root, `fake-soffice-${mode}.mjs`)
   await writeFile(script, `#!/usr/bin/env node
 import { copyFile, readFile, writeFile } from 'node:fs/promises'
@@ -71,6 +71,9 @@ await new Promise((resolve) => setTimeout(resolve, 500))
 const outputDir = args[args.indexOf('--outdir') + 1]
 const source = await readFile(args.at(-1))
 await writeFile(outputDir + '/source.pdf', Buffer.concat([Buffer.from('%PDF-1.4\\n'), source, Buffer.from('\\n%%EOF\\n')]))
+` : mode === 'echo-fontconfig' ? `
+const outputDir = args[args.indexOf('--outdir') + 1]
+await writeFile(outputDir + '/source.pdf', Buffer.from('%PDF-1.4\\n' + (process.env.FONTCONFIG_FILE || 'missing') + '\\n%%EOF\\n'))
 ` : ''}
 `)
   await writeFile(join(root, 'fixture.pdf'), Buffer.from('%PDF-1.4\n%%EOF\n'))
@@ -94,6 +97,21 @@ describe('PPTX review converter', () => {
     await expect(access(join(root, 'source.pptx'))).rejects.toThrow()
   })
 
+  it('passes an explicit macOS fontconfig to the isolated renderer', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'pptx-fontconfig-test-'))
+    const sofficePath = await fakeSoffice(root, 'echo-fontconfig')
+    const fontconfigFile = join(root, 'fonts.conf')
+
+    const result = await convertPptxForReview(syntheticPptx(), {
+      sofficePath,
+      fontconfigFile,
+      temporaryRoot: root,
+    })
+
+    expect(result.pdfBytes.toString('utf8')).toContain(fontconfigFile)
+    expect((await readdir(root)).filter((name) => name.startsWith('canvas-prompt-pptx-'))).toEqual([])
+  })
+
   it('rejects empty, oversized and non-ZIP inputs before running the renderer', async () => {
     await expect(convertPptxForReview(new Uint8Array())).rejects.toThrow('PPTX 文件为空')
     await expect(convertPptxForReview(syntheticPptx(), { maxBytes: 4 })).rejects.toThrow('PPTX 文件超过')
@@ -104,7 +122,7 @@ describe('PPTX review converter', () => {
     await expect(convertPptxForReview(Buffer.from([0x50, 0x4b, 0x03, 0x04]))).rejects.toThrow('PPTX ZIP 目录损坏')
     await expect(convertPptxForReview(syntheticPptx({ includePresentation: false }))).rejects.toThrow('不包含有效的 PPTX 结构')
     await expect(convertPptxForReview(syntheticPptx({ encrypted: true }))).rejects.toThrow('PPTX 文件已加密')
-    await expect(convertPptxForReview(syntheticPptx({ includeSlide: false }))).rejects.toThrow('PPTX 不包含可批阅页面')
+    await expect(convertPptxForReview(syntheticPptx({ includeSlide: false }))).rejects.toThrow('PPTX 不包含可审阅页面')
   })
 
   it('cleans the isolated directory when the renderer produces no PDF', async () => {
