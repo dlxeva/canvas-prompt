@@ -205,6 +205,7 @@ export default function App() {
 
   const beginTrace = async () => {
     if (recording || sessionStage === 'compiling') return
+    const speechLanguage = locale === 'en' ? 'en' : 'zh'
     setSessionStage('starting')
     setWorkflowMessage('正在准备本次推演…')
     setAsrProgress({ completed: 0, pending: 0, failed: 0, active: 0 })
@@ -240,7 +241,7 @@ export default function App() {
       if (stream && typeof MediaRecorder !== 'undefined') {
         windowedAsrRef.current = new WindowedAsrSession({
           stream,
-          language: 'zh-CN',
+          language: speechLanguage === 'en' ? 'en-US' : 'zh-CN',
           windowMs: 25_000,
           overlapMs: 3_000,
           onProgress: setAsrProgress,
@@ -250,7 +251,7 @@ export default function App() {
         setWorkflowMessage('推演中 · 画、圈、移动，也可以直接说。语音会在后台分段整理。')
       } else {
         // Fallback for browsers without a second MediaRecorder stream.
-        transcriberRef.current = new VoiceTranscriber({ strategy: 'doubao-asr', language: 'zh', asrServerUrl: 'http://localhost:8080' })
+        transcriberRef.current = new VoiceTranscriber({ strategy: 'doubao-asr', language: speechLanguage, asrServerUrl: 'http://localhost:8080' })
         await transcriberRef.current.start()
         setWorkflowMessage('推演中 · 画、圈、移动，也可以直接说。')
       }
@@ -262,6 +263,7 @@ export default function App() {
 
   const finishTrace = async () => {
     if (!recording || !startedAt) return
+    const speechLanguage = locale === 'en' ? 'en' : 'zh'
     setRecording(false)
     setEvents([...trace.current])
     setSessionStage('compiling')
@@ -295,10 +297,15 @@ export default function App() {
       }
       // Do not export a partial timeline just because some windows succeeded.
       // The raw archival recording is the authoritative recovery source.
-      if ((!transcript?.text || backgroundSession?.hasFailures()) && audio?.blob) {
-        if (backgroundSession?.hasFailures()) setWorkflowMessage('少量语音片段需要回退补齐…')
+      const requiresFullAsrRecovery = Boolean(backgroundSession?.hasFailures())
+      // A successful subset of windows is not a complete transcript. Clear it
+      // before fallback so a failed full-file retry cannot silently export a
+      // partial result as if it were authoritative.
+      if (requiresFullAsrRecovery) transcript = null
+      if ((!transcript?.text || requiresFullAsrRecovery) && audio?.blob) {
+        if (requiresFullAsrRecovery) setWorkflowMessage('少量语音片段需要回退补齐…')
         try {
-          const result = await asrClient.transcribe(audio.blob, 'zh')
+          const result = await asrClient.transcribe(audio.blob, speechLanguage)
           transcript = {
             text: result.text,
             segments: result.segments.map((segment) => ({ text: segment.text, startMs: segment.start * 1000, endMs: segment.end * 1000, confidence: segment.confidence, isFinal: true })),
@@ -556,6 +563,19 @@ export default function App() {
     }
   }
 
+  const importNativeMacImage = async (board: 'general' | 'drag') => {
+    try {
+      const response = await fetch(`/api/native-pasteboard-image?board=${board}`, { cache: 'no-store' })
+      if (!response.ok) return false
+      const blob = await response.blob()
+      if (!blob.type.startsWith('image/')) return false
+      await importImageFile(new File([blob], 'Codex 图片.png', { type: blob.type }))
+      return true
+    } catch {
+      return false
+    }
+  }
+
   const droppedImageSource = (transfer: DataTransfer) => {
     const uri = transfer.getData('text/uri-list').split('\n').map((line) => line.trim()).find((line) => line && !line.startsWith('#'))
     if (uri) return uri
@@ -593,17 +613,41 @@ export default function App() {
       void importDroppedImageSource(source)
     } else {
       const types = Array.from(event.dataTransfer.types).join('、') || '无可读拖拽类型'
-      setImageNotice(`Codex 没有交付可读取的图片数据（${types}）。请改用“导入图片”。`)
+      setImageNotice('正在读取 Codex 的原生拖拽图片…')
+      void importNativeMacImage('drag').then((imported) => {
+        if (!imported) setImageNotice(`未能读取 Codex 的原生拖拽图片（${types}）。`)
+      })
     }
   }
 
   const handleExternalPaste = (event: React.ClipboardEvent<HTMLElement>) => {
+    // Window capture owns paste so Excalidraw cannot consume a context-menu
+    // paste before our importer sees it.
+    if (event.defaultPrevented) return
+    // Do not let Excalidraw run its own paste after our importer has claimed
+    // the clipboard; otherwise one Cmd+V produces two independent images.
+    event.preventDefault()
+    event.stopPropagation()
     const file = Array.from(event.clipboardData.files).find((candidate) => candidate.type.startsWith('image/'))
     const source = file ? null : droppedImageSource(event.clipboardData)
-    if (!file && !source) return
+    if (file) {
+      void importImageFile(file)
+    } else if (source) {
+      void importDroppedImageSource(source)
+    } else {
+      setImageNotice('正在读取 Codex 的原生剪贴板图片…')
+      void importNativeMacImage('general').then((imported) => {
+        if (!imported) setImageNotice('剪贴板中没有可导入的原生图片。')
+      })
+    }
+  }
+
+  const handleCanvasContextMenu = (event: React.MouseEvent<HTMLElement>) => {
+    // The stock Excalidraw menu creates a second, unreliable image-import path
+    // in the Codex host. Keep one explicit contract: copy in Codex, then ⌘V.
     event.preventDefault()
-    if (file) void importImageFile(file)
-    else if (source) void importDroppedImageSource(source)
+    event.stopPropagation()
+    setImageNotice(locale === 'zh' ? '请使用 ⌘V 粘贴图片。' : 'Use ⌘V to paste an image.')
   }
 
   const changeZoom = (factor: number) => {
@@ -744,6 +788,7 @@ export default function App() {
         onDragLeave={() => setImageDropActive(false)}
         onDropCapture={handleExternalDrop}
         onPasteCapture={handleExternalPaste}
+        onContextMenuCapture={handleCanvasContextMenu}
       >
         <nav
           className={toolsCollapsed ? 'canvas-tools collapsed' : 'canvas-tools'}
@@ -825,7 +870,10 @@ export default function App() {
           onChange={handleChange}
           initialData={{ appState: { currentItemStrokeColor: strokeColors[0], currentItemStrokeWidth: 1 } }}
           UIOptions={{
-            tools: { image: false },
+            // The native Excalidraw image tool remains visually hidden by our
+            // custom shell, but must stay enabled: its capability gate also
+            // protects programmatic image elements created by paste/drop/import.
+            tools: { image: true },
             canvasActions: {
               changeViewBackgroundColor: false,
               clearCanvas: false,

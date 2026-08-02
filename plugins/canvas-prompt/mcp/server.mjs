@@ -12,9 +12,9 @@
  * 参考 Cowart 的 MCP 实现模式。
  */
 
-import { createReadStream, existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { createInterface } from 'node:readline';
+import { createMessageFramer } from './stdio-framer.mjs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -843,69 +843,16 @@ async function handleRequest(req) {
 // ============================================================
 
 function startServer() {
-  let buffer = '';
+  const transport = createMessageFramer(
+    (req) => {
+      handleRequest(req).catch((err) => {
+        if (req.id !== undefined) error(req.id, -32603, `Internal error: ${err.message}`);
+      });
+    },
+    () => send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }),
+  );
 
-  process.stdin.setEncoding('utf-8');
-
-  process.stdin.on('data', (chunk) => {
-    buffer += chunk;
-
-    while (buffer.length > 0) {
-      // 查找 Content-Length 头（MCP 标准协议）
-      const headerEnd = buffer.indexOf('\r\n\r\n');
-      if (headerEnd !== -1) {
-        const header = buffer.substring(0, headerEnd);
-        const match = header.match(/Content-Length:\s*(\d+)/i);
-        if (match) {
-          const contentLength = parseInt(match[1], 10);
-          const bodyStart = headerEnd + 4;
-
-          if (Buffer.byteLength(buffer.substring(bodyStart), 'utf-8') < contentLength) {
-            break; // 数据不完整，等待更多
-          }
-
-          const body = buffer.substring(bodyStart, bodyStart + contentLength);
-          buffer = buffer.substring(bodyStart + contentLength);
-
-          try {
-            const req = JSON.parse(body);
-            handleRequest(req).catch((err) => {
-              if (req.id !== undefined) {
-                error(req.id, -32603, `Internal error: ${err.message}`);
-              }
-            });
-          } catch {
-            send({
-              jsonrpc: '2.0',
-              id: null,
-              error: { code: -32700, message: 'Parse error' },
-            });
-          }
-          continue;
-        }
-      }
-
-      // 回退：按行解析（兼容简单 JSON-RPC 输入）
-      const newlineIdx = buffer.indexOf('\n');
-      if (newlineIdx === -1) break;
-
-      const line = buffer.substring(0, newlineIdx).trim();
-      buffer = buffer.substring(newlineIdx + 1);
-
-      if (line) {
-        try {
-          const req = JSON.parse(line);
-          handleRequest(req).catch((err) => {
-            if (req.id !== undefined) {
-              error(req.id, -32603, `Internal error: ${err.message}`);
-            }
-          });
-        } catch {
-          // 忽略无法解析的行
-        }
-      }
-    }
-  });
+  process.stdin.on('data', (chunk) => transport.push(chunk));
 
   process.stdin.on('end', () => {
     process.exit(0);

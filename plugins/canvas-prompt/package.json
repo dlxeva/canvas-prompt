@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "npm --prefix app run dev",
     "build": "npm --prefix app run build",
-    "test": "npm --prefix app run test"
+    "test:mcp": "node --test mcp/*.test.mjs",
+    "test": "npm run test:mcp && npm --prefix app run test"
   }
 }
