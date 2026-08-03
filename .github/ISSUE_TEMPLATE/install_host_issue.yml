@@ -1,0 +1,107 @@
+name: Installation or host issue / 安装或宿主问题
+description: Report installation, Codex Desktop, MCP, or local dependency trouble. / 报告安装、Codex Desktop、MCP 或本地依赖问题。
+title: "[Install/Host] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for setup and host-integration problems.
+
+        Remove credentials, tokens, private canvas data, recordings,
+        transcripts, Prompt Packages, and sensitive screenshot content before
+        posting.
+
+        中文摘要：此表单用于安装和宿主集成问题。发布前请删除凭据、Token、私有画布、录音、转写、Prompt Package 和敏感截图。
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit / 版本或提交
+      description: Use the published version or exact commit, for example v0.1.35. / 请填写公开版本或精确提交，例如 v0.1.35。
+      placeholder: v0.1.35
+    validations:
+      required: true
+
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host or surface / 宿主或界面
+      options:
+        - Codex Desktop
+        - Other MCP-capable terminal / 其他 MCP 宿主
+        - Canvas Prompt local setup / Canvas Prompt 本地设置
+        - PDF Interactive Review / PDF 交互审阅
+        - PPTX Interactive Review / PPTX 交互审阅
+        - Other / 其他
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and architecture / 操作系统与架构
+      placeholder: macOS 15.x, arm64
+    validations:
+      required: true
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where did it fail? / 哪个阶段失败？
+      options:
+        - Marketplace or plugin add / 添加 Marketplace 或插件
+        - Opening Canvas Prompt / 打开 Canvas Prompt
+        - Starting a board session / 开始白板会话
+        - Explicit continuation or MCP read / 显式续接或 MCP 读取
+        - Local speech setup / 本地语音设置
+        - PDF review / PDF 审阅
+        - PPTX review or LibreOffice discovery / PPTX 审阅或 LibreOffice 发现
+        - Other / 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps / 复现步骤
+      description: Include the command or UI sequence without private paths or data. / 请提供命令或界面操作顺序，不要包含私有路径或数据。
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Choose ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result / 预期结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result / 实际结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized command output or evidence / 脱敏命令输出或证据
+      description: Redact usernames, absolute paths, tokens, private file names, and local content. Do not attach Prompt Packages or recordings. / 请脱敏用户名、绝对路径、Token、私有文件名和本地内容，不要附加 Prompt Package 或录音。
+      render: shell
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Public-data check / 公开数据检查
+      options:
+        - label: I removed credentials, private canvas data, recordings, transcripts, Prompt Packages, sensitive screenshots, and machine-specific paths. / 我已删除凭据、私有画布、录音、转写、Prompt Package、敏感截图和机器特有路径。
+          required: true
+        - label: I am reporting a published version or have clearly identified a local build. / 我报告的是公开版本，或已明确标出本地构建。
+          required: true
