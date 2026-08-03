@@ -1,0 +1,83 @@
+name: Documentation issue / 文档问题
+description: Report unclear, missing, or incorrect public documentation. / 报告不清楚、缺失或错误的公开文档。
+title: "[Docs] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Documentation reports help keep the public installation and capability
+        boundary accurate. Please do not include private project material.
+
+        中文摘要：文档报告用于保持公开安装说明和能力边界准确。请勿包含私有项目材料。
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit / 版本或提交
+      description: Use the published version or exact commit, or write not applicable. / 请填写公开版本或精确提交；不适用时填写 not applicable。
+      placeholder: v0.1.35, or not applicable
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Host or workflow / 宿主或工作流
+      description: Name the host or write not applicable if the issue is general documentation. / 请填写宿主；通用文档问题可填写 not applicable。
+      placeholder: Codex Desktop, PDF review, or not applicable
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: Documentation location / 文档位置
+      description: Give the public URL or file path and section heading. / 请提供公开 URL 或文件路径及章节标题。
+      placeholder: README.md, Try it in Codex Desktop
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction or reading steps / 复现或阅读步骤
+      description: Explain how a reader reaches the unclear or incorrect statement. / 请说明读者如何遇到不清楚或错误的表述。
+      placeholder: |
+        1. Open ...
+        2. Follow ...
+        3. The instruction says ...
+        4. The result is ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: What is unclear or incorrect? / 哪些内容不清楚或不正确？
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggested_change
+    attributes:
+      label: Suggested clarification / 建议如何澄清
+      description: Suggest wording or an example that stays within the published v0.1.35 boundary. / 请提出符合公开 v0.1.35 边界的措辞或示例。
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence / 脱敏证据
+      description: Include a public link, command output, or short text example. Do not upload private screenshots, recordings, Prompt Packages, or sensitive content. / 请提供公开链接、命令输出或简短文字示例，不要上传私有截图、录音、Prompt Package 或敏感内容。
+      render: text
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Public-data check / 公开数据检查
+      options:
+        - label: I removed credentials, private canvas data, recordings, transcripts, Prompt Packages, sensitive screenshots, and machine-specific paths. / 我已删除凭据、私有画布、录音、转写、Prompt Package、敏感截图和机器特有路径。
+          required: true

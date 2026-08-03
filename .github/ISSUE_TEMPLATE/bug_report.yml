@@ -1,0 +1,96 @@
+name: Bug report / Bug 报告
+description: Report a reproducible problem in a published Canvas Prompt version. / 报告公开 Canvas Prompt 版本中的可复现问题。
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve Canvas Prompt.
+
+        Please use a published version when possible. Remove credentials,
+        private canvas data, recordings, transcripts, Prompt Packages, and
+        sensitive screenshot content before posting.
+
+        中文摘要：请尽量使用公开版本报告可复现问题。发布前请删除凭据、私有画布、录音、转写、Prompt Package 和敏感截图。
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit / 版本或提交
+      description: Use the published version or exact commit, for example v0.1.35. / 请填写公开版本或精确提交，例如 v0.1.35。
+      placeholder: v0.1.35
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Host integration / 宿主集成
+      description: Name the host used for the report. / 请填写报告所使用的宿主。
+      placeholder: Codex Desktop, or another MCP-capable terminal
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and architecture / 操作系统与架构
+      placeholder: macOS 15.x, arm64
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps / 复现步骤
+      description: Give the smallest sequence that reproduces the problem. Do not include private material. / 请提供能复现问题的最短步骤，不要包含私有材料。
+      placeholder: |
+        1. Install ...
+        2. Open ...
+        3. Choose ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / 预期行为
+      description: What should the published version do? / 公开版本应该如何表现？
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior / 实际行为
+      description: What happened instead? Include a concise error message when available. / 实际发生了什么？如有错误信息，请提供简短版本。
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence / 脱敏证据
+      description: Paste redacted logs or a minimal text description. Do not upload recordings, Prompt Packages, private whiteboards, credentials, or sensitive screenshots. / 请粘贴脱敏日志或最小文字说明，不要上传录音、Prompt Package、私有白板、凭据或敏感截图。
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context / 补充信息
+      description: Add only context that is safe to make public. / 只添加适合公开的背景信息。
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Public-data check / 公开数据检查
+      options:
+        - label: I removed credentials, private canvas data, recordings, transcripts, Prompt Packages, sensitive screenshots, and machine-specific paths. / 我已删除凭据、私有画布、录音、转写、Prompt Package、敏感截图和机器特有路径。
+          required: true
+        - label: I understand that this issue is public and that maintainers may ask for a private reproduction path for security-sensitive details. / 我理解此 Issue 公开可见，安全敏感细节可能需要转到私密复现渠道。
+          required: true

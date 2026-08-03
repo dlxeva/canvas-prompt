@@ -1,0 +1,102 @@
+name: Feature proposal / 功能提案
+description: Propose a scoped workflow improvement with a concrete user need. / 围绕具体用户需求提出范围明确的工作流改进。
+title: "[Proposal] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature proposals are evaluated as workflow questions. A proposal is
+        not a commitment or a statement that the capability already exists.
+        Keep examples public, minimal, and free of private material.
+
+        中文摘要：功能提案会按工作流需求评估。提案不代表实现承诺，也不代表能力已经存在。示例应公开、最小且不含私有材料。
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit used / 使用的版本或提交
+      description: Name the published version you used, or write not applicable if this is a new workflow. / 请填写使用的公开版本；新工作流可填写 not applicable。
+      placeholder: v0.1.35, or not applicable
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Host or workflow / 宿主或工作流
+      description: Name the host or workflow used. / 请填写使用的宿主或工作流。
+      placeholder: Codex Desktop, PDF review, or another MCP-capable terminal
+    validations:
+      required: true
+
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Scenario steps / 场景步骤
+      description: Describe the smallest real workflow that exposes the need. / 请描述暴露需求的最小真实工作流。
+      placeholder: |
+        1. I start with ...
+        2. I need to ...
+        3. I currently ...
+        4. The limitation appears when ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem and desired outcome / 用户问题与期望结果
+      description: Describe the work that should become easier and how you would observe improvement. / 请说明需要变得更容易的工作，以及如何观察到改进。
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Current workaround / 当前替代方案
+      description: Include the current manual steps, if any. / 如有，请写出当前手动步骤。
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change / 建议改动
+      description: Keep the proposal concrete. Do not assume a particular implementation. / 请保持提案具体，不要预设特定实现方式。
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Evidence and acceptance signal / 证据与验收信号
+      description: Explain what a maintainer could verify. Use sanitized public evidence only. / 请说明维护者可以验证什么，只使用脱敏公开证据。
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and constraints / 替代方案与约束
+      description: Include privacy, local-first, host, performance, or compatibility constraints. / 请说明隐私、本地优先、宿主、性能或兼容性约束。
+    validations:
+      required: false
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence / 脱敏证据
+      description: Add a public link or short text example. Do not upload credentials, private canvas data, recordings, transcripts, Prompt Packages, or sensitive screenshots. / 请添加公开链接或简短文字示例，不要上传凭据、私有画布、录音、转写、Prompt Package 或敏感截图。
+      render: text
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Public-data check / 公开数据检查
+      options:
+        - label: I removed credentials, private canvas data, recordings, transcripts, Prompt Packages, sensitive screenshots, and machine-specific paths. / 我已删除凭据、私有画布、录音、转写、Prompt Package、敏感截图和机器特有路径。
+          required: true
+        - label: I understand that this proposal records a need for discussion and is not a promise of implementation. / 我理解此提案记录的是待讨论需求，不构成实现承诺。
+          required: true
