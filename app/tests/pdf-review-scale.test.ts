@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { reviewPageScale } from '../src/pdf-review-scale'
+import { reviewCompactStageHeight, reviewPageScale } from '../src/pdf-review-scale'
 
 describe('responsive Artifact Review page scale', () => {
   it('fits a wide page into a narrow sidebar at the 100% baseline', () => {
@@ -24,5 +24,17 @@ describe('responsive Artifact Review page scale', () => {
 
   it('keeps the explicit zoom multiplier when the viewport is resized', () => {
     expect(reviewPageScale(1000, 562.5, 1500, 843.75, 120)).toBeCloseTo(1.8)
+  })
+
+  it('shrinks a width-constrained default stage to the rendered page height', () => {
+    expect(reviewCompactStageHeight(662, 50, 1002, 100)).toBe(712)
+  })
+
+  it('keeps a height-constrained portrait stage available for scrolling', () => {
+    expect(reviewCompactStageHeight(952, 50, 1002, 100)).toBeNull()
+  })
+
+  it('does not replace an explicit zoom stage with compact-fit behavior', () => {
+    expect(reviewCompactStageHeight(662, 50, 1002, 120)).toBeNull()
   })
 })
