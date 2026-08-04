@@ -65,7 +65,7 @@ def compile_runtime_package(input_path: Path, output_dir: Path) -> dict[str, Any
             "object_count": len(process_ir.get("objects", [])),
             "structural_observation_count": sum(
                 len(process_ir.get(field, []))
-                for field in ("reference_candidates", "ink_relation_candidates", "ink_circle_candidates", "ink_arrowhead_candidates", "ink_cross_candidates", "ink_check_candidates", "paired_symbol_choice_candidates", "ink_annotation_candidates", "visual_unit_candidates")
+                for field in ("reference_candidates", "ink_relation_candidates", "ink_circle_candidates", "ink_region_candidates", "ink_arrowhead_candidates", "ink_cross_candidates", "ink_check_candidates", "paired_symbol_choice_candidates", "ink_annotation_candidates", "visual_unit_candidates")
             ),
             "semantic_event_count": len(compact.get("semantic_events", [])),
         },
