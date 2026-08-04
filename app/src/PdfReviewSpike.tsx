@@ -45,7 +45,7 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
   const [pages, setPages] = useState<ArtifactReviewPage[]>([])
   const [pageNumber, setPageNumber] = useState(1)
   const [zoomPercent, setZoomPercent] = useState(100)
-  const [stageContentWidth, setStageContentWidth] = useState(0)
+  const [stageContentSize, setStageContentSize] = useState({ width: 0, height: 0 })
   const [loading, setLoading] = useState(false)
   const [rendering, setRendering] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -92,14 +92,18 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
   useLayoutEffect(() => {
     const stage = stageScrollRef.current
     if (!documentHandle || !stage) return
-    const updateWidth = () => {
+    const updateSize = () => {
       const styles = window.getComputedStyle(stage)
       const horizontalPadding = Number.parseFloat(styles.paddingLeft) + Number.parseFloat(styles.paddingRight)
-      const nextWidth = Math.max(1, stage.clientWidth - horizontalPadding)
-      setStageContentWidth((current) => Math.abs(current - nextWidth) < 1 ? current : nextWidth)
+      const verticalPadding = Number.parseFloat(styles.paddingTop) + Number.parseFloat(styles.paddingBottom)
+      const nextSize = {
+        width: Math.max(1, stage.clientWidth - horizontalPadding),
+        height: Math.max(1, stage.clientHeight - verticalPadding),
+      }
+      setStageContentSize((current) => Math.abs(current.width - nextSize.width) < 1 && Math.abs(current.height - nextSize.height) < 1 ? current : nextSize)
     }
-    updateWidth()
-    const observer = new ResizeObserver(updateWidth)
+    updateSize()
+    const observer = new ResizeObserver(updateSize)
     observer.observe(stage)
     return () => observer.disconnect()
   }, [documentHandle])
@@ -137,7 +141,7 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
   }, [artifactKind, marksByPage, pages, pageVisits, renderDerivative, sourceHash, voiceSegments])
 
   useEffect(() => {
-    if (!documentHandle || !canvasRef.current || stageContentWidth <= 0) return
+    if (!documentHandle || !canvasRef.current || stageContentSize.width <= 0 || stageContentSize.height <= 0) return
 
     let cancelled = false
     let renderTask: ReturnType<Awaited<ReturnType<PDFDocumentProxy['getPage']>>['render']> | null = null
@@ -150,7 +154,7 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
         const page = await documentHandle.getPage(pageNumber)
         if (cancelled) return
         const baseViewport = page.getViewport({ scale: 1 })
-        const viewport = page.getViewport({ scale: reviewPageScale(baseViewport.width, stageContentWidth, zoomPercent) })
+        const viewport = page.getViewport({ scale: reviewPageScale(baseViewport.width, baseViewport.height, stageContentSize.width, stageContentSize.height, zoomPercent) })
         const pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_RENDER_SCALE)
         if (!canvas.getContext('2d', { alpha: false })) throw new Error('当前浏览器无法建立 PDF 渲染画布。')
         canvas.width = Math.max(1, Math.floor(viewport.width * pixelRatio))
@@ -180,7 +184,7 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
       cancelled = true
       renderTask?.cancel()
     }
-  }, [documentHandle, pageNumber, stageContentWidth, zoomPercent])
+  }, [documentHandle, pageNumber, stageContentSize, zoomPercent])
 
   const chooseFile = async (file: File | undefined) => {
     if (!file) return

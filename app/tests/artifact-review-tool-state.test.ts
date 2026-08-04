@@ -9,8 +9,15 @@ describe('Artifact Review selected tool styling', () => {
 
   it('keeps the zoomed review stage pannable without exposing native scrollbars', () => {
     const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
-    expect(styles).toContain('.artifact-review-stage-scroll { min-height: 420px; overflow: auto;')
+    expect(styles).toContain('.artifact-review-stage-scroll { width: 100%; min-height: 0; min-width: 0; height: 100%; flex: 1 1 auto; overflow: auto;')
     expect(styles).toContain('scrollbar-width: none;')
     expect(styles).toContain('.artifact-review-stage-scroll::-webkit-scrollbar { width: 0; height: 0; }')
+  })
+
+  it('lets the stage occupy the remaining viewport below the toolbar', () => {
+    const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
+    expect(styles).toContain('.artifact-review-content { display: flex;')
+    expect(styles).toContain('.artifact-review-shell { display: flex; height: 100dvh;')
+    expect(styles).toContain('.artifact-review-stage-shell { position: relative; display: flex;')
   })
 })

@@ -37,16 +37,12 @@ function stream(content) {
   return `<< /Length ${Buffer.byteLength(content, 'binary')} >>\nstream\n${content}\nendstream`;
 }
 
-function twoPagePdf() {
-  const pageOne = 'BT /F1 24 Tf 72 700 Td (Canvas Prompt Page One) Tj ET';
-  const pageTwo = 'BT /F1 24 Tf 72 700 Td (Canvas Prompt Page Two) Tj ET';
+function pdfWithPages(pageWidth, pageHeight, labels) {
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>',
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents 5 0 R >>',
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>',
-    stream(pageOne),
-    stream(pageTwo),
+    `<< /Type /Pages /Kids [${labels.map((_, index) => `${index + 3} 0 R`).join(' ')}] /Count ${labels.length} >>`,
+    ...labels.map((_, index) => `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 ${labels.length + 5} 0 R >> >> /Contents ${labels.length + 3 + index} 0 R >>`),
+    ...labels.map((label) => stream(`BT /F1 24 Tf 72 ${Math.max(72, pageHeight - 92)} Td (${label}) Tj ET`)),
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
   ];
   let body = '%PDF-1.4\n';
@@ -62,10 +58,18 @@ function twoPagePdf() {
   return Buffer.from(body, 'binary');
 }
 
+function twoPagePdf() {
+  return pdfWithPages(612, 792, ['Canvas Prompt Page One', 'Canvas Prompt Page Two']);
+}
+
+function widePagePdf() {
+  return pdfWithPages(960, 540, ['Canvas Prompt Widescreen Page']);
+}
+
 function scenarioFromArgs() {
   const index = process.argv.indexOf('--scenario');
   const scenario = index === -1 ? 'handoff' : process.argv[index + 1];
-  if (!['entry', 'handoff', 'visual-failure'].includes(scenario)) {
+  if (!['entry', 'handoff', 'visual-failure', 'responsive'].includes(scenario)) {
     throw new Error(`Unknown scenario: ${scenario ?? '(missing)'}`);
   }
   return scenario;
@@ -148,7 +152,7 @@ async function main() {
   const pdfPath = resolve(project, 'runtime-evidence.pdf');
   await mkdir(home, { recursive: true });
   await mkdir(project, { recursive: true });
-  await writeFile(pdfPath, twoPagePdf());
+  await writeFile(pdfPath, scenario === 'responsive' ? widePagePdf() : twoPagePdf());
   const port = await availablePort();
   const origin = `http://127.0.0.1:${port}`;
   const vite = spawn('npm', ['--prefix', 'app', 'run', 'dev', '--', '--port', String(port), '--strictPort'], {
@@ -164,7 +168,7 @@ async function main() {
     await waitForHttp(`${origin}/?artifact-review-spike=1`, vite);
     const { chromium } = await loadPlaywright();
     browser = await chromium.launch({ headless: true, executablePath: chromePath, args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
-    const context = await browser.newContext({ permissions: ['microphone'] });
+    const context = await browser.newContext({ permissions: ['microphone'], viewport: scenario === 'responsive' ? { width: 1600, height: 1000 } : { width: 1280, height: 720 } });
     await context.route('http://127.0.0.1:18080/**', async (route) => {
       if (route.request().method() === 'OPTIONS') {
         await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': origin, 'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': '*' } });
@@ -245,6 +249,63 @@ async function main() {
     await page.goto(`${origin}/?artifact-review-spike=1`);
     await page.locator('.artifact-review-shell input[type=file]').setInputFiles(pdfPath);
     await page.locator('canvas[aria-label="PDF 第 1 页"]').waitFor({ state: 'visible', timeout: 15_000 });
+    if (scenario === 'responsive') {
+      const measure = () => page.evaluate(() => {
+        const stage = document.querySelector('.artifact-review-stage-scroll');
+        const canvas = document.querySelector('canvas[aria-label="PDF 第 1 页"]');
+        const overlay = document.querySelector('svg[aria-label="PDF 第 1 页批注层"]');
+        const pageBounds = canvas?.getBoundingClientRect();
+        const stageBounds = stage?.getBoundingClientRect();
+        return {
+          viewport: { width: window.innerWidth, height: window.innerHeight },
+          stage: stageBounds ? { width: stageBounds.width, height: stageBounds.height, clientWidth: stage.clientWidth, clientHeight: stage.clientHeight, scrollWidth: stage.scrollWidth, scrollHeight: stage.scrollHeight } : null,
+          canvas: pageBounds ? { width: pageBounds.width, height: pageBounds.height } : null,
+          overlay: overlay ? { width: overlay.getBoundingClientRect().width, height: overlay.getBoundingClientRect().height } : null,
+          zoom: document.querySelector('.artifact-review-zoom span')?.textContent,
+          documentScrollWidth: document.documentElement.scrollWidth,
+        };
+      });
+      const wideDefault = await measure();
+      if (!wideDefault.canvas || !wideDefault.overlay || !wideDefault.stage || wideDefault.canvas.width <= 960 || wideDefault.canvas.height <= 540) throw new Error(`Wide viewport did not fit the page to the available stage: ${JSON.stringify(wideDefault)}`);
+      if (Math.abs(wideDefault.canvas.width - wideDefault.overlay.width) > 1 || Math.abs(wideDefault.canvas.height - wideDefault.overlay.height) > 1) throw new Error(`Canvas and annotation overlay diverged at wide size: ${JSON.stringify(wideDefault)}`);
+      await page.setViewportSize({ width: 640, height: 800 });
+      await page.waitForFunction((previousWidth) => {
+        const canvas = document.querySelector('canvas[aria-label="PDF 第 1 页"]');
+        return canvas instanceof HTMLCanvasElement && canvas.getBoundingClientRect().width < previousWidth - 50;
+      }, wideDefault.canvas.width);
+      const narrowDefault = await measure();
+      if (!narrowDefault.canvas || !narrowDefault.overlay || narrowDefault.canvas.width >= wideDefault.canvas.width) throw new Error(`Narrow resize did not reduce the page: ${JSON.stringify({ wideDefault, narrowDefault })}`);
+      if (narrowDefault.documentScrollWidth > narrowDefault.viewport.width + 1) throw new Error(`Narrow review introduced page-level horizontal overflow: ${JSON.stringify(narrowDefault)}`);
+      if (Math.abs(narrowDefault.canvas.width - narrowDefault.overlay.width) > 1 || Math.abs(narrowDefault.canvas.height - narrowDefault.overlay.height) > 1) throw new Error(`Canvas and annotation overlay diverged at narrow size: ${JSON.stringify(narrowDefault)}`);
+      await page.getByRole('button', { name: '圈选' }).click();
+      const narrowOverlay = page.locator('svg[aria-label="PDF 第 1 页批注层"]');
+      const narrowBox = await narrowOverlay.boundingBox();
+      if (!narrowBox) throw new Error('Responsive annotation overlay is not visible.');
+      await page.mouse.move(narrowBox.x + narrowBox.width * 0.2, narrowBox.y + narrowBox.height * 0.2);
+      await page.mouse.down();
+      await page.mouse.move(narrowBox.x + narrowBox.width * 0.55, narrowBox.y + narrowBox.height * 0.45, { steps: 5 });
+      await page.mouse.up();
+      await page.locator('svg[aria-label="PDF 第 1 页批注层"] ellipse').waitFor({ state: 'visible' });
+      const narrowEllipse = await page.locator('svg[aria-label="PDF 第 1 页批注层"] ellipse').boundingBox();
+      await page.getByRole('button', { name: '放大' }).click();
+      await page.waitForFunction(() => document.querySelector('.artifact-review-zoom span')?.textContent === '120%');
+      const narrowManual = await measure();
+      await page.setViewportSize({ width: 1600, height: 1000 });
+      await page.waitForFunction((previousWidth) => {
+        const canvas = document.querySelector('canvas[aria-label="PDF 第 1 页"]');
+        return canvas instanceof HTMLCanvasElement && canvas.getBoundingClientRect().width > previousWidth + 50;
+      }, narrowManual.canvas.width);
+      const wideManual = await measure();
+      if (wideManual.zoom !== '120%') throw new Error(`Resize reset explicit zoom: ${JSON.stringify({ narrowManual, wideManual })}`);
+      if (!wideManual.canvas || wideManual.canvas.width <= wideDefault.canvas.width) throw new Error(`Manual zoom was not preserved after resize: ${JSON.stringify({ wideDefault, wideManual })}`);
+      if (!wideManual.overlay || Math.abs(wideManual.canvas.width - wideManual.overlay.width) > 1 || Math.abs(wideManual.canvas.height - wideManual.overlay.height) > 1) throw new Error(`Canvas and annotation overlay diverged after resize: ${JSON.stringify(wideManual)}`);
+      const wideEllipse = await page.locator('svg[aria-label="PDF 第 1 页批注层"] ellipse').boundingBox();
+      const wideOverlayBox = await narrowOverlay.boundingBox();
+      if (!narrowEllipse || !wideEllipse || !wideOverlayBox || Math.abs((narrowEllipse.x + narrowEllipse.width / 2 - narrowBox.x) / narrowBox.width - (wideEllipse.x + wideEllipse.width / 2 - wideOverlayBox.x) / wideOverlayBox.width) > 0.05 || Math.abs((narrowEllipse.y + narrowEllipse.height / 2 - narrowBox.y) / narrowBox.height - (wideEllipse.y + wideEllipse.height / 2 - wideOverlayBox.y) / wideOverlayBox.height) > 0.05) throw new Error('Annotation geometry drifted across resize.');
+      if (browserErrors.length > 0) throw new Error(`Browser errors: ${browserErrors.join(' | ')}`);
+      process.stdout.write(`${JSON.stringify({ ok: true, scenario, wideDefault, narrowDefault, narrowManual, wideManual, annotation_aligned: true }, null, 2)}\n`);
+      return;
+    }
     const previousEdge = page.getByRole('button', { name: '页面左侧：上一页' });
     const nextEdge = page.getByRole('button', { name: '页面右侧：下一页' });
     await previousEdge.waitFor({ state: 'visible' });
