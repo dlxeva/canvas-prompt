@@ -23,6 +23,10 @@
 
 <p align="center">简体中文 · <a href="./README.md">English</a></p>
 
+<p align="center">
+  <a href="https://youtu.be/J5hnvWZsh3I" target="_blank" rel="noopener noreferrer"><strong>观看 3 分 50 秒实机演示 ↗</strong></a>
+</p>
+
 很多工作发生在一句清晰提示词之前：一个还没画完的结构、一张被圈出两个细节的图片、说到一半改了方向的话、停在你所指对象上的光标。Canvas Prompt 给这些过程一块本地画布。
 
 你可以自然地画、圈、移动、粘贴和讲述。一轮结束时，Canvas Prompt 会把**最后的画面，以及它如何形成的过程**编译成保存在设备上的 Prompt Package。AI 读到的不只是截图；它还能区分画了什么、改了什么、说了什么，以及哪些地方仍待确认。
