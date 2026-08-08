@@ -1,0 +1,77 @@
+{
+  "compact_package": {
+    "meta": {
+      "format": "compact_timeline_aware",
+      "package_id": "pp_response_policy_confirmation",
+      "version": "2.6"
+    },
+    "final_canvas_snapshot": {
+      "format": "png",
+      "width": 320,
+      "height": 200,
+      "availability": "available"
+    },
+    "compact_caption_summary": [
+      {
+        "caption_id": "seg_confirm",
+        "timestamp_start_ms": 5000,
+        "timestamp_end_ms": 6200,
+        "summary": "对，我确认左边这个是入口。"
+      }
+    ],
+    "process_ir_summary": {
+      "source_provenance": {
+        "package_id": "pp_response_policy_confirmation",
+        "content_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "compiler_version": "process-ir-compiler-v0.7"
+      }
+    }
+  },
+  "process_ir": {
+    "schema_version": "process-ir-v0.8",
+    "source": {
+      "package_id": "pp_response_policy_confirmation",
+      "content_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "compiler_version": "process-ir-compiler-v0.7"
+    },
+    "speech_anchors": [
+      {
+        "caption_id": "seg_confirm",
+        "start_ms": 5000,
+        "end_ms": 6200,
+        "text": "对，我确认左边这个是入口。"
+      }
+    ],
+    "objects": [
+      {
+        "object_id": "obj_left",
+        "label": "左侧节点",
+        "bounds": {"x": 20, "y": 40, "width": 80, "height": 60}
+      },
+      {
+        "object_id": "obj_right",
+        "label": "右侧节点",
+        "bounds": {"x": 220, "y": 40, "width": 80, "height": 60}
+      }
+    ],
+    "semantic_events": [
+      {
+        "type": "confirm_entry_selection",
+        "summary": "用户确认 obj_left 是入口",
+        "source_caption_ids": ["seg_confirm"],
+        "involved_object_ids": ["obj_left"],
+        "assertion_level": "assertion"
+      }
+    ],
+    "spatial_relations": [],
+    "reference_candidates": [],
+    "ink_relation_candidates": [],
+    "ink_arrowhead_candidates": [],
+    "ink_circle_candidates": [],
+    "ink_annotation_candidates": [],
+    "ocr_observations": [],
+    "quality": {
+      "ink_trace": {"geometry_status": "available"}
+    }
+  }
+}
