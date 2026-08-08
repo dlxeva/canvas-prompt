@@ -23,6 +23,10 @@
 
 <p align="center"><a href="./README.zh-CN.md">简体中文</a> · English</p>
 
+<p align="center">
+  <a href="https://youtu.be/J5hnvWZsh3I" target="_blank" rel="noopener noreferrer"><strong>Watch the 3:50 live demo ↗</strong></a>
+</p>
+
 Some work happens before a clean chat prompt exists: a rough sketch, an image
 with two circled details, a sentence that changes halfway through, a cursor
 resting on the thing you mean. Canvas Prompt gives that work a local canvas.

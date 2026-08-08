@@ -37,6 +37,11 @@
       .install-note{overflow-wrap:anywhere}
     }
   </style>
+  <style>
+    footer .institute-link{color:var(--ink);border-bottom-color:var(--red)}
+    footer .institute-link:focus-visible{outline:2px solid var(--red);outline-offset:4px}
+    @media(max-width:820px){footer>*{display:block}footer>*+*{margin-top:8px}}
+  </style>
 </head>
 <body>
 <main class="wrap">
@@ -85,7 +90,7 @@ codex plugin add canvas-prompt@canvas-prompt</pre><p class="install-note">Codex:
   <hr class="rule">
 
   <section class="close"><div class="eyebrow">Canvas Prompt</div><h2>Put a complete thinking session into your AI workflow.</h2><p>Start with one image and one correction. Stay when the work needs more room than a chat box can hold.</p><div class="buttons" style="justify-content:center"><a class="button primary" href="https://x.com/dlxeva" target="_blank" rel="noopener">BECOME A DESIGN PARTNER ↗</a></div></section>
-  <footer><span>CANVAS PROMPT · WORKING PRODUCT DIRECTION</span><span>MARK · WORDS · OBJECT · MOMENT</span></footer>
+  <footer><span>CANVAS PROMPT · WORKING PRODUCT DIRECTION</span><a class="link institute-link" href="https://aizhiz.com/" aria-label="Back to AI Institute homepage">BACK TO AI INSTITUTE ↗</a><span>MARK · WORDS · OBJECT · MOMENT</span></footer>
 </main>
 <script>
   const board=document.getElementById('sessionBoard');
