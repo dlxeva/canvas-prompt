@@ -14,7 +14,7 @@ import { latestDraftTimestamp, restoreReviewDraftFromExport } from './pdf-review
 import { clientPointToPagePoint } from './pdf-review-geometry'
 import { createInkSvgPath, pointerSamples } from './pdf-review-ink'
 import { isEditableReviewShortcutTarget, restoredReviewPage, reviewPageNavigationState, reviewPageShortcutDelta } from './pdf-review-navigation'
-import { reviewPageScale } from './pdf-review-scale'
+import { reviewCompactStageHeight, reviewPageScale } from './pdf-review-scale'
 import { VoiceRecorder } from './voice-recorder'
 import { archiveArtifactReviewVisualEvidence } from './artifact-review-visual-handoff'
 import type { Locale } from './locale'
@@ -23,6 +23,15 @@ GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
 const MAX_RENDER_SCALE = 2
 const DEFAULT_LOCAL_ASR_BASE_URL = 'http://127.0.0.1:18080'
+const MIN_REVIEW_STAGE_HEIGHT = 420
+const PAGE_EDGE_GAP = 12
+
+type StageContentSize = {
+  width: number
+  height: number
+  maxOuterHeight: number
+  chromeHeight: number
+}
 
 /**
  * The page-aware review surface can still be opened through the development
@@ -31,7 +40,10 @@ const DEFAULT_LOCAL_ASR_BASE_URL = 'http://127.0.0.1:18080'
 export default function PdfReviewSpike({ active = true, locale, onLocaleChange, initialFile, onReturnToCanvas, onCaptureStateChange }: { active?: boolean, locale: Locale, onLocaleChange: (next: Locale) => void, initialFile?: File, onReturnToCanvas?: (captureBusy?: boolean) => void, onCaptureStateChange?: (busy: boolean) => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const stageShellRef = useRef<HTMLDivElement | null>(null)
   const stageScrollRef = useRef<HTMLDivElement | null>(null)
+  const previousEdgeRef = useRef<HTMLButtonElement | null>(null)
+  const nextEdgeRef = useRef<HTMLButtonElement | null>(null)
   const documentRef = useRef<PDFDocumentProxy | null>(null)
   const loadingTaskRef = useRef<PDFDocumentLoadingTask | null>(null)
   const sessionStartedAtRef = useRef(Date.now())
@@ -45,7 +57,7 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
   const [pages, setPages] = useState<ArtifactReviewPage[]>([])
   const [pageNumber, setPageNumber] = useState(1)
   const [zoomPercent, setZoomPercent] = useState(100)
-  const [stageContentWidth, setStageContentWidth] = useState(0)
+  const [stageContentSize, setStageContentSize] = useState<StageContentSize>({ width: 0, height: 0, maxOuterHeight: 0, chromeHeight: 0 })
   const [loading, setLoading] = useState(false)
   const [rendering, setRendering] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -90,19 +102,106 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
   }, [captureBusy, onCaptureStateChange])
 
   useLayoutEffect(() => {
+    const shell = stageShellRef.current
     const stage = stageScrollRef.current
-    if (!documentHandle || !stage) return
-    const updateWidth = () => {
-      const styles = window.getComputedStyle(stage)
-      const horizontalPadding = Number.parseFloat(styles.paddingLeft) + Number.parseFloat(styles.paddingRight)
-      const nextWidth = Math.max(1, stage.clientWidth - horizontalPadding)
-      setStageContentWidth((current) => Math.abs(current - nextWidth) < 1 ? current : nextWidth)
+    const content = shell?.parentElement
+    if (!documentHandle || !shell || !stage || !content) return
+    const toPixels = (value: string) => Number.parseFloat(value) || 0
+    const updateSize = () => {
+      const stageStyles = window.getComputedStyle(stage)
+      const shellStyles = window.getComputedStyle(shell)
+      const contentStyles = window.getComputedStyle(content)
+      const horizontalPadding = toPixels(stageStyles.paddingLeft) + toPixels(stageStyles.paddingRight)
+      const verticalPadding = toPixels(stageStyles.paddingTop) + toPixels(stageStyles.paddingBottom)
+      const shellBorder = toPixels(shellStyles.borderTopWidth) + toPixels(shellStyles.borderBottomWidth)
+      const chromeHeight = shellBorder + verticalPadding
+      const shellBounds = shell.getBoundingClientRect()
+      const contentBounds = content.getBoundingClientRect()
+      const maxOuterHeight = Math.max(1, contentBounds.bottom - toPixels(contentStyles.paddingBottom) - shellBounds.top)
+      const nextSize = {
+        width: Math.max(1, stage.clientWidth - horizontalPadding),
+        height: Math.max(1, maxOuterHeight - chromeHeight),
+        maxOuterHeight,
+        chromeHeight,
+      }
+      setStageContentSize((current) => Math.abs(current.width - nextSize.width) < 1
+        && Math.abs(current.height - nextSize.height) < 1
+        && Math.abs(current.maxOuterHeight - nextSize.maxOuterHeight) < 1
+        && Math.abs(current.chromeHeight - nextSize.chromeHeight) < 1
+        ? current
+        : nextSize)
     }
-    updateWidth()
-    const observer = new ResizeObserver(updateWidth)
+    updateSize()
+    const observer = new ResizeObserver(updateSize)
     observer.observe(stage)
-    return () => observer.disconnect()
+    observer.observe(shell)
+    observer.observe(content)
+    window.addEventListener('resize', updateSize)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', updateSize)
+    }
   }, [documentHandle])
+
+  useLayoutEffect(() => {
+    const shell = stageShellRef.current
+    const stage = stageScrollRef.current
+    const canvas = canvasRef.current
+    if (!documentHandle || !pageViewport || !shell || !stage || !canvas) return
+
+    const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value))
+    const updatePageEdgeGeometry = () => {
+      const shellBounds = shell.getBoundingClientRect()
+      const stageBounds = stage.getBoundingClientRect()
+      const pageBounds = canvas.getBoundingClientRect()
+      if (shellBounds.width <= 0 || shellBounds.height <= 0 || pageBounds.width <= 0 || pageBounds.height <= 0) return
+
+      const previousBounds = previousEdgeRef.current?.getBoundingClientRect()
+      const nextBounds = nextEdgeRef.current?.getBoundingClientRect()
+      const edgeWidth = Math.max(previousBounds?.width ?? 48, nextBounds?.width ?? 48)
+      const edgeHeight = Math.max(previousBounds?.height ?? 72, nextBounds?.height ?? 72)
+      const pageVisibleLeft = Math.max(pageBounds.left, stageBounds.left)
+      const pageVisibleRight = Math.min(pageBounds.right, stageBounds.right)
+      const pageVisibleTop = Math.max(pageBounds.top, stageBounds.top)
+      const pageVisibleBottom = Math.min(pageBounds.bottom, stageBounds.bottom)
+
+      const centerY = pageVisibleBottom > pageVisibleTop
+        ? (pageVisibleTop + pageVisibleBottom) / 2 - shellBounds.top
+        : pageBounds.bottom <= stageBounds.top
+          ? stageBounds.top - shellBounds.top + edgeHeight / 2 + PAGE_EDGE_GAP
+          : stageBounds.bottom - shellBounds.top - edgeHeight / 2 - PAGE_EDGE_GAP
+      const minCenterY = Math.min(shellBounds.height / 2, edgeHeight / 2 + PAGE_EDGE_GAP)
+      const maxCenterY = Math.max(minCenterY, shellBounds.height - edgeHeight / 2 - PAGE_EDGE_GAP)
+      const safeSide = PAGE_EDGE_GAP
+      const minLeft = safeSide
+      const maxLeft = Math.max(minLeft, shellBounds.width - edgeWidth - safeSide)
+      const horizontalVisibleLeft = pageVisibleRight > pageVisibleLeft ? pageVisibleLeft : pageBounds.right <= stageBounds.left ? stageBounds.left : stageBounds.right
+      const horizontalVisibleRight = pageVisibleRight > pageVisibleLeft ? pageVisibleRight : pageBounds.right <= stageBounds.left ? stageBounds.left : stageBounds.right
+      const previousLeft = clamp(horizontalVisibleLeft - shellBounds.left - edgeWidth - PAGE_EDGE_GAP, minLeft, maxLeft)
+      const nextLeft = clamp(horizontalVisibleRight - shellBounds.left + PAGE_EDGE_GAP, minLeft, maxLeft)
+      const nextRight = shellBounds.width - nextLeft - edgeWidth
+
+      shell.style.setProperty('--artifact-review-page-center-y', `${clamp(centerY, minCenterY, maxCenterY)}px`)
+      shell.style.setProperty('--artifact-review-page-previous-left', `${previousLeft}px`)
+      shell.style.setProperty('--artifact-review-page-next-right', `${Math.max(safeSide, nextRight)}px`)
+    }
+
+    updatePageEdgeGeometry()
+    stage.addEventListener('scroll', updatePageEdgeGeometry, { passive: true })
+    window.addEventListener('resize', updatePageEdgeGeometry)
+    const observer = new ResizeObserver(updatePageEdgeGeometry)
+    observer.observe(shell)
+    observer.observe(stage)
+    observer.observe(canvas)
+    return () => {
+      stage.removeEventListener('scroll', updatePageEdgeGeometry)
+      window.removeEventListener('resize', updatePageEdgeGeometry)
+      observer.disconnect()
+      shell.style.removeProperty('--artifact-review-page-center-y')
+      shell.style.removeProperty('--artifact-review-page-previous-left')
+      shell.style.removeProperty('--artifact-review-page-next-right')
+    }
+  }, [documentHandle, pageNumber, pageViewport, stageContentSize, zoomPercent])
 
   useEffect(() => {
     if (!initialFile || initialFileHandledRef.current === initialFile) return
@@ -137,7 +236,7 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
   }, [artifactKind, marksByPage, pages, pageVisits, renderDerivative, sourceHash, voiceSegments])
 
   useEffect(() => {
-    if (!documentHandle || !canvasRef.current || stageContentWidth <= 0) return
+    if (!documentHandle || !canvasRef.current || stageContentSize.width <= 0 || stageContentSize.height <= 0) return
 
     let cancelled = false
     let renderTask: ReturnType<Awaited<ReturnType<PDFDocumentProxy['getPage']>>['render']> | null = null
@@ -150,7 +249,7 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
         const page = await documentHandle.getPage(pageNumber)
         if (cancelled) return
         const baseViewport = page.getViewport({ scale: 1 })
-        const viewport = page.getViewport({ scale: reviewPageScale(baseViewport.width, stageContentWidth, zoomPercent) })
+        const viewport = page.getViewport({ scale: reviewPageScale(baseViewport.width, baseViewport.height, stageContentSize.width, stageContentSize.height, zoomPercent) })
         const pixelRatio = Math.min(window.devicePixelRatio || 1, MAX_RENDER_SCALE)
         if (!canvas.getContext('2d', { alpha: false })) throw new Error('当前浏览器无法建立 PDF 渲染画布。')
         canvas.width = Math.max(1, Math.floor(viewport.width * pixelRatio))
@@ -180,7 +279,7 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
       cancelled = true
       renderTask?.cancel()
     }
-  }, [documentHandle, pageNumber, stageContentWidth, zoomPercent])
+  }, [documentHandle, pageNumber, stageContentSize, zoomPercent])
 
   const chooseFile = async (file: File | undefined) => {
     if (!file) return
@@ -262,6 +361,9 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
   const zoomBy = (delta: number) => setZoomPercent((value) => Math.max(60, Math.min(200, value + delta)))
   const pageMarks = marksByPage[pageNumber] ?? []
   const pageNavigation = reviewPageNavigationState(pageNumber, pageCount, rendering)
+  const compactStageHeight = reviewCompactStageHeight(pageViewport?.height ?? 0, stageContentSize.chromeHeight, stageContentSize.maxOuterHeight, zoomPercent, MIN_REVIEW_STAGE_HEIGHT)
+  const stageClassName = `artifact-review-stage-shell${compactStageHeight ? ' artifact-review-stage-compact' : ''}`
+  const stageStyle = compactStageHeight ? { height: `${Math.ceil(compactStageHeight)}px` } : undefined
 
   const navigateToPage = (nextPage: number) => {
     if (nextPage === pageNumber) return
@@ -575,9 +677,10 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
           {handoffStatus && <div role="status" style={{ margin: '0 0 12px', padding: 10, borderRadius: 8, background: handoffStatus.includes('未能') ? '#fff1f1' : '#edf8f1', color: handoffStatus.includes('未能') ? '#a61b1b' : '#17643a', fontSize: 14 }}>
             {handoffStatus}
           </div>}
-          <div className="artifact-review-stage-shell">
+          <div ref={stageShellRef} className={stageClassName} style={stageStyle}>
             <button
               type="button"
+              ref={previousEdgeRef}
               className="artifact-review-page-edge artifact-review-page-edge-previous"
               aria-label="页面左侧：上一页"
               title={locale === 'zh' ? '上一页（← / PageUp）' : 'Previous page (← / PageUp)'}
@@ -598,6 +701,7 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
             </div>
             <button
               type="button"
+              ref={nextEdgeRef}
               className="artifact-review-page-edge artifact-review-page-edge-next"
               aria-label="页面右侧：下一页"
               title={locale === 'zh' ? '下一页（→ / PageDown）' : 'Next page (→ / PageDown)'}
