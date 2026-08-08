@@ -18,6 +18,45 @@ from validate_compact_package import validate_package
 
 
 class RuntimeArtifactPathTests(unittest.TestCase):
+    def test_handwritten_anchor_modes_survive_full_runtime_compile(self):
+        fixture_path = MODULE_DIR / "fixtures" / "handwriting-visual-anchor-modes.json"
+        with tempfile.TemporaryDirectory() as directory:
+            result = compile_runtime_package(fixture_path, Path(directory) / "engine")
+            process_ir = json.loads(Path(result["process_ir_path"]).read_text(encoding="utf-8"))
+            compact = json.loads(Path(result["compact_package_path"]).read_text(encoding="utf-8"))
+
+            self.assertEqual(
+                {"free_arrow_shaft", "native_arrow", "box_connector"},
+                {item["stroke_id"] for item in process_ir["ink_relation_candidates"]},
+            )
+            connections = compact["structural_observations"]["handdrawn_connection_candidates"]
+            self.assertEqual(3, len(connections))
+            self.assertIn("strong", [item["evidence_level"] for item in connections])
+            self.assertTrue(any("region_anchor" in item["evidence_sources"] for item in connections))
+            self.assertGreaterEqual(len(compact["structural_observations"]["handdrawn_region_candidates"]), 2)
+            self.assertEqual([], validate_process_ir(process_ir))
+            compact_errors, _warnings = validate_package(compact)
+            self.assertEqual([], compact_errors)
+
+    def test_handwriting_relation_fixture_survives_full_runtime_compile(self):
+        fixture_path = MODULE_DIR / "fixtures" / "handwriting-relation-regression.json"
+        with tempfile.TemporaryDirectory() as directory:
+            result = compile_runtime_package(fixture_path, Path(directory) / "engine")
+            process_ir = json.loads(Path(result["process_ir_path"]).read_text(encoding="utf-8"))
+            compact = json.loads(Path(result["compact_package_path"]).read_text(encoding="utf-8"))
+
+            self.assertEqual(["real_connector"], [
+                item["stroke_id"] for item in process_ir["ink_relation_candidates"]
+            ])
+            self.assertEqual(["ink_rel_001"], [
+                item["relation_id"]
+                for item in compact["structural_observations"]["handdrawn_connection_candidates"]
+            ])
+            self.assertEqual("strong", compact["structural_observations"]["handdrawn_connection_candidates"][0]["evidence_level"])
+            self.assertEqual([], validate_process_ir(process_ir))
+            compact_errors, _warnings = validate_package(compact)
+            self.assertEqual([], compact_errors)
+
     def test_process_ir_is_published_at_stable_engine_path(self):
         source = {
             "meta": {"package_id": "pp_runtime_path", "duration_ms": 0},

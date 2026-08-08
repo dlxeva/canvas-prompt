@@ -1,0 +1,57 @@
+{
+  "meta": {
+    "package_id": "pp_handwriting_visual_anchor_modes",
+    "duration_ms": 8200
+  },
+  "transcript": {
+    "full_text": "",
+    "segments": [],
+    "alignment_status": "unavailable"
+  },
+  "strokes": [
+    {"stroke_id": "a_left", "timestamp_ms": 0, "points": [{"x": 40, "y": 40}, {"x": 20, "y": 160}]},
+    {"stroke_id": "a_right", "timestamp_ms": 120, "points": [{"x": 45, "y": 60}, {"x": 80, "y": 160}]},
+    {"stroke_id": "b_left", "timestamp_ms": 300, "points": [{"x": 420, "y": 40}, {"x": 420, "y": 160}]},
+    {"stroke_id": "b_right", "timestamp_ms": 420, "points": [{"x": 420, "y": 45}, {"x": 480, "y": 70}, {"x": 425, "y": 105}, {"x": 480, "y": 135}, {"x": 420, "y": 160}]},
+    {"stroke_id": "free_arrow_shaft", "timestamp_ms": 900, "points": [{"x": 95, "y": 105}, {"x": 365, "y": 105}]},
+    {"stroke_id": "free_arrowhead", "timestamp_ms": 980, "points": [{"x": 345, "y": 88}, {"x": 378, "y": 105}, {"x": 345, "y": 122}]},
+    {"stroke_id": "c_single", "timestamp_ms": 1400, "points": [{"x": 40, "y": 300}, {"x": 30, "y": 410}, {"x": 35, "y": 405}]},
+    {"stroke_id": "d_left", "timestamp_ms": 1500, "points": [{"x": 420, "y": 300}, {"x": 420, "y": 410}]},
+    {"stroke_id": "d_curve", "timestamp_ms": 1600, "points": [{"x": 420, "y": 305}, {"x": 480, "y": 330}, {"x": 420, "y": 355}, {"x": 480, "y": 385}, {"x": 420, "y": 410}]},
+    {"stroke_id": "box_l_top", "timestamp_ms": 2200, "points": [{"x": 20, "y": 500}, {"x": 210, "y": 500}]},
+    {"stroke_id": "box_l_right", "timestamp_ms": 2300, "points": [{"x": 210, "y": 500}, {"x": 210, "y": 640}]},
+    {"stroke_id": "box_l_bottom", "timestamp_ms": 2400, "points": [{"x": 210, "y": 640}, {"x": 20, "y": 640}]},
+    {"stroke_id": "box_l_left", "timestamp_ms": 2500, "points": [{"x": 20, "y": 640}, {"x": 20, "y": 500}]},
+    {"stroke_id": "box_l_label", "timestamp_ms": 2600, "points": [{"x": 70, "y": 535}, {"x": 70, "y": 600}]},
+    {"stroke_id": "box_r_top", "timestamp_ms": 2700, "points": [{"x": 420, "y": 500}, {"x": 610, "y": 500}]},
+    {"stroke_id": "box_r_right", "timestamp_ms": 2800, "points": [{"x": 610, "y": 500}, {"x": 610, "y": 640}]},
+    {"stroke_id": "box_r_bottom", "timestamp_ms": 2900, "points": [{"x": 610, "y": 640}, {"x": 420, "y": 640}]},
+    {"stroke_id": "box_r_left", "timestamp_ms": 3000, "points": [{"x": 420, "y": 640}, {"x": 420, "y": 500}]},
+    {"stroke_id": "box_r_label", "timestamp_ms": 3100, "points": [{"x": 480, "y": 535}, {"x": 480, "y": 600}]},
+    {"stroke_id": "box_connector", "timestamp_ms": 8000, "points": [{"x": 210, "y": 570}, {"x": 420, "y": 570}]},
+    {"stroke_id": "unknown_stroke", "timestamp_ms": 8100, "points": [{"x": 300, "y": 700}, {"x": 315, "y": 715}, {"x": 310, "y": 700}]}
+  ],
+  "arrows": [
+    {"arrow_id": "native_arrow", "timestamp_ms": 2000, "from": {"type": "point", "ref": {"x": 70, "y": 350}}, "to": {"type": "point", "ref": {"x": 390, "y": 350}}, "style": {"arrowhead": "solid"}}
+  ],
+  "objects": [
+    {"object_id": "obj_a_left", "timestamp_ms": 0, "type": "diagram_element", "bounds": {"x": 20, "y": 40, "width": 20, "height": 120}, "source_strokes": ["a_left"]},
+    {"object_id": "obj_a_right", "timestamp_ms": 120, "type": "diagram_element", "bounds": {"x": 45, "y": 60, "width": 35, "height": 100}, "source_strokes": ["a_right"]},
+    {"object_id": "obj_b_left", "timestamp_ms": 300, "type": "diagram_element", "bounds": {"x": 420, "y": 40, "width": 1, "height": 120}, "source_strokes": ["b_left"]},
+    {"object_id": "obj_b_right", "timestamp_ms": 420, "type": "diagram_element", "bounds": {"x": 420, "y": 45, "width": 60, "height": 115}, "source_strokes": ["b_right"]},
+    {"object_id": "obj_c", "timestamp_ms": 1400, "type": "diagram_element", "bounds": {"x": 30, "y": 300, "width": 10, "height": 110}, "source_strokes": ["c_single"]},
+    {"object_id": "obj_d_left", "timestamp_ms": 1500, "type": "diagram_element", "bounds": {"x": 420, "y": 300, "width": 1, "height": 110}, "source_strokes": ["d_left"]},
+    {"object_id": "obj_d_curve", "timestamp_ms": 1600, "type": "diagram_element", "bounds": {"x": 420, "y": 305, "width": 60, "height": 105}, "source_strokes": ["d_curve"]},
+    {"object_id": "obj_box_l_top", "timestamp_ms": 2200, "type": "diagram_element", "bounds": {"x": 20, "y": 500, "width": 190, "height": 1}, "source_strokes": ["box_l_top"]},
+    {"object_id": "obj_box_l_right", "timestamp_ms": 2300, "type": "diagram_element", "bounds": {"x": 210, "y": 500, "width": 1, "height": 140}, "source_strokes": ["box_l_right"]},
+    {"object_id": "obj_box_l_bottom", "timestamp_ms": 2400, "type": "diagram_element", "bounds": {"x": 20, "y": 640, "width": 190, "height": 1}, "source_strokes": ["box_l_bottom"]},
+    {"object_id": "obj_box_l_left", "timestamp_ms": 2500, "type": "diagram_element", "bounds": {"x": 20, "y": 500, "width": 1, "height": 140}, "source_strokes": ["box_l_left"]},
+    {"object_id": "obj_box_l_label", "timestamp_ms": 2600, "type": "diagram_element", "bounds": {"x": 65, "y": 530, "width": 10, "height": 70}, "source_strokes": ["box_l_label"]},
+    {"object_id": "obj_box_r_top", "timestamp_ms": 2700, "type": "diagram_element", "bounds": {"x": 420, "y": 500, "width": 190, "height": 1}, "source_strokes": ["box_r_top"]},
+    {"object_id": "obj_box_r_right", "timestamp_ms": 2800, "type": "diagram_element", "bounds": {"x": 610, "y": 500, "width": 1, "height": 140}, "source_strokes": ["box_r_right"]},
+    {"object_id": "obj_box_r_bottom", "timestamp_ms": 2900, "type": "diagram_element", "bounds": {"x": 420, "y": 640, "width": 190, "height": 1}, "source_strokes": ["box_r_bottom"]},
+    {"object_id": "obj_box_r_left", "timestamp_ms": 3000, "type": "diagram_element", "bounds": {"x": 420, "y": 500, "width": 1, "height": 140}, "source_strokes": ["box_r_left"]},
+    {"object_id": "obj_box_r_label", "timestamp_ms": 3100, "type": "diagram_element", "bounds": {"x": 475, "y": 530, "width": 10, "height": 70}, "source_strokes": ["box_r_label"]},
+    {"object_id": "obj_unknown", "timestamp_ms": 3600, "type": "diagram_element", "bounds": {"x": 300, "y": 700, "width": 15, "height": 15}, "source_strokes": ["unknown_stroke"]}
+  ]
+}

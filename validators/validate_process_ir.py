@@ -58,6 +58,8 @@ def validate_process_ir(data: Any) -> list[str]:
             errors.append(f"{field} must be a list.")
     if "ink_circle_candidates" in data and not isinstance(data["ink_circle_candidates"], list):
         errors.append("ink_circle_candidates must be a list.")
+    if "ink_region_candidates" in data and not isinstance(data["ink_region_candidates"], list):
+        errors.append("ink_region_candidates must be a list.")
     if "ink_cross_candidates" in data and not isinstance(data["ink_cross_candidates"], list):
         errors.append("ink_cross_candidates must be a list.")
     if "ink_check_candidates" in data and not isinstance(data["ink_check_candidates"], list):
@@ -115,6 +117,17 @@ def validate_process_ir(data: Any) -> list[str]:
             errors.append("Hand-drawn circle candidates require candidate object IDs.")
         elif len(set(object_ids)) != len(object_ids):
             errors.append("Hand-drawn circle candidate object IDs must be unique.")
+    for item in data.get("ink_region_candidates", []):
+        if item.get("assertion_level") != "observation" or item.get("resolution_status") != "unresolved":
+            errors.append("Hand-drawn region candidates must be unresolved observations.")
+        if item.get("relation") != "unresolved_handdrawn_region":
+            errors.append("Unsupported hand-drawn region candidate type.")
+        stroke_ids = item.get("stroke_ids")
+        if not isinstance(stroke_ids, list) or not stroke_ids or any(not isinstance(value, str) or not value for value in stroke_ids):
+            errors.append("Hand-drawn region candidates require source strokes.")
+        object_ids = item.get("candidate_object_ids")
+        if not isinstance(object_ids, list) or not object_ids or any(not isinstance(value, str) or not value for value in object_ids):
+            errors.append("Hand-drawn region candidates require candidate object IDs.")
     for item in data.get("ink_cross_candidates", []):
         if item.get("assertion_level") != "observation" or item.get("resolution_status") != "unresolved":
             errors.append("Hand-drawn cross candidates must be unresolved observations.")

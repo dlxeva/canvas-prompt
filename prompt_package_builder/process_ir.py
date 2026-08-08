@@ -30,6 +30,7 @@ MAX_SPATIAL_RELATIONS = 300
 MAX_INK_RELATION_CANDIDATES = 100
 MAX_INK_CIRCLE_CANDIDATES = 100
 MAX_INK_ARROWHEAD_CANDIDATES = 100
+MAX_INK_REGION_CANDIDATES = 100
 MAX_INK_CROSS_CANDIDATES = 100
 MAX_INK_CHECK_CANDIDATES = 100
 MAX_INK_ANNOTATION_CANDIDATES = 160
@@ -44,8 +45,25 @@ TRANSFORM_MIN_SCALE_DELTA = 0.05
 # prior 2.5 s window merged a later connector into a nearby hand-drawn frame.
 VISUAL_UNIT_TIME_WINDOW_MS = 1_200
 VISUAL_UNIT_GAP_PX = 24
+RELATION_ENDPOINT_MAX_DISTANCE_PX = 12
+RELATION_VISUAL_ANCHOR_MAX_DISTANCE_PX = 96
+RELATION_ANCHOR_WINDOW_MS = 4_000
+REGION_CONSTRUCTION_WINDOW_MS = 4_000
+REGION_GROUP_GAP_PX = 36
+RELATION_ENDPOINT_TYPES = {
+    "text_block",
+    "shape",
+    "sticky_note",
+    "checkbox",
+    "image",
+    "region",
+}
 REFERENCE_RE = re.compile(
     r"(?:\bthis(?:\s+one)?\b|\bthat(?:\s+one)?\b|\bthese\b|\bthose\b|\bit\b|\b(?:over\s+)?here\b|\b(?:over\s+)?there\b|\bthe\s+one\s+on\s+the\s+(?:left|right)\b|这个|那个|这边|那边|这里|那里|上述|前面|后面)",
+    re.IGNORECASE,
+)
+RELATION_SPEECH_RE = re.compile(
+    r"(?:导致|因而|所以|有关|关系|连接|连线|从.{0,12}到|这个.{0,12}那个|它们.{0,12}(?:有关|相关)|\b(?:leads?\s+to|related\s+to|connected?\s+to|from.{0,20}to)\b)",
     re.IGNORECASE,
 )
 
@@ -535,18 +553,110 @@ def _point(point: Any) -> tuple[float, float] | None:
         return None
 
 
+def _points_rect(points: list[tuple[float, float]]) -> tuple[float, float, float, float] | None:
+    if not points:
+        return None
+    xs, ys = zip(*points)
+    return min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)
+
+
+def _is_stable_relation_endpoint(obj: dict[str, Any]) -> bool:
+    """Accept only independently inspectable endpoint objects.
+
+    A raw freehand mark is itself represented as a ``diagram_element`` with a
+    ``source_strokes`` link.  Treating those derived marks as endpoint objects
+    makes adjacent handwriting strokes look like a connector.  Relation
+    extraction needs a stable canvas object, a named object, or an explicit
+    adapter-provided anchor; proximity to another raw stroke is insufficient.
+    """
+    object_type = obj.get("type")
+    if object_type in RELATION_ENDPOINT_TYPES:
+        return True
+    if _label(obj):
+        return True
+    properties = obj.get("properties")
+    return isinstance(properties, dict) and (
+        properties.get("relation_anchor") is True
+        or properties.get("baseline_anchor") is True
+    )
+
+
+def _relation_speech_evidence(
+    captions: list[dict[str, Any]], stroke_timestamp_ms: int,
+) -> list[dict[str, Any]]:
+    """Return timestamped relation-language evidence near a connector stroke."""
+    evidence = []
+    for caption in captions:
+        if not isinstance(caption, dict) or not isinstance(caption.get("text"), str):
+            continue
+        try:
+            start_ms = int(caption.get("start_ms", 0) or 0)
+            end_ms = int(caption.get("end_ms", start_ms) or start_ms)
+        except (TypeError, ValueError):
+            continue
+        if end_ms < stroke_timestamp_ms - RELATION_ANCHOR_WINDOW_MS or start_ms > stroke_timestamp_ms + RELATION_ANCHOR_WINDOW_MS:
+            continue
+        match = RELATION_SPEECH_RE.search(caption["text"])
+        if not match:
+            continue
+        evidence.append({
+            "caption_id": caption.get("caption_id"),
+            "time_range_ms": [start_ms, end_ms],
+            "matched_text": match.group(0),
+            "temporal_distance_ms": max(start_ms - stroke_timestamp_ms, stroke_timestamp_ms - end_ms, 0),
+        })
+    return evidence
+
+
+def _circle_supports_endpoint(circle: dict[str, Any], point: tuple[float, float]) -> bool:
+    geometry = circle.get("geometry")
+    bounds = geometry.get("bounds") if isinstance(geometry, dict) else None
+    if not isinstance(bounds, dict):
+        return False
+    try:
+        rect = (
+            float(bounds["x"]),
+            float(bounds["y"]),
+            max(0.0, float(bounds["width"])),
+            max(0.0, float(bounds["height"])),
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+    return _distance_to_rect(*point, rect) <= RELATION_VISUAL_ANCHOR_MAX_DISTANCE_PX
+
+
+def _region_supports_endpoint(region: dict[str, Any], point: tuple[float, float]) -> bool:
+    geometry = region.get("geometry")
+    bounds = geometry.get("bounds") if isinstance(geometry, dict) else None
+    if not isinstance(bounds, dict):
+        return False
+    try:
+        rect = (
+            float(bounds["x"]),
+            float(bounds["y"]),
+            max(0.0, float(bounds["width"])),
+            max(0.0, float(bounds["height"])),
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+    return _distance_to_rect(*point, rect) <= RELATION_VISUAL_ANCHOR_MAX_DISTANCE_PX
+
+
 def _ink_relation_candidates(
     package: dict[str, Any],
     objects: list[dict[str, Any]],
     visual_unit_candidates: list[dict[str, Any]],
+    circle_candidates: list[dict[str, Any]] | None = None,
+    captions: list[dict[str, Any]] | None = None,
+    region_candidates: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Find only unresolved connection geometry from complete hand-drawn traces.
 
     This is deliberately narrower than arrow recognition: a nearly straight
-    stroke whose two endpoints reach distinct non-source objects becomes a
-    connection *candidate*. It has no direction, causal label, or object-state
-    effect. Human sketches with arrowheads, loops, or free-form marks need a
-    later, separately evaluated recognizer.
+    stroke whose two endpoints reach distinct, stable non-source objects
+    becomes a connection *candidate*. It has no direction, causal label, or
+    object-state effect. Human sketches with arrowheads, loops, or free-form
+    marks need a later, separately evaluated recognizer.
     """
     indexed = []
     for obj in objects:
@@ -565,13 +675,176 @@ def _ink_relation_candidates(
         if isinstance(object_id, str) and isinstance(unit.get("unit_id"), str)
     }
     candidates = []
+    circle_candidates = circle_candidates or []
+    captions = captions or []
+    region_candidates = region_candidates or []
+    anchor_candidates = []
+
+    def add_anchor(
+        anchor_id: str,
+        object_id: str,
+        rect: tuple[float, float, float, float],
+        kind: str,
+        timestamp_ms: int,
+        member_object_ids: list[str] | None = None,
+    ) -> None:
+        anchor_candidates.append({
+            "anchor_id": anchor_id,
+            "object_id": object_id,
+            "rect": rect,
+            "kind": kind,
+            "timestamp_ms": timestamp_ms,
+            "member_object_ids": member_object_ids or [object_id],
+        })
+
+    # Native objects remain the strongest endpoint source. Raw marks that are
+    # grouped into a visual unit also become bounded endpoint candidates, but
+    # retain their provenance instead of being silently relabeled as text.
+    unit_member_ids = set(object_unit_ids)
+    for obj, rect in indexed:
+        object_id = obj.get("object_id")
+        if _is_stable_relation_endpoint(obj) and object_id:
+            add_anchor(
+                object_id,
+                object_id,
+                rect,
+                "object",
+                int(obj.get("timestamp_ms", 0) or 0),
+            )
+    objects_by_id = {obj.get("object_id"): obj for obj, _ in indexed if obj.get("object_id")}
+    for unit in visual_unit_candidates:
+        unit_id = unit.get("unit_id")
+        bounds = unit.get("bounds") or {}
+        member_ids = [value for value in unit.get("member_object_ids") or [] if value in objects_by_id]
+        if not isinstance(unit_id, str) or not member_ids:
+            continue
+        try:
+            unit_rect = (
+                float(bounds["x"]),
+                float(bounds["y"]),
+                max(0.0, float(bounds["width"])),
+                max(0.0, float(bounds["height"])),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        timestamps = [int(objects_by_id[value].get("timestamp_ms", 0) or 0) for value in member_ids]
+        add_anchor(unit_id, member_ids[0], unit_rect, "visual_unit", max(timestamps), member_ids)
+    for region in region_candidates:
+        region_id = region.get("region_id")
+        object_ids = [value for value in region.get("candidate_object_ids") or [] if value in objects_by_id]
+        geometry = region.get("geometry") or {}
+        bounds = geometry.get("bounds") if isinstance(geometry, dict) else None
+        if not isinstance(region_id, str) or not object_ids or not isinstance(bounds, dict):
+            continue
+        try:
+            region_rect = (
+                float(bounds["x"]),
+                float(bounds["y"]),
+                max(0.0, float(bounds["width"])),
+                max(0.0, float(bounds["height"])),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        add_anchor(
+            region_id,
+            object_ids[0],
+            region_rect,
+            "region",
+            int(region.get("timestamp_ms", 0) or 0),
+            object_ids,
+        )
+    for circle in circle_candidates:
+        circle_id = circle.get("circle_id")
+        object_ids = [value for value in circle.get("candidate_object_ids") or [] if value in objects_by_id]
+        geometry = circle.get("geometry") or {}
+        bounds = geometry.get("bounds") if isinstance(geometry, dict) else None
+        if not isinstance(circle_id, str) or not object_ids or not isinstance(bounds, dict):
+            continue
+        try:
+            circle_rect = (
+                float(bounds["x"]),
+                float(bounds["y"]),
+                max(0.0, float(bounds["width"])),
+                max(0.0, float(bounds["height"])),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        add_anchor(
+            circle_id,
+            object_ids[0],
+            circle_rect,
+            "circle",
+            int(circle.get("timestamp_ms", 0) or 0),
+            object_ids,
+        )
+    circles_by_object: dict[str, list[dict[str, Any]]] = {}
+    for circle in circle_candidates:
+        for object_id in circle.get("candidate_object_ids") or []:
+            if isinstance(object_id, str):
+                circles_by_object.setdefault(object_id, []).append(circle)
+    trace_sources = []
     for stroke in package.get("strokes") or []:
-        if not isinstance(stroke, dict):
+        if not isinstance(stroke, dict) or not isinstance(stroke.get("stroke_id"), str):
             continue
         points = [point for point in (_point(raw) for raw in stroke.get("points") or []) if point]
+        trace_sources.append({
+            "source_id": stroke["stroke_id"],
+            "source_type": "stroke",
+            "points": points,
+            "timestamp_ms": int(stroke.get("timestamp_ms", 0) or 0),
+        })
+    for arrow in package.get("arrows") or []:
+        if not isinstance(arrow, dict) or not isinstance(arrow.get("arrow_id"), str):
+            continue
+        from_value = arrow.get("from") if isinstance(arrow.get("from"), dict) else {}
+        to_value = arrow.get("to") if isinstance(arrow.get("to"), dict) else {}
+        start = _point(from_value.get("ref") or from_value)
+        end = _point(to_value.get("ref") or to_value)
+        if not start or not end:
+            continue
+        trace_sources.append({
+            "source_id": arrow["arrow_id"],
+            "source_type": "native_arrow",
+            "points": [start, end],
+            "timestamp_ms": int(arrow.get("timestamp_ms", 0) or 0),
+        })
+    for trace_source in trace_sources:
+        points = trace_source["points"]
         if len(points) < 2:
             continue
         start, end = points[0], points[-1]
+        binding_start, binding_end = start, end
+        if trace_source["source_type"] == "stroke":
+            # A natural hand-drawn arrow is often a shaft followed by one
+            # lifted V-shaped arrowhead stroke.  Extend only the binding point
+            # to a nearby later stroke; keep the shaft geometry unchanged.
+            direction = (end[0] - start[0], end[1] - start[1])
+            direction_length = (direction[0] ** 2 + direction[1] ** 2) ** 0.5
+            if direction_length > 0:
+                unit_direction = (direction[0] / direction_length, direction[1] / direction_length)
+                for support in package.get("strokes") or []:
+                    if not isinstance(support, dict) or support.get("stroke_id") == trace_source["source_id"]:
+                        continue
+                    if int(support.get("timestamp_ms", 0) or 0) < trace_source["timestamp_ms"]:
+                        continue
+                    if int(support.get("timestamp_ms", 0) or 0) - trace_source["timestamp_ms"] > RELATION_ANCHOR_WINDOW_MS:
+                        continue
+                    support_points = [point for point in (_point(raw) for raw in support.get("points") or []) if point]
+                    if len(support_points) < 3:
+                        continue
+                    if min(
+                        ((support_points[0][0] - end[0]) ** 2 + (support_points[0][1] - end[1]) ** 2) ** 0.5,
+                        ((support_points[-1][0] - end[0]) ** 2 + (support_points[-1][1] - end[1]) ** 2) ** 0.5,
+                    ) > 32:
+                        continue
+                    projected = [
+                        ((point[0] - end[0]) * unit_direction[0] + (point[1] - end[1]) * unit_direction[1], point)
+                        for point in support_points
+                    ]
+                    extension, extension_point = max(projected, key=lambda item: item[0])
+                    if 0 < extension <= 64:
+                        binding_end = extension_point
+                        break
         direct_distance = ((end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2) ** 0.5
         if direct_distance < 40:
             continue
@@ -581,35 +854,134 @@ def _ink_relation_candidates(
         )
         if path_length <= 0 or path_length / direct_distance > 1.35:
             continue
-        stroke_id = stroke.get("stroke_id")
+        source_id = trace_source["source_id"]
         source_object_ids = {
             obj.get("object_id")
             for obj, _ in indexed
-            if stroke_id and stroke_id in (obj.get("source_strokes") or [])
+            if source_id in (obj.get("source_strokes") or [])
         }
-        destinations = [item for item in indexed if item[0].get("object_id") not in source_object_ids]
+        trace_anchors = list(anchor_candidates)
+        # An explicit native arrow can bind to one isolated hand-drawn object
+        # even when that object is only one coherent stroke.  A plain stroke
+        # may not use this fallback: it needs a visual unit or an enclosure.
+        if trace_source["source_type"] == "native_arrow":
+            for obj, rect in indexed:
+                object_id = obj.get("object_id")
+                if not object_id or object_id in unit_member_ids or _is_stable_relation_endpoint(obj):
+                    continue
+                trace_anchors.append({
+                    "anchor_id": object_id,
+                    "object_id": object_id,
+                    "rect": rect,
+                    "kind": "handwritten_object",
+                    "timestamp_ms": int(obj.get("timestamp_ms", 0) or 0),
+                    "member_object_ids": [object_id],
+                })
+        destinations = []
+        for anchor in trace_anchors:
+            if source_object_ids.intersection(anchor.get("member_object_ids") or []):
+                continue
+            if anchor.get("timestamp_ms", 0) > trace_source["timestamp_ms"]:
+                continue
+            limit = RELATION_ENDPOINT_MAX_DISTANCE_PX if anchor["kind"] == "object" else RELATION_VISUAL_ANCHOR_MAX_DISTANCE_PX
+            start_distance = _distance_to_rect(*binding_start, anchor["rect"])
+            end_distance = _distance_to_rect(*binding_end, anchor["rect"])
+            if min(start_distance, end_distance) <= limit:
+                destinations.append((anchor, min(start_distance, end_distance)))
         if not destinations:
             continue
-        start_obj, start_rect = min(destinations, key=lambda item: _distance_to_rect(*start, item[1]))
-        end_obj, end_rect = min(destinations, key=lambda item: _distance_to_rect(*end, item[1]))
-        start_distance = _distance_to_rect(*start, start_rect)
-        end_distance = _distance_to_rect(*end, end_rect)
-        start_object_id = start_obj.get("object_id")
-        end_object_id = end_obj.get("object_id")
-        if start_object_id == end_object_id or max(start_distance, end_distance) > 35:
+        start_destinations = sorted(
+            ((anchor, _distance_to_rect(*binding_start, anchor["rect"])) for anchor, _ in destinations),
+            key=lambda item: item[1],
+        )
+        end_destinations = sorted(
+            ((anchor, _distance_to_rect(*binding_end, anchor["rect"])) for anchor, _ in destinations),
+            key=lambda item: item[1],
+        )
+        start_anchor, start_distance = start_destinations[0]
+        end_anchor, end_distance = end_destinations[0]
+        start_object_id = start_anchor.get("object_id")
+        end_object_id = end_anchor.get("object_id")
+        if (
+            not start_object_id
+            or not end_object_id
+            or start_anchor.get("anchor_id") == end_anchor.get("anchor_id")
+            or start_object_id == end_object_id
+        ):
             continue
-        start_unit_id = object_unit_ids.get(start_object_id)
-        end_unit_id = object_unit_ids.get(end_object_id)
-        if start_unit_id is not None and start_unit_id == end_unit_id:
+        connection_timestamp_ms = trace_source["timestamp_ms"]
+        circle_anchors = []
+        for circle in circle_candidates:
+            circle_timestamp_ms = int(circle.get("timestamp_ms", 0) or 0)
+            if not (
+                circle_timestamp_ms <= connection_timestamp_ms
+                and connection_timestamp_ms - circle_timestamp_ms <= RELATION_ANCHOR_WINDOW_MS
+            ):
+                continue
+            if (
+                circle in circles_by_object.get(start_object_id, [])
+                or circle in circles_by_object.get(end_object_id, [])
+                or _circle_supports_endpoint(circle, binding_start)
+                or _circle_supports_endpoint(circle, binding_end)
+            ):
+                circle_anchors.append(circle)
+        region_anchors = [
+            region for region in region_candidates
+            if int(region.get("timestamp_ms", 0) or 0) <= connection_timestamp_ms
+            and (
+                _region_supports_endpoint(region, binding_start)
+                or _region_supports_endpoint(region, binding_end)
+                or set(region.get("candidate_object_ids") or []).intersection({start_object_id, end_object_id})
+            )
+        ]
+        if any(
+            _region_supports_endpoint(region, binding_start)
+            and _region_supports_endpoint(region, binding_end)
+            for region in region_candidates
+        ):
+            # A short mark whose two ends remain inside one enclosure is part
+            # of that object/annotation, not a cross-region connector.
             continue
-        candidates.append(
-            {
+        if any(
+            _circle_supports_endpoint(circle, binding_start)
+            and _circle_supports_endpoint(circle, binding_end)
+            for circle in circle_candidates
+        ):
+            continue
+        speech_evidence = _relation_speech_evidence(captions, connection_timestamp_ms)
+        evidence_sources = []
+        anchor_kinds = {start_anchor.get("kind"), end_anchor.get("kind")}
+        if "object" in anchor_kinds:
+            evidence_sources.append("object_binding")
+        if "visual_unit" in anchor_kinds:
+            evidence_sources.append("visual_unit_anchor")
+        if "handwritten_object" in anchor_kinds:
+            evidence_sources.append("handwritten_object_anchor")
+        if circle_anchors:
+            evidence_sources.append("circle_anchor")
+        if region_anchors or "region" in anchor_kinds:
+            evidence_sources.append("region_anchor")
+        if speech_evidence:
+            evidence_sources.append("speech_alignment")
+        if trace_source["source_type"] == "native_arrow":
+            evidence_sources.append("arrow_geometry")
+            evidence_level = "strong"
+        else:
+            evidence_level = "multimodal_candidate" if circle_anchors and speech_evidence else "explicit"
+        candidate = {
                 "relation_id": f"ink_rel_{len(candidates) + 1:03d}",
-                "stroke_id": stroke_id,
+                "stroke_id": source_id,
+                "source_type": trace_source["source_type"],
                 "relation": "unresolved_handdrawn_connection",
+                "evidence_level": evidence_level,
+                "evidence_sources": evidence_sources,
                 "endpoint_candidates": {
                     "start_object_id": start_object_id,
                     "end_object_id": end_object_id,
+                    "start_anchor_id": start_anchor.get("anchor_id"),
+                    "end_anchor_id": end_anchor.get("anchor_id"),
+                    "start_anchor_kind": start_anchor.get("kind"),
+                    "end_anchor_kind": end_anchor.get("kind"),
                     "start_distance": round(start_distance, 2),
                     "end_distance": round(end_distance, 2),
                 },
@@ -620,9 +992,43 @@ def _ink_relation_candidates(
                 },
                 "resolution_status": "unresolved",
                 "assertion_level": "observation",
-                "constraint": "connection_geometry_does_not_establish_direction_or_semantic_relation",
+                "constraint": (
+                    "arrow_geometry_does_not_establish_causal_or_semantic_relation"
+                    if trace_source["source_type"] == "native_arrow"
+                    else "connection_geometry_does_not_establish_direction_or_semantic_relation"
+                ),
+        }
+        if trace_source["source_type"] == "native_arrow":
+            candidate["arrow_id"] = source_id
+        if circle_anchors:
+            candidate["circle_anchor_ids"] = [circle.get("circle_id") for circle in circle_anchors]
+        if region_anchors:
+            candidate["region_anchor_ids"] = [region.get("region_id") for region in region_anchors]
+        visual_unit_ids = [anchor.get("anchor_id") for anchor in (start_anchor, end_anchor) if anchor.get("kind") == "visual_unit"]
+        if visual_unit_ids:
+            candidate["visual_unit_ids"] = visual_unit_ids
+        temporal_anchor_times = [
+            int(anchor.get("timestamp_ms", 0) or 0)
+            for anchor in (start_anchor, end_anchor)
+            if anchor.get("kind") in {"visual_unit", "region", "circle", "handwritten_object"}
+        ]
+        if circle_anchors or region_anchors or temporal_anchor_times:
+            anchor_timestamps = temporal_anchor_times + [
+                int(item.get("timestamp_ms", 0) or 0)
+                for item in circle_anchors + region_anchors
+            ]
+            candidate["temporal_evidence"] = {
+                "anchor_timestamps_ms": sorted(set(anchor_timestamps)),
+                "connection_timestamp_ms": connection_timestamp_ms,
+                "window_ms": RELATION_ANCHOR_WINDOW_MS,
+                "within_window": all(
+                    0 <= connection_timestamp_ms - timestamp <= RELATION_ANCHOR_WINDOW_MS
+                    for timestamp in anchor_timestamps
+                ),
             }
-        )
+        if speech_evidence:
+            candidate["speech_evidence"] = speech_evidence
+        candidates.append(candidate)
         if len(candidates) >= MAX_INK_RELATION_CANDIDATES:
             break
     return candidates
@@ -652,7 +1058,10 @@ def _ink_circle_candidates(package: dict[str, Any], objects: list[dict[str, Any]
         if min(width, height) < 40 or diagonal <= 0:
             continue
         closure_distance = ((points[-1][0] - points[0][0]) ** 2 + (points[-1][1] - points[0][1]) ** 2) ** 0.5
-        if closure_distance > max(36.0, diagonal * 0.12):
+        # Natural circles often finish a small distance from their start point;
+        # keep the tolerance bounded while allowing a roughly closed loop with
+        # a gap up to 20% of its diagonal.
+        if closure_distance > max(36.0, diagonal * 0.20):
             continue
         path_length = _path_length(points)
         if path_length / diagonal < 1.7:
@@ -678,6 +1087,7 @@ def _ink_circle_candidates(package: dict[str, Any], objects: list[dict[str, Any]
         candidates.append({
             "circle_id": f"ink_circle_{len(candidates) + 1:03d}",
             "stroke_id": stroke_id,
+            "timestamp_ms": int(stroke.get("timestamp_ms", 0) or 0),
             "relation": "unresolved_handdrawn_circle",
             "candidate_object_ids": [object_id for _, object_id in enclosed[:5]],
             "geometry": {
@@ -691,6 +1101,160 @@ def _ink_circle_candidates(package: dict[str, Any], objects: list[dict[str, Any]
             "constraint": "closed_ink_geometry_does_not_establish_selection_or_intent",
         })
         if len(candidates) >= MAX_INK_CIRCLE_CANDIDATES:
+            break
+    return candidates
+
+
+def _ink_region_candidates(package: dict[str, Any], objects: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Record open, hand-drawn box/lasso regions as unresolved anchors.
+
+    Real boards often use several lifted strokes to draw a loose box around an
+    object.  Those strokes are not objects and are not relations, but the
+    resulting enclosure can anchor a later connector when both endpoints land
+    in different regions.  The detector requires three of four boundary sides
+    and a bounded construction burst so dense handwriting does not become a
+    region by proximity alone.
+    """
+    stroke_records = []
+    for stroke in package.get("strokes") or []:
+        if not isinstance(stroke, dict) or not isinstance(stroke.get("stroke_id"), str):
+            continue
+        points = [point for point in (_point(raw) for raw in stroke.get("points") or []) if point]
+        rect = _points_rect(points)
+        if len(points) < 2 or not rect:
+            continue
+        stroke_records.append({
+            "stroke_id": stroke["stroke_id"],
+            "timestamp_ms": int(stroke.get("timestamp_ms", 0) or 0),
+            "points": points,
+            "rect": rect,
+        })
+
+    parent = list(range(len(stroke_records)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left, right = find(left), find(right)
+        if left != right:
+            parent[right] = left
+
+    for left_index, left in enumerate(stroke_records):
+        lx, ly, lw, lh = left["rect"]
+        for right_index in range(left_index + 1, len(stroke_records)):
+            right = stroke_records[right_index]
+            if abs(left["timestamp_ms"] - right["timestamp_ms"]) > REGION_CONSTRUCTION_WINDOW_MS:
+                continue
+            rx, ry, rw, rh = right["rect"]
+            gap_x = max(lx - (rx + rw), rx - (lx + lw), 0.0)
+            gap_y = max(ly - (ry + rh), ry - (ly + lh), 0.0)
+            if (gap_x * gap_x + gap_y * gap_y) ** 0.5 <= REGION_GROUP_GAP_PX:
+                union(left_index, right_index)
+
+    components: dict[int, list[dict[str, Any]]] = {}
+    for index, record in enumerate(stroke_records):
+        components.setdefault(find(index), []).append(record)
+
+    indexed = [(obj, _rect(obj)) for obj in objects]
+    indexed = [(obj, rect) for obj, rect in indexed if obj.get("object_id") and rect]
+    candidates = []
+    for records in components.values():
+        if len(records) < 3 or len(records) > MAX_VISUAL_UNIT_MEMBERS * 2:
+            continue
+        left = min(record["rect"][0] for record in records)
+        top = min(record["rect"][1] for record in records)
+        right = max(record["rect"][0] + record["rect"][2] for record in records)
+        bottom = max(record["rect"][1] + record["rect"][3] for record in records)
+        width, height = right - left, bottom - top
+        if width < 80 or height < 60:
+            continue
+        tolerance = max(12.0, min(width, height) * 0.18)
+        sides: dict[str, list[str]] = {"top": [], "right": [], "bottom": [], "left": []}
+        for record in records:
+            x, y, record_width, record_height = record["rect"]
+            stroke_id = record["stroke_id"]
+            if record_width >= width * 0.35 and y <= top + tolerance:
+                sides["top"].append(stroke_id)
+            if record_width >= width * 0.35 and y + record_height >= bottom - tolerance:
+                sides["bottom"].append(stroke_id)
+            if record_height >= height * 0.35 and x <= left + tolerance:
+                sides["left"].append(stroke_id)
+            if record_height >= height * 0.35 and x + record_width >= right - tolerance:
+                sides["right"].append(stroke_id)
+        supported_sides = [side for side, stroke_ids in sides.items() if stroke_ids]
+        if len(supported_sides) < 3:
+            continue
+        boundary_stroke_ids = sorted({stroke_id for stroke_ids in sides.values() for stroke_id in stroke_ids})
+        # Recompute the enclosure from boundary-like strokes only. Interior
+        # handwriting or a later connector can touch a box and otherwise make
+        # the candidate span across the entire board.
+        for _ in range(2):
+            boundary_records = [record for record in records if record["stroke_id"] in boundary_stroke_ids]
+            if not boundary_records:
+                break
+            boundary_left = min(record["rect"][0] for record in boundary_records)
+            boundary_top = min(record["rect"][1] for record in boundary_records)
+            boundary_right = max(record["rect"][0] + record["rect"][2] for record in boundary_records)
+            boundary_bottom = max(record["rect"][1] + record["rect"][3] for record in boundary_records)
+            boundary_width = boundary_right - boundary_left
+            boundary_height = boundary_bottom - boundary_top
+            boundary_tolerance = max(12.0, min(boundary_width, boundary_height) * 0.18)
+            for record in records:
+                if record["stroke_id"] in boundary_stroke_ids:
+                    continue
+                x, y, record_width, record_height = record["rect"]
+                horizontal_side = record_width >= boundary_width * 0.35 and (
+                    y <= boundary_top + boundary_tolerance
+                    or y + record_height >= boundary_bottom - boundary_tolerance
+                )
+                vertical_side = record_height >= boundary_height * 0.35 and (
+                    x <= boundary_left + boundary_tolerance
+                    or x + record_width >= boundary_right - boundary_tolerance
+                )
+                if horizontal_side or vertical_side:
+                    boundary_stroke_ids.append(record["stroke_id"])
+            boundary_stroke_ids = sorted(set(boundary_stroke_ids))
+        boundary_records = [record for record in records if record["stroke_id"] in boundary_stroke_ids]
+        if not boundary_records:
+            continue
+        left = min(record["rect"][0] for record in boundary_records)
+        top = min(record["rect"][1] for record in boundary_records)
+        right = max(record["rect"][0] + record["rect"][2] for record in boundary_records)
+        bottom = max(record["rect"][1] + record["rect"][3] for record in boundary_records)
+        width, height = right - left, bottom - top
+        enclosed = []
+        for obj, rect in indexed:
+            object_id = obj.get("object_id")
+            if set(boundary_stroke_ids).intersection(obj.get("source_strokes") or []):
+                continue
+            x, y, object_width, object_height = rect
+            center_x, center_y = x + object_width / 2, y + object_height / 2
+            if left <= center_x <= right and top <= center_y <= bottom:
+                enclosed.append((object_width * object_height, object_id))
+        if not enclosed:
+            continue
+        enclosed.sort(key=lambda item: (-item[0], item[1]))
+        candidates.append({
+            "region_id": f"ink_region_{len(candidates) + 1:03d}",
+            "stroke_ids": boundary_stroke_ids,
+            "timestamp_ms": max(record["timestamp_ms"] for record in records),
+            "relation": "unresolved_handdrawn_region",
+            "candidate_object_ids": [object_id for _, object_id in enclosed[:8]],
+            "geometry": {
+                "kind": "freehand_enclosure",
+                "bounds": {"x": round(left, 2), "y": round(top, 2), "width": round(width, 2), "height": round(height, 2)},
+                "supported_sides": supported_sides,
+                "construction_stroke_count": len(records),
+            },
+            "resolution_status": "unresolved",
+            "assertion_level": "observation",
+            "constraint": "enclosure_geometry_does_not_establish_selection_or_grouping_intent",
+        })
+        if len(candidates) >= MAX_INK_REGION_CANDIDATES:
             break
     return candidates
 
@@ -900,7 +1464,10 @@ def _paired_symbol_choice_candidates(
 
 
 def _ink_annotation_candidates(
-    package: dict[str, Any], objects: list[dict[str, Any]], circles: list[dict[str, Any]]
+    package: dict[str, Any],
+    objects: list[dict[str, Any]],
+    circles: list[dict[str, Any]],
+    regions: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Extract conservative, object-bound board annotation shapes.
 
@@ -910,6 +1477,7 @@ def _ink_annotation_candidates(
     """
     indexed = [(obj, _rect(obj)) for obj in objects]
     indexed = [(obj, rect) for obj, rect in indexed if obj.get("object_id") and rect]
+    regions = regions or []
     strokes: list[tuple[str, list[tuple[float, float]]]] = []
     for stroke in package.get("strokes") or []:
         if not isinstance(stroke, dict) or not isinstance(stroke.get("stroke_id"), str):
@@ -939,6 +1507,12 @@ def _ink_annotation_candidates(
         emit(
             "enclosure_like", [circle.get("stroke_id", "")], circle.get("candidate_object_ids") or [],
             circle.get("geometry") or {},
+            "enclosure_geometry_does_not_establish_selection_or_grouping_intent",
+        )
+    for region in regions:
+        emit(
+            "enclosure_like", region.get("stroke_ids") or [], region.get("candidate_object_ids") or [],
+            region.get("geometry") or {},
             "enclosure_geometry_does_not_establish_selection_or_grouping_intent",
         )
 
@@ -1193,6 +1767,8 @@ def _arrowhead_candidates(
                             "support_stroke_ids": [left["stroke_id"], right["stroke_id"]],
                             "tip": {"shaft_endpoint": endpoint_name, "object_id": tip_object_id},
                             "candidate_visual_direction": direction,
+                            "evidence_level": "strong",
+                            "evidence_sources": ["arrow_geometry", "object_binding"],
                             "geometry": {
                                 "shaft_direct_distance": round(shaft_length, 2),
                                 "support_lengths": [round(left["length"], 2), round(right["length"], 2)],
@@ -1218,7 +1794,7 @@ def _arrowhead_candidates(
                 )
                 pivot = support[pivot_index]
                 pivot_distance = ((pivot[0] - tip[0]) ** 2 + (pivot[1] - tip[1]) ** 2) ** 0.5
-                if pivot_distance > 18:
+                if pivot_distance > 36:
                     continue
                 left_vector = (support[0][0] - pivot[0], support[0][1] - pivot[1])
                 right_vector = (support[-1][0] - pivot[0], support[-1][1] - pivot[1])
@@ -1244,6 +1820,8 @@ def _arrowhead_candidates(
                         "support_stroke_ids": [support_id],
                         "tip": {"shaft_endpoint": endpoint_name, "object_id": tip_object_id},
                         "candidate_visual_direction": direction,
+                        "evidence_level": "strong",
+                        "evidence_sources": ["arrow_geometry", "object_binding"],
                         "geometry": {
                             "shaft_direct_distance": round(shaft_length, 2),
                             "support_lengths": [round(left_length, 2), round(right_length, 2)],
@@ -1353,13 +1931,35 @@ def compile_process_ir(
     review_items = package.get("review_items") if isinstance(package.get("review_items"), list) else []
     reference_candidates = _reference_candidates(captions, events, objects, gestures, review_items)
     visual_unit_candidates = _visual_unit_candidates(objects)
-    ink_relation_candidates = _ink_relation_candidates(package, objects, visual_unit_candidates)
     ink_circle_candidates = _ink_circle_candidates(package, objects)
+    ink_region_candidates = _ink_region_candidates(package, objects)
+    ink_relation_candidates = _ink_relation_candidates(
+        package,
+        objects,
+        visual_unit_candidates,
+        ink_circle_candidates,
+        captions,
+        ink_region_candidates,
+    )
     ink_arrowhead_candidates = _arrowhead_candidates(package, ink_relation_candidates)
+    strong_relation_ids = {
+        item.get("shaft_relation_id")
+        for item in ink_arrowhead_candidates
+        if item.get("shaft_relation_id")
+    }
+    for relation in ink_relation_candidates:
+        if relation.get("relation_id") in strong_relation_ids:
+            relation["evidence_level"] = "strong"
+            relation["evidence_sources"] = sorted(set(relation.get("evidence_sources", []) + ["arrow_geometry"]))
     ink_cross_candidates = _ink_cross_candidates(package, objects)
     ink_check_candidates = _ink_check_candidates(package, objects)
     paired_symbol_choice_candidates = _paired_symbol_choice_candidates(ink_cross_candidates, ink_check_candidates, objects)
-    ink_annotation_candidates = _ink_annotation_candidates(package, objects, ink_circle_candidates)
+    ink_annotation_candidates = _ink_annotation_candidates(
+        package,
+        objects,
+        ink_circle_candidates,
+        ink_region_candidates,
+    )
     layout_transform_observations = _layout_transform_observations(package, objects)
     review_mark_candidates = _review_mark_candidates(package, captions)
     view_transform_observations = _view_transform_observations(package)
@@ -1370,6 +1970,8 @@ def compile_process_ir(
         "pointer_attention_is_weak_signal_only",
         "object_state_requires_auditable_association",
         "handdrawn_relation_requires_multi_point_trace",
+        "handdrawn_relation_requires_stable_endpoint_binding",
+        "speech_cannot_create_visual_relation_endpoints",
         "reported_duration_is_not_process_evidence",
         "view_transform_does_not_establish_attention_or_priority",
     ]
@@ -1412,6 +2014,7 @@ def compile_process_ir(
         "reference_candidates": reference_candidates,
         "ink_relation_candidates": ink_relation_candidates,
         "ink_circle_candidates": ink_circle_candidates,
+        "ink_region_candidates": ink_region_candidates,
         "ink_arrowhead_candidates": ink_arrowhead_candidates,
         "ink_cross_candidates": ink_cross_candidates,
         "ink_check_candidates": ink_check_candidates,
