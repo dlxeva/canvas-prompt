@@ -60,7 +60,7 @@ async function runtimeIdentity() {
     conversation_bound: false,
     thread_scope_key: conversationScope.threadScopeKey,
     session_scope_key: null,
-    service_version: '0.1.35',
+    service_version: '0.1.36',
     delivery_mode: deliveryMode,
     asr_url: localAsrUrl(),
     asr_enabled: process.env.CANVAS_PROMPT_ASR !== 'disabled',
