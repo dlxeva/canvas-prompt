@@ -22,7 +22,7 @@
 <p align="center">圈出来 · 说出来 · 继续推进</p>
 
 <p align="center">
-  <a href="https://canvas-prompt.aizhiz.com/zh/">官网</a> · <a href="https://youtu.be/J5hnvWZsh3I" target="_blank" rel="noopener noreferrer"><strong>观看 3 分 50 秒实机演示 ↗</strong></a> · 简体中文 · <a href="./README.md">English</a>
+  <a href="https://canvas-prompt.aizhiz.com/">官网</a> · <a href="https://youtu.be/J5hnvWZsh3I" target="_blank" rel="noopener noreferrer"><strong>观看 3 分 50 秒实机演示 ↗</strong></a> · 简体中文 · <a href="./README.md">English</a>
 </p>
 
 很多工作发生在一句清晰提示词之前：草图、圈注、改口的句子、停在意图上的光标。Canvas Prompt 给这些过程一块本地画布。
