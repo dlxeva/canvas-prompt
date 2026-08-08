@@ -22,8 +22,9 @@ import type { ExportReceiptStatus, HandoffReceipt } from './receipt-state'
 import { protectedLocalApiFetch } from './protected-local-api'
 import type { Locale } from './locale'
 import { isArtifactReviewFile } from './artifact-review-entry'
+import { canvasToolActivation } from './canvas-tool-state'
+import type { CanvasTool } from './canvas-tool-state'
 
-type CanvasTool = 'selection' | 'freedraw' | 'line' | 'arrow' | 'rectangle' | 'ellipse' | 'eraser'
 type HistoryAction = 'undo' | 'redo'
 const tools: Array<{ id: CanvasTool; zh: string; en: string }> = [
   { id: 'selection', zh: '选择', en: 'Select' },
@@ -805,7 +806,7 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
       setImageNotice('画布正在准备工具，请稍后再试。')
       return
     }
-    canvasApi.setActiveTool({ type: tool })
+    canvasApi.setActiveTool(canvasToolActivation(tool))
     canvasApi.updateScene({ appState: { currentItemStrokeColor: strokeColor, currentItemStrokeWidth: strokeWidth } })
   }
 
