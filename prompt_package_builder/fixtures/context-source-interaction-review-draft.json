@@ -1,0 +1,75 @@
+{
+  "schema_version": "interaction-review/0.1-draft",
+  "package_id": "irp_2222222222222222_1700000000000",
+  "source": {
+    "kind": "local-static-html",
+    "name": "fixture-flow.html",
+    "entry_path": "index.html",
+    "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "source_bytes_in_export": false
+  },
+  "session": {
+    "started_at": "2026-08-08T08:10:00.000Z",
+    "duration_ms": 4200,
+    "capture_scope": "explicit-session-only"
+  },
+  "events": [
+    {
+      "id": "evt_generate_001",
+      "kind": "click",
+      "at_ms": 1200,
+      "route": "/generate",
+      "viewport": {"width": 1280, "height": 800, "scroll_x": 0, "scroll_y": 0},
+      "target": {
+        "element_id": "generate-run",
+        "tag": "button",
+        "label": "生成",
+        "rect": {"x": 420, "y": 220, "width": 128, "height": 44}
+      },
+      "state": {"route": "/generate", "title": "Generate", "scroll": {"x": 0, "y": 0}},
+      "detail": {"action": "activate", "source": "user"}
+    },
+    {
+      "id": "evt_review_002",
+      "kind": "focus",
+      "at_ms": 2600,
+      "route": "/review",
+      "viewport": {"width": 1280, "height": 800, "scroll_x": 0, "scroll_y": 0},
+      "target": {
+        "element_id": "review-card",
+        "tag": "section",
+        "label": "结果卡片",
+        "rect": {"x": 280, "y": 180, "width": 520, "height": 300}
+      },
+      "state": {"route": "/review", "title": "Review", "scroll": {"x": 0, "y": 0}},
+      "detail": {"action": "focus", "source": "user"}
+    }
+  ],
+  "annotations": [
+    {
+      "id": "ann_web_circle_001",
+      "kind": "circle",
+      "created_at_ms": 3000,
+      "points": [
+        {"x": 0.22, "y": 0.28},
+        {"x": 0.38, "y": 0.46}
+      ]
+    }
+  ],
+  "transcript": [
+    {
+      "segment_id": "voice_web_001",
+      "start_ms": 1500,
+      "end_ms": 2300,
+      "text": "生成按钮之后我想先看到进度。",
+      "confidence": 0.94
+    }
+  ],
+  "privacy": {
+    "processing": "local_only",
+    "sensitive_input_values": "excluded",
+    "external_network": "blocked-by-frame-policy",
+    "full_screen_video": false
+  },
+  "execution_authorized": false
+}

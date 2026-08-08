@@ -26,6 +26,24 @@ try:  # package import
         validate_policy,
         validate_response_policy,
     )
+    from .build_context_source_adapter import (  # type: ignore
+        ADAPTER_VERSION,
+        adapt_artifact_review,
+        adapt_artifact_review_package,
+        adapt_canvas,
+        adapt_canvas_round,
+        adapt_context_source,
+        adapt_interaction_review,
+        adapt_interaction_review_package,
+        build_context_source_pack,
+        build_minimal_context_pack_from_source,
+        detect_context_source,
+    )
+    from .validate_context_source_adapter import (  # type: ignore
+        validate_context_source_pack,
+        validate_minimal_context_pack_source,
+        validate_source_context_pack,
+    )
 except ImportError:  # existing script-style imports
     from build_minimal_context_pack import (  # noqa: F401
         CONTRACT,
@@ -52,6 +70,24 @@ except ImportError:  # existing script-style imports
         validate_policy,
         validate_response_policy,
     )
+    from build_context_source_adapter import (  # noqa: F401
+        ADAPTER_VERSION,
+        adapt_artifact_review,
+        adapt_artifact_review_package,
+        adapt_canvas,
+        adapt_canvas_round,
+        adapt_context_source,
+        adapt_interaction_review,
+        adapt_interaction_review_package,
+        build_context_source_pack,
+        build_minimal_context_pack_from_source,
+        detect_context_source,
+    )
+    from validate_context_source_adapter import (  # noqa: F401
+        validate_context_source_pack,
+        validate_minimal_context_pack_source,
+        validate_source_context_pack,
+    )
 
 __all__ = [
     "CONTRACT",
@@ -73,4 +109,18 @@ __all__ = [
     "validate_layered_answer_policy",
     "validate_package",
     "validate_policy",
+    "ADAPTER_VERSION",
+    "detect_context_source",
+    "adapt_context_source",
+    "adapt_artifact_review",
+    "adapt_artifact_review_package",
+    "adapt_interaction_review",
+    "adapt_interaction_review_package",
+    "adapt_canvas",
+    "adapt_canvas_round",
+    "build_context_source_pack",
+    "build_minimal_context_pack_from_source",
+    "validate_context_source_pack",
+    "validate_minimal_context_pack_source",
+    "validate_source_context_pack",
 ]
