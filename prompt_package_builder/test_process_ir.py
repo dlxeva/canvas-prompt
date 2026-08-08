@@ -1,3 +1,4 @@
+import json
 import sys
 import unittest
 from copy import deepcopy
@@ -16,6 +17,171 @@ from validate_process_ir import validate_process_ir
 
 
 class LayoutTransformObservationTests(unittest.TestCase):
+    def test_real_handwritten_anchor_modes_preserve_arrow_and_region_evidence(self):
+        fixture_path = MODULE_DIR / "fixtures" / "handwriting-visual-anchor-modes.json"
+        package = json.loads(fixture_path.read_text(encoding="utf-8"))
+        process_ir = compile_process_ir(package, [], [], package["objects"])
+
+        relations = {item["stroke_id"]: item for item in process_ir["ink_relation_candidates"]}
+        self.assertEqual({"free_arrow_shaft", "native_arrow", "box_connector"}, set(relations))
+        self.assertEqual("strong", relations["free_arrow_shaft"]["evidence_level"])
+        self.assertIn("visual_unit_anchor", relations["free_arrow_shaft"]["evidence_sources"])
+        self.assertIn("arrow_geometry", relations["free_arrow_shaft"]["evidence_sources"])
+        self.assertEqual("strong", relations["native_arrow"]["evidence_level"])
+        self.assertIn("handwritten_object_anchor", relations["native_arrow"]["evidence_sources"])
+        self.assertEqual("explicit", relations["box_connector"]["evidence_level"])
+        self.assertIn("region_anchor", relations["box_connector"]["evidence_sources"])
+        self.assertEqual([], [item for item in process_ir["ink_relation_candidates"] if item["stroke_id"] == "unknown_stroke"])
+        self.assertGreaterEqual(len(process_ir["ink_region_candidates"]), 2)
+        self.assertEqual([], validate_process_ir(process_ir))
+
+    def test_dense_handwriting_stays_out_of_relations_but_bound_connector_survives(self):
+        fixture_path = MODULE_DIR / "fixtures" / "handwriting-relation-regression.json"
+        package = json.loads(fixture_path.read_text(encoding="utf-8"))
+        process_ir = compile_process_ir(package, [], [], package["objects"])
+
+        relations = process_ir["ink_relation_candidates"]
+        self.assertEqual(["real_connector"], [item["stroke_id"] for item in relations])
+        self.assertEqual("obj_start", relations[0]["endpoint_candidates"]["start_object_id"])
+        self.assertEqual("obj_end", relations[0]["endpoint_candidates"]["end_object_id"])
+        self.assertEqual("strong", relations[0]["evidence_level"])
+        self.assertIn("circle_anchor", relations[0]["evidence_sources"])
+        compact = build_structural_observations(process_ir)
+        self.assertEqual("strong", compact["handdrawn_connection_candidates"][0]["evidence_level"])
+        self.assertEqual(2, len(process_ir["ink_circle_candidates"]))
+        self.assertEqual(1, len(process_ir["ink_arrowhead_candidates"]))
+        self.assertEqual("real_connector", process_ir["ink_arrowhead_candidates"][0]["shaft_stroke_id"])
+        self.assertEqual("strong", process_ir["ink_arrowhead_candidates"][0]["evidence_level"])
+        self.assertEqual("strong", relations[0]["evidence_level"])
+        self.assertEqual([], validate_process_ir(process_ir))
+
+    def test_dense_handwriting_without_connector_has_no_relation(self):
+        fixture_path = MODULE_DIR / "fixtures" / "handwriting-relation-regression.json"
+        package = json.loads(fixture_path.read_text(encoding="utf-8"))
+        package["strokes"] = [stroke for stroke in package["strokes"] if stroke["stroke_id"].startswith("hand_")]
+        package["objects"] = [obj for obj in package["objects"] if obj["object_id"].startswith("obj_hand_")]
+
+        process_ir = compile_process_ir(package, [], [], package["objects"])
+
+        self.assertEqual([], process_ir["ink_relation_candidates"])
+
+    def test_circled_connector_with_relation_speech_is_multimodal_and_traceable(self):
+        fixture_path = MODULE_DIR / "fixtures" / "handwriting-relation-regression.json"
+        package = json.loads(fixture_path.read_text(encoding="utf-8"))
+        package["strokes"] = [
+            stroke for stroke in package["strokes"] if stroke["stroke_id"] != "real_arrowhead"
+        ]
+        captions = [{
+            "caption_id": "seg_relation",
+            "start_ms": 1_500,
+            "end_ms": 2_100,
+            "text": "这个导致那个，它们有关",
+        }]
+        process_ir = compile_process_ir(package, captions, [], package["objects"])
+        relation = next(item for item in process_ir["ink_relation_candidates"] if item["stroke_id"] == "real_connector")
+
+        self.assertEqual("multimodal_candidate", relation["evidence_level"])
+        self.assertIn("speech_alignment", relation["evidence_sources"])
+        self.assertEqual(["seg_relation"], [item["caption_id"] for item in relation["speech_evidence"]])
+        self.assertEqual(1600, relation["temporal_evidence"]["connection_timestamp_ms"])
+        self.assertEqual([], validate_process_ir(process_ir))
+
+    def test_circled_connector_without_arrow_is_explicit_candidate(self):
+        fixture_path = MODULE_DIR / "fixtures" / "handwriting-relation-regression.json"
+        package = json.loads(fixture_path.read_text(encoding="utf-8"))
+        package["strokes"] = [
+            stroke for stroke in package["strokes"] if stroke["stroke_id"] != "real_arrowhead"
+        ]
+
+        process_ir = compile_process_ir(package, [], [], package["objects"])
+        relation = next(item for item in process_ir["ink_relation_candidates"] if item["stroke_id"] == "real_connector")
+
+        self.assertEqual("explicit", relation["evidence_level"])
+        self.assertIn("object_binding", relation["evidence_sources"])
+        self.assertIn("circle_anchor", relation["evidence_sources"])
+        self.assertEqual([], validate_process_ir(process_ir))
+
+    def test_circled_connector_can_bind_existing_baseline_anchors(self):
+        fixture_path = MODULE_DIR / "fixtures" / "handwriting-relation-regression.json"
+        package = json.loads(fixture_path.read_text(encoding="utf-8"))
+        package["strokes"] = [
+            stroke for stroke in package["strokes"] if stroke["stroke_id"] in {
+                "circle_start", "circle_end", "real_connector",
+            }
+        ]
+        for object_id in ("obj_start", "obj_end"):
+            obj = next(item for item in package["objects"] if item["object_id"] == object_id)
+            obj["type"] = "diagram_element"
+            obj.pop("semantic_content", None)
+            obj["properties"] = {"baseline_anchor": True, "evidence_source": "round_start_scene"}
+
+        process_ir = compile_process_ir(package, [], [], package["objects"])
+        relation = next(item for item in process_ir["ink_relation_candidates"] if item["stroke_id"] == "real_connector")
+
+        self.assertEqual("obj_start", relation["endpoint_candidates"]["start_object_id"])
+        self.assertEqual("obj_end", relation["endpoint_candidates"]["end_object_id"])
+        self.assertIn("circle_anchor", relation["evidence_sources"])
+        self.assertEqual([], validate_process_ir(process_ir))
+
+    def test_native_arrow_between_stable_objects_is_strong(self):
+        package = {
+            "meta": {"package_id": "pp_native_arrow"},
+            "strokes": [],
+            "arrows": [{
+                "arrow_id": "native_arrow",
+                "timestamp_ms": 1_000,
+                "from": {"type": "point", "ref": {"x": 60, "y": 100}},
+                "to": {"type": "point", "ref": {"x": 260, "y": 100}},
+            }],
+            "objects": [
+                {"object_id": "obj_start", "type": "text_block", "bounds": {"x": 30, "y": 70, "width": 60, "height": 60}},
+                {"object_id": "obj_end", "type": "shape", "bounds": {"x": 230, "y": 70, "width": 60, "height": 60}},
+            ],
+        }
+
+        process_ir = compile_process_ir(package, [], [], package["objects"])
+        relation = next(item for item in process_ir["ink_relation_candidates"] if item["stroke_id"] == "native_arrow")
+
+        self.assertEqual("strong", relation["evidence_level"])
+        self.assertIn("arrow_geometry", relation["evidence_sources"])
+        self.assertEqual("native_arrow", relation["arrow_id"])
+        self.assertEqual([], validate_process_ir(process_ir))
+
+    def test_relation_speech_without_visual_endpoints_does_not_fabricate_a_connection(self):
+        captions = [{
+            "caption_id": "seg_relation_only",
+            "start_ms": 1_000,
+            "end_ms": 1_600,
+            "text": "这个导致那个，它们有关",
+        }]
+        process_ir = compile_process_ir(
+            {
+                "meta": {"package_id": "pp_relation_speech_only"},
+                "strokes": [{
+                    "stroke_id": "unbound_stroke",
+                    "timestamp_ms": 1_200,
+                    "points": [{"x": 0, "y": 0}, {"x": 100, "y": 0}],
+                }],
+                "objects": [{
+                    "object_id": "obj_unbound_stroke",
+                    "type": "diagram_element",
+                    "bounds": {"x": 0, "y": 0, "width": 100, "height": 1},
+                    "source_strokes": ["unbound_stroke"],
+                }],
+            },
+            captions,
+            [],
+            [{
+                "object_id": "obj_unbound_stroke",
+                "type": "diagram_element",
+                "bounds": {"x": 0, "y": 0, "width": 100, "height": 1},
+                "source_strokes": ["unbound_stroke"],
+            }],
+        )
+
+        self.assertEqual([], process_ir["ink_relation_candidates"])
+        self.assertEqual(["seg_relation_only"], [item["caption_id"] for item in process_ir["speech_anchors"]])
+
     def test_recognizes_english_deictic_forms_without_resolving_them(self):
         captions = [{
             "caption_id": "seg_english", "start_ms": 1_000, "end_ms": 3_000,

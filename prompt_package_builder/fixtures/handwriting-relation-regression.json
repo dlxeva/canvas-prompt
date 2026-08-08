@@ -1,0 +1,56 @@
+{
+  "meta": {
+    "package_id": "pp_handwriting_relation_regression",
+    "duration_ms": 2400
+  },
+  "timeline": [],
+  "transcript": {
+    "full_text": "",
+    "segments": [],
+    "alignment_status": "unavailable"
+  },
+  "strokes": [
+    {"stroke_id": "hand_00", "timestamp_ms": 0, "points": [{"x": 0, "y": 0}, {"x": 35, "y": 35}]},
+    {"stroke_id": "hand_01", "timestamp_ms": 80, "points": [{"x": 40, "y": 0}, {"x": 75, "y": 35}]},
+    {"stroke_id": "hand_02", "timestamp_ms": 160, "points": [{"x": 80, "y": 0}, {"x": 115, "y": 35}]},
+    {"stroke_id": "hand_03", "timestamp_ms": 240, "points": [{"x": 120, "y": 0}, {"x": 155, "y": 35}]},
+    {"stroke_id": "hand_04", "timestamp_ms": 320, "points": [{"x": 160, "y": 0}, {"x": 195, "y": 35}]},
+    {"stroke_id": "hand_05", "timestamp_ms": 400, "points": [{"x": 200, "y": 0}, {"x": 235, "y": 35}]},
+    {"stroke_id": "hand_06", "timestamp_ms": 480, "points": [{"x": 240, "y": 0}, {"x": 275, "y": 35}]},
+    {"stroke_id": "hand_07", "timestamp_ms": 560, "points": [{"x": 280, "y": 0}, {"x": 315, "y": 35}]},
+    {"stroke_id": "hand_08", "timestamp_ms": 640, "points": [{"x": 320, "y": 0}, {"x": 355, "y": 35}]},
+    {"stroke_id": "hand_09", "timestamp_ms": 720, "points": [{"x": 360, "y": 0}, {"x": 395, "y": 35}]},
+    {"stroke_id": "hand_10", "timestamp_ms": 800, "points": [{"x": 400, "y": 0}, {"x": 435, "y": 35}]},
+    {"stroke_id": "hand_11", "timestamp_ms": 880, "points": [{"x": 440, "y": 0}, {"x": 475, "y": 35}]},
+    {"stroke_id": "hand_12", "timestamp_ms": 960, "points": [{"x": 480, "y": 0}, {"x": 515, "y": 35}]},
+    {"stroke_id": "hand_13", "timestamp_ms": 1040, "points": [{"x": 520, "y": 0}, {"x": 555, "y": 35}]},
+    {"stroke_id": "hand_14", "timestamp_ms": 1120, "points": [{"x": 560, "y": 0}, {"x": 595, "y": 35}]},
+    {"stroke_id": "circle_start", "timestamp_ms": 1280, "points": [{"x": 10, "y": 50}, {"x": 110, "y": 50}, {"x": 110, "y": 150}, {"x": 10, "y": 150}, {"x": 10, "y": 100}, {"x": 10, "y": 50}]},
+    {"stroke_id": "circle_end", "timestamp_ms": 1360, "points": [{"x": 210, "y": 50}, {"x": 310, "y": 50}, {"x": 310, "y": 150}, {"x": 210, "y": 150}, {"x": 210, "y": 100}, {"x": 210, "y": 50}]},
+    {"stroke_id": "real_connector", "timestamp_ms": 1600, "points": [{"x": 60, "y": 100}, {"x": 260, "y": 100}]},
+    {"stroke_id": "real_arrowhead", "timestamp_ms": 1680, "points": [{"x": 235, "y": 82}, {"x": 260, "y": 100}, {"x": 235, "y": 118}]},
+    {"stroke_id": "unknown_stroke", "timestamp_ms": 2000, "points": [{"x": 360, "y": 160}, {"x": 375, "y": 175}, {"x": 370, "y": 160}]}
+  ],
+  "objects": [
+    {"object_id": "obj_hand_00", "timestamp_ms": 0, "type": "diagram_element", "bounds": {"x": 0, "y": 0, "width": 35, "height": 35}, "source_strokes": ["hand_00"]},
+    {"object_id": "obj_hand_01", "timestamp_ms": 80, "type": "diagram_element", "bounds": {"x": 40, "y": 0, "width": 35, "height": 35}, "source_strokes": ["hand_01"]},
+    {"object_id": "obj_hand_02", "timestamp_ms": 160, "type": "diagram_element", "bounds": {"x": 80, "y": 0, "width": 35, "height": 35}, "source_strokes": ["hand_02"]},
+    {"object_id": "obj_hand_03", "timestamp_ms": 240, "type": "diagram_element", "bounds": {"x": 120, "y": 0, "width": 35, "height": 35}, "source_strokes": ["hand_03"]},
+    {"object_id": "obj_hand_04", "timestamp_ms": 320, "type": "diagram_element", "bounds": {"x": 160, "y": 0, "width": 35, "height": 35}, "source_strokes": ["hand_04"]},
+    {"object_id": "obj_hand_05", "timestamp_ms": 400, "type": "diagram_element", "bounds": {"x": 200, "y": 0, "width": 35, "height": 35}, "source_strokes": ["hand_05"]},
+    {"object_id": "obj_hand_06", "timestamp_ms": 480, "type": "diagram_element", "bounds": {"x": 240, "y": 0, "width": 35, "height": 35}, "source_strokes": ["hand_06"]},
+    {"object_id": "obj_hand_07", "timestamp_ms": 560, "type": "diagram_element", "bounds": {"x": 280, "y": 0, "width": 35, "height": 35}, "source_strokes": ["hand_07"]},
+    {"object_id": "obj_hand_08", "timestamp_ms": 640, "type": "diagram_element", "bounds": {"x": 320, "y": 0, "width": 35, "height": 35}, "source_strokes": ["hand_08"]},
+    {"object_id": "obj_hand_09", "timestamp_ms": 720, "type": "diagram_element", "bounds": {"x": 360, "y": 0, "width": 35, "height": 35}, "source_strokes": ["hand_09"]},
+    {"object_id": "obj_hand_10", "timestamp_ms": 800, "type": "diagram_element", "bounds": {"x": 400, "y": 0, "width": 35, "height": 35}, "source_strokes": ["hand_10"]},
+    {"object_id": "obj_hand_11", "timestamp_ms": 880, "type": "diagram_element", "bounds": {"x": 440, "y": 0, "width": 35, "height": 35}, "source_strokes": ["hand_11"]},
+    {"object_id": "obj_hand_12", "timestamp_ms": 960, "type": "diagram_element", "bounds": {"x": 480, "y": 0, "width": 35, "height": 35}, "source_strokes": ["hand_12"]},
+    {"object_id": "obj_hand_13", "timestamp_ms": 1040, "type": "diagram_element", "bounds": {"x": 520, "y": 0, "width": 35, "height": 35}, "source_strokes": ["hand_13"]},
+    {"object_id": "obj_hand_14", "timestamp_ms": 1120, "type": "diagram_element", "bounds": {"x": 560, "y": 0, "width": 35, "height": 35}, "source_strokes": ["hand_14"]},
+    {"object_id": "obj_start", "timestamp_ms": 1400, "type": "text_block", "bounds": {"x": 30, "y": 70, "width": 60, "height": 60}, "semantic_content": "开始"},
+    {"object_id": "obj_end", "timestamp_ms": 1400, "type": "shape", "bounds": {"x": 230, "y": 70, "width": 60, "height": 60}},
+    {"object_id": "obj_circle_start", "timestamp_ms": 1280, "type": "diagram_element", "bounds": {"x": 10, "y": 50, "width": 100, "height": 100}, "source_strokes": ["circle_start"]},
+    {"object_id": "obj_circle_end", "timestamp_ms": 1360, "type": "diagram_element", "bounds": {"x": 210, "y": 50, "width": 100, "height": 100}, "source_strokes": ["circle_end"]},
+    {"object_id": "obj_unknown", "timestamp_ms": 2000, "type": "diagram_element", "bounds": {"x": 350, "y": 150, "width": 30, "height": 30}, "source_strokes": ["unknown_stroke"]}
+  ]
+}

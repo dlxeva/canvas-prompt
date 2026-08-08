@@ -238,9 +238,22 @@ def build_structural_observations(process_ir: dict, max_per_type: int = 6) -> di
         connections.append({
             "relation_id": item.get("relation_id"),
             "relation": item.get("relation"),
+            "evidence_level": item.get("evidence_level"),
+            "evidence_sources": item.get("evidence_sources", []),
             "start": _object_locator(objects_by_id, endpoints.get("start_object_id", "")),
             "end": _object_locator(objects_by_id, endpoints.get("end_object_id", "")),
+            "endpoint_anchors": {
+                "start_anchor_id": endpoints.get("start_anchor_id"),
+                "end_anchor_id": endpoints.get("end_anchor_id"),
+                "start_anchor_kind": endpoints.get("start_anchor_kind"),
+                "end_anchor_kind": endpoints.get("end_anchor_kind"),
+            },
             "geometry": item.get("geometry", {}),
+            **({"circle_anchor_ids": item["circle_anchor_ids"]} if item.get("circle_anchor_ids") else {}),
+            **({"region_anchor_ids": item["region_anchor_ids"]} if item.get("region_anchor_ids") else {}),
+            **({"visual_unit_ids": item["visual_unit_ids"]} if item.get("visual_unit_ids") else {}),
+            **({"temporal_evidence": item["temporal_evidence"]} if item.get("temporal_evidence") else {}),
+            **({"speech_evidence": item["speech_evidence"]} if item.get("speech_evidence") else {}),
             "assertion_level": "observation",
             "resolution_status": "unresolved",
         })
@@ -257,6 +270,19 @@ def build_structural_observations(process_ir: dict, max_per_type: int = 6) -> di
             "assertion_level": "observation",
             "resolution_status": "unresolved",
         })
+    regions = []
+    for item in process_ir.get("ink_region_candidates", [])[:max_per_type]:
+        regions.append({
+            "region_id": item.get("region_id"),
+            "relation": item.get("relation"),
+            "candidate_objects": [
+                _object_locator(objects_by_id, object_id)
+                for object_id in item.get("candidate_object_ids", [])[:8]
+            ],
+            "geometry": item.get("geometry", {}),
+            "assertion_level": "observation",
+            "resolution_status": "unresolved",
+        })
     arrowheads = []
     for item in process_ir.get("ink_arrowhead_candidates", [])[:max_per_type]:
         tip = item.get("tip", {})
@@ -268,6 +294,8 @@ def build_structural_observations(process_ir: dict, max_per_type: int = 6) -> di
                 "object": _object_locator(objects_by_id, tip.get("object_id", "")),
             },
             "candidate_visual_direction": item.get("candidate_visual_direction"),
+            "evidence_level": item.get("evidence_level"),
+            "evidence_sources": item.get("evidence_sources", []),
             "support_stroke_count": len(item.get("support_stroke_ids", [])),
             "geometry": item.get("geometry", {}),
             "assertion_level": "observation",
@@ -374,6 +402,7 @@ def build_structural_observations(process_ir: dict, max_per_type: int = 6) -> di
         "reference_candidates": references,
         "handdrawn_connection_candidates": connections,
         "handdrawn_circle_candidates": circles,
+        "handdrawn_region_candidates": regions,
         "handdrawn_arrowhead_candidates": arrowheads,
         "handdrawn_cross_candidates": crosses,
         "handdrawn_check_candidates": checks,
@@ -545,6 +574,7 @@ def build_compact_package(fixture_dir: Path) -> dict:
             "reference_candidate_count": len(process_ir.get("reference_candidates", [])),
             "ink_relation_candidate_count": len(process_ir.get("ink_relation_candidates", [])),
             "ink_circle_candidate_count": len(process_ir.get("ink_circle_candidates", [])),
+            "ink_region_candidate_count": len(process_ir.get("ink_region_candidates", [])),
             "ink_cross_candidate_count": len(process_ir.get("ink_cross_candidates", [])),
             "ink_check_candidate_count": len(process_ir.get("ink_check_candidates", [])),
             "paired_symbol_choice_candidate_count": len(process_ir.get("paired_symbol_choice_candidates", [])),

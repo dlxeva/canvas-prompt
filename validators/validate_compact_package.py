@@ -173,6 +173,7 @@ def validate_package(data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
                 structural_fields.append("paired_symbol_choice_candidates")
             if compact_version == "2.6":
                 structural_fields.append("handdrawn_annotation_candidates")
+                structural_fields.append("handdrawn_region_candidates")
             for field in structural_fields:
                 values = structural.get(field)
                 if not isinstance(values, list):
