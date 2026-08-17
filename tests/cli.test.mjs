@@ -216,6 +216,50 @@ test('read returns the latest prompt package from the single board via the forma
   assert.equal(parsed.delivery.inline_image_data, 'excluded')
 })
 
+test('read-recovery rereads the compiled round with a new context and supersedes the old policy', () => {
+  const root = mkdtempSync(join(tmpdir(), 'canvas-prompt-read-recovery-'))
+  const home = join(root, 'home')
+  const project = join(root, 'project')
+  mkdirSync(project, { recursive: true })
+
+  const boardDir = join(home, '.canvas-prompt', 'board')
+  const packageId = 'pp_canvas_round_fixture_001'
+  const fixturePath = resolve('prompt_package_builder/fixtures/context-source-canvas-round.json')
+  const promptPackage = readFileSync(fixturePath, 'utf8')
+  const roundDir = join(boardDir, 'rounds', packageId)
+  mkdirSync(roundDir, { recursive: true })
+  writeFileSync(join(roundDir, 'prompt-package.json'), promptPackage)
+  writeFileSync(join(boardDir, 'latest-prompt-package.json'), promptPackage)
+
+  const compile = spawnSync('python3', [
+    resolve('prompt_package_builder/compile_runtime_package.py'),
+    '--input', join(roundDir, 'prompt-package.json'),
+    '--output-dir', join(roundDir, 'engine'),
+  ], { encoding: 'utf8' })
+  assert.equal(compile.status, 0, compile.stderr)
+  const archivedPolicy = readFileSync(join(roundDir, 'engine', 'continuity-policy.json'), 'utf8')
+  const archivedPack = readFileSync(join(roundDir, 'engine', 'minimal-context-pack.json'), 'utf8')
+
+  const result = runWithEnvironment({ HOME: home }, 'read-recovery', '--project', project, '--correction', '我纠正：先确认本轮身份，再比较新旧理解。')
+  assert.equal(result.status, 0, result.stderr)
+  const parsed = JSON.parse(result.stdout)
+  assert.equal(parsed.source.read_mode, 're_read')
+  assert.equal(parsed.source.previous_context_id, 'ctx_round_pp_canvas_round_fixture_001')
+  assert.notEqual(parsed.source.context_id, parsed.source.previous_context_id)
+  assert.equal(parsed.context_pack.context_id, parsed.source.context_id)
+  assert.equal(parsed.context_pack.round_id, 'round_fixture_001')
+  assert.equal(parsed.continuity_policy.identity_receipt.round_id, 'round_fixture_001')
+  assert.equal(parsed.continuity_policy.continuity.read_mode, 're_read')
+  assert.equal(parsed.continuity_policy.continuity.status, 'reconciled')
+  assert.equal(parsed.continuity_policy.continuity.supersedes[0].status, 'superseded')
+  assert.equal(parsed.continuity_policy.continuity.supersedes[0].context_id, parsed.source.previous_context_id)
+  assert.equal(parsed.continuity_policy.continuity.reconciliation.correction.source_layer, 'user_input')
+  assert.equal(parsed.delivery.archive_mutated, false)
+  assert.equal(parsed.delivery.execution_authorized, false)
+  assert.equal(readFileSync(join(roundDir, 'engine', 'continuity-policy.json'), 'utf8'), archivedPolicy)
+  assert.equal(readFileSync(join(roundDir, 'engine', 'minimal-context-pack.json'), 'utf8'), archivedPack)
+})
+
 test('read reports an error when no prompt package exists on the board', () => {
   const root = mkdtempSync(join(tmpdir(), 'canvas-prompt-read-empty-'))
   const home = join(root, 'home')

@@ -161,7 +161,8 @@ export function appServerEnvironment(base = process.env) {
 }
 
 export function handoffMessage({ packagePath, roundPath, engine, snapshotPath, keyframePaths = [], sourceImagePaths = [] }) {
-  const enginePaths = [engine?.process_ir_path, engine?.compact_package_path].filter(Boolean)
+  const continuityPaths = [engine?.continuity_policy_path, engine?.minimal_context_pack_path].filter(Boolean)
+  const enginePaths = [engine?.compact_package_path, engine?.process_ir_path].filter(Boolean)
   return [
     '[Canvas Prompt｜本轮推演上下文]',
     snapshotPath ? '上方附件是本轮画布最终快照；完整上下文已随本轮一同接收。' : '本轮完整上下文已接收。',
@@ -170,11 +171,15 @@ export function handoffMessage({ packagePath, roundPath, engine, snapshotPath, k
     `本轮目录：${roundPath}`,
     ...(keyframePaths.length ? [`状态帧（仅在需要理解沉默的空间重组时查看）：${keyframePaths.join('；')}`] : []),
     ...(sourceImagePaths.length ? [`可编辑原图：${sourceImagePaths.join('；')}`] : []),
+    ...(continuityPaths.length ? [`可信交接产物（先读）：${continuityPaths.join('；')}`] : []),
     ...(enginePaths.length ? [`核心编译产物：${enginePaths.join('；')}`] : []),
     [
-      '快速读取规则：先用 Canvas Prompt MCP 读取 Compact Package；不要打开浏览器画布、索取 Base64 截图，或回放原始笔迹作为第一步。只有 Compact Package 明确留下重要视觉歧义时，才查看一个本地快照。',
+      '快速读取规则：先用 Canvas Prompt MCP 读取最新 round 的可信交接产物；先读 continuity policy 的 identity_receipt，再读 Minimal Context Pack，随后先用 Canvas Prompt MCP 读取 Compact Package，再读 Process IR。不要打开浏览器画布、索取 Base64 截图，或回放原始笔迹作为第一步。只有 Compact Package 明确留下重要视觉歧义时，才查看一个本地快照。',
       '交接规则：这是一轮已经结束、不可变的富输入，不是要求用户继续操作画布。先读取 Prompt Package 与核心编译产物。',
-      '回复规则：先用 2–4 句说明“我这样理解你这一轮”的目标、结构或修改请求；明确区分观察、合理推断和待确认。纯分析、讨论、查漏可以直接继续。',
+      '可信回执规则：把 package_id、round_id、context_id、context_version、快照状态/索引、时间窗口和 compiler/content hash 当作本轮身份回执；若回执缺失、与当前 round 不一致或 continuity.response_decision 不是 answer_current_context_only，先停在身份核对，不得沿用旧理解。',
+      '回复规则：首响应附一行紧凑身份回执（package_id／round_id／context_id／version／快照状态或索引／时间窗口）；先用 2–4 句说明“我这样理解你这一轮”的目标、结构或修改请求，再按“我观察到／我推断／我还不确定”明确区分 visual_observation、user_input、compiler_candidate 和 unresolved，并保留 status 与 evidence refs。纯分析、讨论、查漏可以直接继续。',
+      '视觉硬门：最终快照 unavailable/degraded/conflicting 时，不得给出画面、位置、笔画、对象可见性或视觉关系结论；只能复述有来源的 user_input，并把 compiler_candidate 留作待核对候选。',
+      '读错恢复：若用户指出读错，重新读取最新 round（Canvas Prompt MCP；需要新的交接回执时用 `node bin/canvas-prompt.mjs read-recovery --correction "<用户纠正>"`），并并列旧理解、用户纠正、新理解。新读取必须生成新的 context_id；旧 response policy 标记 superseded，不得继续进入回答。same_context、identity_mismatch 或 block_until_new_context 时，只报告阻断并等待新回执，不能拼接旧轮次。',
       '执行门禁：画布交接只授权理解，不授权产生实质改动。若下一步会改网站或代码、修改文件、生成或替换交付物、发送/发布，先把理解整理成可确认计划；不得在同一回复中直接执行。若当前宿主是 Codex 且原生计划模式可用，转入计划模式；否则以“我理解的修改／准备怎么做／待确认”三段简短计划复述。等待用户明确确认（如“对，按这个做”“开始改”）后才执行。',
       '不要把 package ID、事件数量、本地路径或读取步骤当作主要回复；不要要求用户手动调用 Skill、重新上传截图或回到画布来解释已经导出的内容。',
       '若语义不足但有空间重组：只报告可直接观察到的对象创建、对象移动、对象尺寸变化、删除与状态帧变化；不要给对象杜撰名称或优先级。只提出一个最小澄清问题，并说明回答后你能继续做什么。',

@@ -4,7 +4,15 @@ export type MainThreadHandoffInput = {
   roundPath: string
   snapshotPath?: string | null
   keyframePaths?: string[]
-  engine: { ok: boolean; error?: string; process_ir_path?: string; compact_package_path?: string }
+  engine: {
+    ok: boolean
+    error?: string
+    process_ir_path?: string
+    compact_package_path?: string
+    minimal_context_pack_path?: string
+    continuity_policy_path?: string
+    context_id?: string
+  }
   appServerCommand?: string
   startupTimeoutMs?: number
   completionTimeoutMs?: number

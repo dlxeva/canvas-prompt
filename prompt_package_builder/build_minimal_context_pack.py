@@ -875,6 +875,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--task-kind", default="understand")
     parser.add_argument("--question", default="Summarize the bounded evidence for this round.")
     parser.add_argument("--context-id")
+    parser.add_argument("--parent-context-id")
     args = parser.parse_args(argv)
     try:
         compact, process_ir = _load_input(args)
@@ -883,6 +884,7 @@ def main(argv: list[str] | None = None) -> int:
             process_ir,
             task={"kind": args.task_kind, "question": args.question},
             context_id=args.context_id,
+            parent_context_id=args.parent_context_id,
         )
         write_json(args.output, result)
         print(json.dumps({"ok": True, "output": str(args.output), "context_id": result["context_id"], "budget": result["budget"]}, ensure_ascii=False))

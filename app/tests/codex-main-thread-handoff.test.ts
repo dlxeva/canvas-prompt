@@ -172,10 +172,21 @@ describe('main-thread handoff routing', () => {
     const message = handoffMessage({
       packagePath: '/project/.canvas-prompt/rounds/r1/prompt-package.json',
       roundPath: '/project/.canvas-prompt/rounds/r1',
-      engine: { compact_package_path: '/project/.canvas-prompt/rounds/r1/engine/compact-package.json' },
+      engine: {
+        continuity_policy_path: '/project/.canvas-prompt/rounds/r1/engine/continuity-policy.json',
+        minimal_context_pack_path: '/project/.canvas-prompt/rounds/r1/engine/minimal-context-pack.json',
+        compact_package_path: '/project/.canvas-prompt/rounds/r1/engine/compact-package.json',
+      },
       snapshotPath: '/project/.canvas-prompt/rounds/r1/canvas-snapshot.png',
     })
     expect(message).toContain('先用 Canvas Prompt MCP 读取 Compact Package')
+    expect(message).toContain('可信交接产物（先读）：/project/.canvas-prompt/rounds/r1/engine/continuity-policy.json；/project/.canvas-prompt/rounds/r1/engine/minimal-context-pack.json')
+    expect(message).toContain('identity_receipt')
+    expect(message).toContain('首响应附一行紧凑身份回执')
+    expect(message).toContain('visual_observation、user_input、compiler_candidate 和 unresolved')
+    expect(message).toContain('若用户指出读错，重新读取最新 round')
+    expect(message).toContain('node bin/canvas-prompt.mjs read-recovery --correction')
+    expect(message).toContain('新读取必须生成新的 context_id')
     expect(message).toContain('不要打开浏览器画布')
     expect(message).toContain('先用 2–4 句说明“我这样理解你这一轮”')
     expect(message).toContain('画布交接只授权理解，不授权产生实质改动')
