@@ -13,14 +13,34 @@ continuation command in any conversation reads that board's latest round. Do
 not make the user copy a path, choose an archive, or manage a conversation
 binding. Do not claim an experimental native host panel.
 
-Before the first launch in a new installation, tell the user that bootstrap
-will install Canvas Prompt-managed Node and local-ASR dependencies into an
-isolated runtime (current macOS arm64 check: about 235 MB), and that first ASR
-start downloads a separately cached base model (about 148 MB; cold downloads
-can take several minutes). Then run the managed bootstrap. It reuses healthy
-local runtime components when available. Opening runs the local speech
-readiness gate before opening a normal voice-enabled canvas; do not claim the
-canvas is ready until this gate has passed.
+Before describing setup work, read the launch preflight. It only checks local
+component health and does not install, start, download, scan model caches, read
+credentials, or inspect project content.
+
+```bash
+node bin/canvas-prompt.mjs preflight --project /absolute/path/to/the/active/project
+```
+
+Use its `state` to set expectations accurately:
+
+- `healthy_reuse`: say that the validated app and local-ASR runtime components
+  will be reused. Do not announce a download.
+- `first_install`: say that setup is expected to install the private app and
+  local-ASR runtime components. The first ASR start may download its base model
+  when the model is absent; do not claim that the model is missing because the
+  safe preflight deliberately does not scan model caches.
+- `repair_or_upgrade`: say that setup may repair or refresh existing
+  components. Do not predict the amount of network work.
+- `unknown`: say that local state could not be determined safely and that the
+  setup logs will report each component action. Do not announce a download or
+  size in advance.
+
+The historical macOS arm64 observations of about 235 MB for the ASR runtime and
+about 148 MB for the base model are estimates only. Mention them only when the
+user asks about possible disk or network cost, and label them as platform- and
+cache-dependent estimates. Then run the managed bootstrap. Opening runs the
+local speech readiness gate before opening a normal voice-enabled canvas; do
+not claim the canvas is ready until this gate has passed.
 Never ask the user to manually find Whisper, ffmpeg, or a private ASR project.
 
 ```bash
