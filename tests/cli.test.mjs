@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, realpathSync, readFileSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readdirSync, realpathSync, readFileSync, rmSync } from 'node:fs'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -14,6 +15,100 @@ const runWithPreferences = (preferencesPath, ...args) => spawnSync(process.execP
 })
 const runWithEnvironment = (environment, ...args) => spawnSync(process.execPath, [cli, ...args], {
   encoding: 'utf8', env: { ...process.env, ...environment },
+})
+
+const makeFakeAsrRuntime = ({ healthy }) => {
+  const runtime = mkdtempSync(join(tmpdir(), 'canvas-prompt-runtime-'))
+  const python = join(runtime, 'asr-venv', 'bin', 'python')
+  mkdirSync(join(python, '..'), { recursive: true })
+  writeFileSync(python, `#!/bin/sh\nexit ${healthy ? 0 : 1}\n`)
+  chmodSync(python, 0o755)
+  return runtime
+}
+
+const makeCleanCliSource = ({ appHealthy = false } = {}) => {
+  const source = mkdtempSync(join(tmpdir(), 'canvas-prompt-clean-source-'))
+  for (const directory of ['bin', 'app', 'mcp']) mkdirSync(join(source, directory), { recursive: true })
+  copyFileSync(cli, join(source, 'bin', 'canvas-prompt.mjs'))
+  copyFileSync(resolve('app', 'package.json'), join(source, 'app', 'package.json'))
+  copyFileSync(resolve('app', 'package-lock.json'), join(source, 'app', 'package-lock.json'))
+  for (const entry of readdirSync(resolve('app'))) {
+    if (entry.endsWith('.mjs')) copyFileSync(resolve('app', entry), join(source, 'app', entry))
+  }
+  copyFileSync(resolve('mcp', 'server.mjs'), join(source, 'mcp', 'server.mjs'))
+  copyFileSync(resolve('mcp', 'stdio-framer.mjs'), join(source, 'mcp', 'stdio-framer.mjs'))
+  if (appHealthy) {
+    const nodeModules = join(source, 'app', 'node_modules')
+    const vite = join(nodeModules, '.bin', 'vite')
+    mkdirSync(join(vite, '..'), { recursive: true })
+    copyFileSync(process.execPath, vite)
+    const hashRoot = realpathSync(source)
+    const hashes = spawnSync('shasum', ['-a', '256', join(hashRoot, 'app', 'package.json'), join(hashRoot, 'app', 'package-lock.json')], { encoding: 'utf8' })
+    assert.equal(hashes.status, 0, hashes.stderr)
+    writeFileSync(join(nodeModules, '.canvas-prompt-dependency-fingerprint'), createHash('sha256').update(hashes.stdout).digest('hex'))
+  }
+  return join(source, 'bin', 'canvas-prompt.mjs')
+}
+
+test('preflight reports healthy reuse without mutating the managed runtime', () => {
+  const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
+  const runtime = makeFakeAsrRuntime({ healthy: true })
+  const cleanCli = makeCleanCliSource({ appHealthy: true })
+  const before = readFileSync(join(runtime, 'asr-venv', 'bin', 'python'), 'utf8')
+  const result = spawnSync(process.execPath, [cleanCli, 'preflight', '--project', project], {
+    encoding: 'utf8', env: { ...process.env, CANVAS_PROMPT_RUNTIME_DIR: runtime },
+  })
+  assert.equal(result.status, 0, result.stderr)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.state, 'healthy_reuse')
+  assert.equal(report.mutates_runtime, false)
+  assert.equal(report.components.app_dependencies.healthy, true)
+  assert.equal(report.components.local_asr_runtime.healthy, true)
+  assert.equal(readFileSync(join(runtime, 'asr-venv', 'bin', 'python'), 'utf8'), before)
+})
+
+test('preflight reports a true first install from clean source and runtime fixtures', () => {
+  const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
+  const runtime = join(mkdtempSync(join(tmpdir(), 'canvas-prompt-empty-runtime-parent-')), 'runtime')
+  const cleanCli = makeCleanCliSource()
+  const result = spawnSync(process.execPath, [cleanCli, 'preflight', '--project', project], {
+    encoding: 'utf8', env: { ...process.env, CANVAS_PROMPT_RUNTIME_DIR: runtime },
+  })
+  assert.equal(result.status, 0, result.stderr)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.state, 'first_install')
+  assert.equal(report.components.app_dependencies.present, false)
+  assert.equal(report.components.local_asr_runtime.present, false)
+  assert.equal(report.components.speech_model.state, 'unknown_until_asr_readiness')
+  assert.equal(existsSync(runtime), false)
+})
+
+test('preflight reports repair or upgrade for an unhealthy existing ASR runtime', () => {
+  const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
+  const runtime = makeFakeAsrRuntime({ healthy: false })
+  const cleanCli = makeCleanCliSource({ appHealthy: true })
+  const result = spawnSync(process.execPath, [cleanCli, 'preflight', '--project', project], {
+    encoding: 'utf8', env: { ...process.env, CANVAS_PROMPT_RUNTIME_DIR: runtime },
+  })
+  assert.equal(result.status, 0, result.stderr)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.state, 'repair_or_upgrade')
+  assert.equal(report.components.app_dependencies.healthy, true)
+  assert.equal(report.components.local_asr_runtime.present, true)
+  assert.equal(report.components.local_asr_runtime.healthy, false)
+})
+
+test('preflight reports unknown when a safe dependency inspection is unavailable', () => {
+  const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
+  const runtime = join(mkdtempSync(join(tmpdir(), 'canvas-prompt-unknown-runtime-parent-')), 'runtime')
+  const result = spawnSync(process.execPath, [cli, 'preflight', '--project', project], {
+    encoding: 'utf8', env: { ...process.env, PATH: '', CANVAS_PROMPT_RUNTIME_DIR: runtime },
+  })
+  assert.equal(result.status, 0, result.stderr)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.state, 'unknown')
+  assert.match(report.setup_expectation, /do not announce a download size/i)
+  assert.equal(existsSync(runtime), false)
 })
 
 test('init emits MCP configuration with optional project provenance', () => {
@@ -133,7 +228,8 @@ test('doctor reports a missing package without treating it as a failure', () => 
 
 test('setup can prepare only the core runtime without changing a global environment', () => {
   const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
-  const result = run('setup', '--core-only', '--project', project)
+  const home = mkdtempSync(join(tmpdir(), 'canvas-prompt-setup-home-'))
+  const result = runWithEnvironment({ HOME: home }, 'setup', '--core-only', '--project', project)
   assert.equal(result.status, 0, result.stderr)
   assert.match(result.stderr, /Canvas Prompt app dependencies|Reusing Canvas Prompt app dependencies/)
 })

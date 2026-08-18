@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { resolveConversationScope, threadScopeKey, validSessionId, validThreadId } from '../app/conversation-scope.mjs'
 import { migrateLegacyArchive } from '../app/legacy-archive-migration.mjs'
 
@@ -91,6 +92,67 @@ const DEFAULT_MANAGED_ASR_PORT = String(MANAGED_ASR_PORT_START)
 const asrUrl = (environment = process.env) => environment.CANVAS_PROMPT_ASR_URL ?? `http://127.0.0.1:${environment.CANVAS_PROMPT_ASR_PORT ?? DEFAULT_MANAGED_ASR_PORT}`
 const runtimeEnvironment = (overrides = {}) => ({ ...process.env, ...overrides, CANVAS_PROMPT_RUNTIME_DIR: runtimeDir() })
 const runBootstrap = (mode) => spawnSync('bash', [resolve(rootDir, 'scripts', 'bootstrap-runtime.sh'), mode], { stdio: 'inherit', env: runtimeEnvironment() })
+const appDependencyFingerprint = () => {
+  const sources = [resolve(rootDir, 'app', 'package.json'), resolve(rootDir, 'app', 'package-lock.json')]
+  const hashes = spawnSync('shasum', ['-a', '256', ...sources], { encoding: 'utf8' })
+  if (hashes.error || hashes.status !== 0) return null
+  return createHash('sha256').update(hashes.stdout).digest('hex')
+}
+const launchPreflight = async () => {
+  const appReceiptPath = resolve(rootDir, 'app', 'node_modules', '.canvas-prompt-dependency-fingerprint')
+  const appVitePath = resolve(rootDir, 'app', 'node_modules', '.bin', 'vite')
+  const asrVenvPath = resolve(runtimeDir(), 'asr-venv')
+  const asrPythonPath = resolve(asrVenvPath, 'bin', 'python')
+  try {
+    const expectedAppFingerprint = appDependencyFingerprint()
+    const appReceipt = existsSync(appReceiptPath) ? (await readFile(appReceiptPath, 'utf8')).trim() : null
+    const appPresent = existsSync(resolve(rootDir, 'app', 'node_modules')) || appReceipt !== null
+    const appHealthy = Boolean(expectedAppFingerprint && existsSync(appVitePath) && appReceipt === expectedAppFingerprint)
+    const asrPresent = existsSync(asrVenvPath)
+    const asrProbe = existsSync(asrPythonPath)
+      ? spawnSync(asrPythonPath, ['-c', 'import fastapi, uvicorn, faster_whisper'], { stdio: 'ignore' })
+      : null
+    const asrHealthy = asrProbe?.status === 0
+    const inspectionComplete = expectedAppFingerprint !== null && !asrProbe?.error
+    const state = !inspectionComplete
+      ? 'unknown'
+      : appHealthy && asrHealthy
+        ? 'healthy_reuse'
+        : !appPresent && !asrPresent
+          ? 'first_install'
+          : 'repair_or_upgrade'
+    return {
+      schema_version: 1,
+      state,
+      safe_to_run_setup: true,
+      mutates_runtime: false,
+      components: {
+        app_dependencies: { present: appPresent, healthy: appHealthy },
+        local_asr_runtime: { present: asrPresent, healthy: asrHealthy },
+        speech_model: {
+          state: 'unknown_until_asr_readiness',
+          note: 'Preflight does not scan model caches or claim that a download is required.',
+        },
+      },
+      setup_expectation: {
+        healthy_reuse: 'Setup should reuse the validated app and local ASR runtime components.',
+        first_install: 'Setup is expected to install app and local ASR runtime components. First ASR start may download its model if the model is not already cached.',
+        repair_or_upgrade: 'Setup may repair or refresh one or more existing runtime components. Exact network work is determined by the installers.',
+        unknown: 'Runtime state could not be determined safely. Run setup and rely on its component-level logs; do not announce a download size in advance.',
+      }[state],
+    }
+  } catch (error) {
+    return {
+      schema_version: 1,
+      state: 'unknown',
+      safe_to_run_setup: true,
+      mutates_runtime: false,
+      components: null,
+      setup_expectation: 'Runtime state could not be determined safely. Run setup and rely on its component-level logs; do not announce a download size in advance.',
+      inspection_error: error.message,
+    }
+  }
+}
 const allowsExternalAsr = (environment = process.env) => environment.CANVAS_PROMPT_ALLOW_EXTERNAL_ASR === '1' || Boolean(environment.CANVAS_PROMPT_ASR_URL)
 const probeAsr = async (environment = process.env) => {
   const endpoint = asrUrl(environment)
@@ -165,6 +227,7 @@ const asrEnvironmentForOpen = async (project) => {
 const help = () => console.log(`Canvas Prompt host-neutral entrypoint
 
 Usage:
+  canvas-prompt preflight [--project <dir>]
   canvas-prompt setup [--core-only]
   canvas-prompt open [--project <dir>] [--conversation-only] [--host codex|workbuddy|local]
   canvas-prompt read [--project <dir>]
@@ -174,7 +237,8 @@ Usage:
   canvas-prompt migrate --from <legacy-project-or-.canvas-prompt-dir>
   canvas-prompt preferences [--guidance on|off]
 
-setup installs Canvas Prompt-managed dependencies into its local runtime and
+preflight reads local component health without installing, starting, or
+downloading anything. setup installs Canvas Prompt-managed dependencies and
 reuses validated existing dependencies. The local ASR model downloads on first
 start. A supplied thread ID is provenance only, never inferred from project
 history. init prints the single-board MCP configuration. migrate copies complete
@@ -209,7 +273,10 @@ try {
     if (boundThreadId && !validThreadId(boundThreadId)) throw new Error('Canvas Prompt received an invalid host thread ID.')
     if (suppliedSessionId && !validSessionId(suppliedSessionId)) throw new Error('Canvas Prompt received an invalid session capability.')
     const scope = resolveConversationScope({ projectDir: project, threadId: boundThreadId, sessionId: suppliedSessionId, singleBoard: true })
-    if (command === 'setup') {
+    if (command === 'preflight') {
+      console.log(JSON.stringify(await launchPreflight(), null, 2))
+    }
+    else if (command === 'setup') {
       await ensureMcpRuntime()
       const result = runBootstrap(flag('--core-only') ? '--core-only' : '--with-asr')
       process.exitCode = result.status ?? 1
