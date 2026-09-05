@@ -185,6 +185,28 @@ class ContextSourceAdapterTests(unittest.TestCase):
         self.assertEqual("available", raw_pack["quality"]["layers"]["final_snapshot"])
         self.assert_valid(raw, raw_pack)
 
+    def test_canvas_round_snapshot_metadata_does_not_open_visual_gate(self):
+        source = load_fixture("context-source-canvas-round.json")
+        variants = {
+            "metadata_only": ({"format": "png", "width": 640, "height": 360}, "unavailable"),
+            "not_found_note": ({"note": "snapshot not found"}, "unavailable"),
+            "degraded": ({"availability": "degraded", "format": "png"}, "degraded"),
+            "conflicting": ({"availability": "conflicting", "format": "png"}, "conflicting"),
+            "parent_unavailable_nested_available": (
+                {"availability": "unavailable", "final": {"availability": "available", "url": "data:image/png;base64,excluded"}},
+                "conflicting",
+            ),
+        }
+        for name, (snapshot, expected_state) in variants.items():
+            with self.subTest(name=name):
+                candidate = copy.deepcopy(source)
+                candidate["canvas_snapshot"]["final"] = snapshot
+                pack = adapt_canvas_round(candidate, context_id=f"ctx_snapshot_{name}")
+                self.assertEqual(expected_state, pack["quality"]["layers"]["final_snapshot"])
+                self.assertTrue(any(item["source_layer"] == "user_input" for item in pack["claims"]))
+                self.assertFalse(pack["execution_authorized"])
+                self.assert_valid(candidate, pack)
+
     def test_explicit_kind_mismatch_and_identity_tamper_fail_closed(self):
         source = load_fixture("context-source-artifact-review.json")
         with self.assertRaises(ValueError):

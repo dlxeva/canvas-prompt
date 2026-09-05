@@ -36,13 +36,19 @@ try:  # package imports
     from .build_minimal_context_pack import (
         HARD_TEXT_TOKENS,
         _budget as _minimal_budget,
+        _snapshot_state_from_value,
         build_minimal_context_pack,
     )
     from .process_ir import compile_process_ir
 except ImportError:  # existing script-style imports
     from browser_package_to_fixture import normalized_captions, normalized_events, raw_objects
     from build_compact_package import build_compact_caption_summary
-    from build_minimal_context_pack import HARD_TEXT_TOKENS, _budget as _minimal_budget, build_minimal_context_pack
+    from build_minimal_context_pack import (
+        HARD_TEXT_TOKENS,
+        _budget as _minimal_budget,
+        _snapshot_state_from_value,
+        build_minimal_context_pack,
+    )
     from process_ir import compile_process_ir
 
 
@@ -250,9 +256,13 @@ def _bounded_snapshot(value: Any) -> dict[str, Any] | None:
         return None
     # Only the availability/format box is allowed into the MCPack builder.
     # URLs, inline payloads and source bytes are intentionally dropped.
-    if snapshot.get("availability") == "unavailable" or snapshot.get("note") == "snapshot not found":
+    state = _snapshot_state_from_value(snapshot)
+    if state is None:
         return None
-    result: dict[str, Any] = {"availability": "available"}
+    # Preserve explicit degraded/unavailable/conflicting states.  In
+    # particular, a non-empty format/size object without a URL or availability
+    # marker must remain unavailable instead of being upgraded by the adapter.
+    result: dict[str, Any] = {"availability": state}
     for key in ("format", "content_type"):
         if isinstance(snapshot.get(key), str) and snapshot[key]:
             result[key] = snapshot[key]

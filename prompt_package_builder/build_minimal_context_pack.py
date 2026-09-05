@@ -99,6 +99,100 @@ def _safe_bounds(value: Any) -> dict[str, float] | None:
     return result
 
 
+def _snapshot_state_from_value(value: Any) -> str | None:
+    """Read one bounded snapshot reference without treating metadata as proof.
+
+    A compact snapshot can be an explicit status, a raw URL, or the compact
+    marker emitted when an inline image was deliberately removed from the
+    model envelope.  A non-empty format/size dictionary alone is only metadata
+    and therefore remains unavailable.  Empty/missing values return ``None``
+    so callers can distinguish an absent source from an explicit state.
+    """
+    if not isinstance(value, dict) or not value:
+        return None
+    # Some persisted shapes wrap ``final`` with a parent status.  Read both
+    # levels: an explicit parent restriction must not be hidden by a nested
+    # optimistic value (for example ``unavailable`` + ``final.available``).
+    nested_final = value.get("final")
+    nested_state = _snapshot_state_from_value(nested_final) if isinstance(nested_final, dict) else None
+    direct_snapshot_keys = {
+        "availability",
+        "note",
+        "url",
+        "inline_payload_excluded",
+        "requires_external_materialization",
+        "format",
+        "content_type",
+        "width",
+        "height",
+    }
+    has_direct_snapshot_fields = any(key in value for key in direct_snapshot_keys)
+    direct_state: str | None = None
+    availability = value.get("availability")
+    if isinstance(availability, str):
+        normalized = availability.strip().casefold()
+        if normalized in QUALITY_STATES:
+            direct_state = normalized
+        else:
+            # An unknown explicit state must not open a visual-claim gate.
+            direct_state = "unavailable"
+
+    if direct_state is None:
+        note = value.get("note")
+        if isinstance(note, str) and note.strip().casefold() == "snapshot not found":
+            direct_state = "unavailable"
+
+    if direct_state is None:
+        # The raw exporter has a URL; compact_snapshot replaces data URLs with
+        # these two bounded markers.  Either shape is evidence that a snapshot
+        # material existed, while format/width/height by themselves are not.
+        url = value.get("url")
+        if isinstance(url, str) and url.strip():
+            direct_state = "available"
+        elif value.get("inline_payload_excluded") is True and value.get("requires_external_materialization") is True:
+            direct_state = "available"
+        elif has_direct_snapshot_fields:
+            # A non-empty metadata-only dictionary is not proof that an image
+            # was captured or remains reachable.
+            direct_state = "unavailable"
+
+    if direct_state is None:
+        return nested_state
+    if nested_state is None:
+        return direct_state
+    if direct_state == nested_state:
+        return direct_state
+    # Parent/nested disagreement is itself a conflicting source; do not allow
+    # the nested ``available`` state to erase a restriction from its wrapper.
+    return "conflicting"
+
+
+def _snapshot_state(compact: dict[str, Any], process_ir: dict[str, Any]) -> str:
+    """Combine compact/IR snapshot states conservatively.
+
+    Sources that disagree are marked ``conflicting`` rather than allowing the
+    most optimistic state to win.  This keeps visual claims fail-closed while
+    preserving explicit degraded/unavailable/conflicting states for policy.
+    """
+    states = [
+        state
+        for state in (
+            _snapshot_state_from_value(compact.get("final_canvas_snapshot")),
+            _snapshot_state_from_value(process_ir.get("canvas_snapshot")),
+        )
+        if state is not None
+    ]
+    if not states:
+        return "unavailable"
+    if len(set(states)) == 1:
+        return states[0]
+    if "conflicting" in states:
+        return "conflicting"
+    # A disagreement between any independently supplied states must not be
+    # resolved by choosing the optimistic value.
+    return "conflicting"
+
+
 def _json_pointer(path: str) -> str:
     return path if path.startswith("/") else f"/{path}"
 
@@ -636,6 +730,7 @@ def _quality(
     compact: dict[str, Any],
     process_ir: dict[str, Any],
     *,
+    snapshot_state: str | None = None,
     claim_count: int,
     candidate_count: int,
     candidate_omitted: int,
@@ -645,10 +740,11 @@ def _quality(
 ) -> dict[str, Any]:
     source_quality = process_ir.get("quality") if isinstance(process_ir.get("quality"), dict) else {}
     ink_trace = source_quality.get("ink_trace") if isinstance(source_quality.get("ink_trace"), dict) else {}
-    has_snapshot = bool(compact.get("final_canvas_snapshot")) or bool(process_ir.get("canvas_snapshot"))
+    snapshot_state = snapshot_state or _snapshot_state(compact, process_ir)
+    has_snapshot = snapshot_state == "available"
     speech_available = bool(captions)
     ocr_available = bool(_as_list(process_ir.get("ocr_observations")))
-    if conflicts:
+    if conflicts or snapshot_state == "conflicting":
         overall = "conflicting"
     elif not has_snapshot and not speech_available and not _as_list(process_ir.get("objects")):
         overall = "unavailable"
@@ -660,15 +756,15 @@ def _quality(
     if ink_geometry == "missing":
         ink_geometry = "unavailable"
     layers = {
-        "final_snapshot": "available" if has_snapshot else "unavailable",
+        "final_snapshot": snapshot_state,
         "speech": "available" if speech_available else "unavailable",
         "ink_geometry": ink_geometry,
         "ocr": "available" if ocr_available else "unavailable",
         "compiler": "available" if process_ir.get("schema_version") else "unavailable",
     }
     issues: list[str] = []
-    if not has_snapshot:
-        issues.append("final_snapshot_unavailable")
+    if snapshot_state != "available":
+        issues.append(f"final_snapshot_{snapshot_state}")
     if not speech_available:
         issues.append("speech_unavailable")
     if not ocr_available:
@@ -736,6 +832,7 @@ def build_minimal_context_pack(
     if not isinstance(compact_package, dict) or not isinstance(process_ir, dict):
         raise TypeError("compact_package and process_ir must be JSON objects")
     evidence = _Evidence()
+    snapshot_state = _snapshot_state(compact_package, process_ir)
     captions = _caption_items(compact_package, process_ir)
     claims = _object_claims(process_ir, evidence)
     claims.extend(_speech_claims(captions, evidence))
@@ -744,8 +841,17 @@ def build_minimal_context_pack(
 
     if not captions:
         evidence.unavailable("speech", "带时间戳的语音来源不可用")
-    if not compact_package.get("final_canvas_snapshot") and not process_ir.get("canvas_snapshot"):
-        evidence.unavailable("final_snapshot", "最终画布快照不可用")
+    if snapshot_state != "available":
+        if snapshot_state == "unavailable":
+            snapshot_evidence_id = evidence.unavailable("final_snapshot", "最终画布快照不可用")
+        else:
+            # Evidence items intentionally support only available/unavailable;
+            # retain degraded/conflicting in quality.layers and use a neutral
+            # evidence ID so the response policy does not collapse the state.
+            snapshot_evidence_id = evidence.unavailable(
+                f"snapshot_{snapshot_state}",
+                f"最终画布快照状态为 {snapshot_state}，画面事实范围受限",
+            )
     if not _as_list(process_ir.get("ocr_observations")):
         evidence.unavailable("ocr", "OCR 来源不可用或按策略留在本地复核")
 
@@ -764,12 +870,14 @@ def build_minimal_context_pack(
             "text": "语音不可用，不能据此判断用户意图或修正视觉候选",
             "evidence_refs": [_evidence_id("unavailable", "speech")],
         })
-    if not compact_package.get("final_canvas_snapshot") and not process_ir.get("canvas_snapshot"):
+    if snapshot_state != "available":
+        unresolved_reason = snapshot_state if snapshot_state in {"degraded", "conflicting"} else "unavailable"
+        unresolved_id = "unres_snapshot_unavailable" if snapshot_state == "unavailable" else f"unres_snapshot_{snapshot_state}"
         unresolved.append({
-            "id": "unres_snapshot_unavailable",
-            "reason": "unavailable",
-            "text": "最终快照不可用，画面事实范围受限",
-            "evidence_refs": [_evidence_id("unavailable", "final_snapshot")],
+            "id": unresolved_id,
+            "reason": unresolved_reason,
+            "text": "最终快照不可用或状态受限，画面事实范围受限",
+            "evidence_refs": [snapshot_evidence_id],
         })
     if not _as_list(process_ir.get("ocr_observations")) and (_as_list(process_ir.get("objects")) or _as_list(process_ir.get("ink_annotation_candidates"))):
         unresolved.append({
@@ -789,6 +897,7 @@ def build_minimal_context_pack(
         compact_package,
         process_ir,
         claim_count=len(claims),
+        snapshot_state=snapshot_state,
         candidate_count=len(relation_candidates),
         candidate_omitted=candidate_omitted,
         truncated=False,

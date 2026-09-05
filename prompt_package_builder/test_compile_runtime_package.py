@@ -59,6 +59,47 @@ class RuntimeArtifactPathTests(unittest.TestCase):
         self.assertEqual([], find_forbidden(context_pack))
         self.assertEqual([], find_forbidden(continuity))
 
+    def test_snapshot_availability_is_preserved_at_formal_compile_boundary(self):
+        source = json.loads(
+            (MODULE_DIR / "fixtures" / "context-source-canvas-round.json").read_text(encoding="utf-8")
+        )
+        variants = {
+            "unavailable": ({"availability": "unavailable", "reason": "image missing"}, "unavailable"),
+            "not_found_note": ({"note": "snapshot not found"}, "unavailable"),
+            "metadata_only": ({"format": "png", "width": 640, "height": 360}, "unavailable"),
+            "degraded": ({"availability": "degraded", "format": "png", "width": 640, "height": 360}, "degraded"),
+            "conflicting": ({"availability": "conflicting", "format": "png", "width": 640, "height": 360}, "conflicting"),
+            "parent_unavailable_nested_available": (
+                {"availability": "unavailable", "final": {"availability": "available", "url": "data:image/png;base64,excluded"}},
+                "conflicting",
+            ),
+            "available_url": ({"url": "data:image/png;base64,excluded", "format": "png", "width": 640, "height": 360}, "available"),
+        }
+
+        for name, (snapshot, expected_state) in variants.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                candidate = deepcopy(source)
+                candidate["canvas_snapshot"]["final"] = snapshot
+                source_path = Path(directory) / "prompt-package.json"
+                source_path.write_text(json.dumps(candidate), encoding="utf-8")
+                result = compile_runtime_package(source_path, Path(directory) / "engine")
+                context_pack = json.loads(Path(result["minimal_context_pack_path"]).read_text(encoding="utf-8"))
+                continuity = json.loads(Path(result["continuity_policy_path"]).read_text(encoding="utf-8"))
+
+                self.assertEqual(expected_state, context_pack["quality"]["layers"]["final_snapshot"])
+                self.assertEqual(expected_state, continuity["snapshot_gate"]["status"])
+                self.assertEqual(
+                    "allow_visual_claims" if expected_state == "available" else "block_visual_claims",
+                    continuity["snapshot_gate"]["decision"],
+                )
+                self.assertEqual("available", context_pack["quality"]["layers"]["speech"])
+                self.assertTrue(any(item["source_layer"] == "user_input" for item in context_pack["claims"]))
+                self.assertFalse(context_pack["execution_authorized"])
+                self.assertFalse(context_pack["constraints"]["execution_authorized"])
+                self.assertEqual([], validate_minimal_context_pack(context_pack))
+                self.assertEqual([], validate_context_continuity_policy(continuity, context_pack))
+                self.assertNotIn("canvas_event_track", context_pack)
+
     def test_handwritten_anchor_modes_survive_full_runtime_compile(self):
         fixture_path = MODULE_DIR / "fixtures" / "handwriting-visual-anchor-modes.json"
         with tempfile.TemporaryDirectory() as directory:
