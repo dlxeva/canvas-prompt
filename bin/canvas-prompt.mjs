@@ -240,7 +240,7 @@ Usage:
   canvas-prompt setup [--core-only]
   canvas-prompt open [--project <dir>] [--conversation-only] [--host codex|workbuddy|local]
   canvas-prompt read [--project <dir>]
-  canvas-prompt read-recovery [--project <dir>] [--correction <text>]
+  canvas-prompt read-recovery [--project <dir>] [--correction <text>] [--previous-recovery <receipt.json>]
   canvas-prompt read-artifact-review [--project <dir>]
   canvas-prompt init [--project <dir>] [--thread-id <id>] [--conversation-only]
   canvas-prompt doctor [--project <dir>] [--thread-id <id>] [--conversation-only]
@@ -254,8 +254,9 @@ start. A supplied thread ID is provenance only, never inferred from project
 history. init prints the single-board MCP configuration. migrate copies complete
 legacy archives without deleting or scanning any source. read prints the latest
 completed prompt package from the single active board. read-recovery rereads
-the latest compiled round with a fresh context ID, records the prior policy as
-superseded in the bounded response, and does not mutate the round archive.
+the latest compiled round with a fresh context ID. Pass the previous command's
+saved JSON output with --previous-recovery to continue an explicit correction
+chain; the command never uses hidden global state or mutates the round archive.
 read-artifact-review
 prints the latest compact PDF/PPTX review. Both use the same code paths as their
 canvas_prompt MCP tools.`)
@@ -334,12 +335,74 @@ try {
         if (required.some((key) => typeof source[key] !== 'string' || !existsSync(source[key]))) {
           throw new Error('最新 round 缺少 continuity policy、Minimal Context Pack 或编译产物；请先导出一个新的完整 round。')
         }
-        const previousPack = JSON.parse(await readFile(source.minimal_context_pack_path, 'utf8'))
+        const archivedPack = JSON.parse(await readFile(source.minimal_context_pack_path, 'utf8'))
+        const archivedPolicy = JSON.parse(await readFile(source.continuity_policy_path, 'utf8'))
+        const currentPackageId = latest.package?.meta?.package_id
+        const currentRoundId = latest.package?.meta?.round_id ?? latest.package?.round_id ?? null
+        const previousRecoveryPath = flag('--previous-recovery')
+        let previousPack = archivedPack
+        let previousPolicy = archivedPolicy
+        let recoveryInput = 'archived_initial_context'
+        if (previousRecoveryPath) {
+          const receiptPath = resolve(previousRecoveryPath)
+          if (!existsSync(receiptPath)) throw new Error(`上一份 recovery 回执不存在：${receiptPath}`)
+          let receipt
+          try {
+            receipt = JSON.parse(await readFile(receiptPath, 'utf8'))
+          } catch (error) {
+            throw new Error(`上一份 recovery 回执不是有效 JSON：${error.message}`)
+          }
+          previousPack = receipt?.context_pack
+          previousPolicy = receipt?.continuity_policy
+          if (!previousPack || typeof previousPack !== 'object' || !previousPolicy || typeof previousPolicy !== 'object') {
+            throw new Error('上一份 recovery 回执必须同时包含 context_pack 与 continuity_policy。')
+          }
+          const previousPackageId = previousPack.package_id ?? previousPolicy.identity_receipt?.package_id
+          const previousRoundId = previousPack.round_id ?? previousPolicy.identity_receipt?.round_id ?? null
+          const previousContextId = previousPack.context_id ?? previousPolicy.identity_receipt?.context_id
+          if (typeof previousContextId !== 'string' || !previousContextId.startsWith('ctx_')) {
+            throw new Error('上一份 recovery 回执缺少有效 context_id。')
+          }
+          if (typeof previousPackageId !== 'string' || !previousPackageId || previousPackageId !== currentPackageId) {
+            throw new Error('上一份 recovery 回执属于不同 round；拒绝跨 round 接续。')
+          }
+          if (currentRoundId && previousRoundId && currentRoundId !== previousRoundId) {
+            throw new Error('上一份 recovery 回执的 round_id 与当前 round 不一致；拒绝身份不匹配接续。')
+          }
+          const archivedHash = archivedPack.source?.content_sha256
+          const previousHash = previousPack.source?.content_sha256
+          if (archivedHash && previousHash && archivedHash !== previousHash) {
+            throw new Error('上一份 recovery 回执的 content hash 与当前 round 不一致；拒绝身份不匹配接续。')
+          }
+          const policyContextId = previousPolicy.identity_receipt?.context_id ?? previousPolicy.continuity?.current_context_id
+          const policyPackageId = previousPolicy.identity_receipt?.package_id
+          const policyHash = previousPolicy.identity_receipt?.source?.content_sha256
+          const policyRoundId = previousPolicy.identity_receipt?.round_id
+          if (
+            (policyContextId && policyContextId !== previousContextId)
+            || (policyPackageId && policyPackageId !== previousPackageId)
+            || (previousRoundId && policyRoundId && previousRoundId !== policyRoundId)
+            || (previousHash && policyHash && previousHash !== policyHash)
+          ) {
+            throw new Error('上一份 recovery 回执的 policy 与 context_pack 身份不一致；拒绝接续。')
+          }
+          if (previousPolicy.continuity?.status === 'superseded') {
+            throw new Error('上一份 recovery 回执已 superseded；请从当前 context 回执重新接续。')
+          }
+          if (previousPolicy.continuity?.status && !['current', 'reconciled'].includes(previousPolicy.continuity.status)) {
+            throw new Error('上一份 recovery 回执处于阻断状态；请先取得新的有效 context 回执。')
+          }
+          recoveryInput = 'explicit_previous_recovery_receipt'
+        }
         const recoveryDir = await mkdtemp(resolve(tmpdir(), 'canvas-prompt-read-recovery-'))
         try {
           const contextId = `ctx_reread_${randomUUID().replaceAll('-', '')}`
           const contextPackPath = resolve(recoveryDir, 'minimal-context-pack.json')
           const continuityPath = resolve(recoveryDir, 'continuity-policy.json')
+          const previousPackPath = resolve(recoveryDir, 'previous-context-pack.json')
+          const previousPolicyPath = resolve(recoveryDir, 'previous-continuity-policy.json')
+          await writeFile(previousPackPath, `${JSON.stringify(previousPack, null, 2)}\n`, 'utf8')
+          await writeFile(previousPolicyPath, `${JSON.stringify(previousPolicy, null, 2)}\n`, 'utf8')
           runPythonJson([
             resolve(rootDir, 'prompt_package_builder', 'build_minimal_context_pack.py'),
             '--compact-package', source.compact_package_path,
@@ -365,8 +428,8 @@ try {
             resolve(rootDir, 'prompt_package_builder', 'build_context_continuity.py'),
             contextPackPath,
             '--output', continuityPath,
-            '--previous-context-pack', source.minimal_context_pack_path,
-            '--previous-policy', source.continuity_policy_path,
+            '--previous-context-pack', previousPackPath,
+            '--previous-policy', previousPolicyPath,
             '--read-mode', 're_read',
           ]
           const correction = flag('--correction')
@@ -380,11 +443,13 @@ try {
               read_mode: 're_read',
               previous_context_id: previousPack.context_id,
               context_id: contextPack.context_id,
+              recovery_input: recoveryInput,
             },
             context_pack: contextPack,
             continuity_policy: continuity,
             delivery: {
               mode: 'bounded_re_read',
+              recovery_input: recoveryInput,
               archive_mutated: false,
               execution_authorized: false,
             },
