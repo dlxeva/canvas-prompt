@@ -352,9 +352,9 @@ export async function handoffToMainThread({
           activeAcceptedTransports.add(child)
           settled = true
           void statusWriter.write(accepted).finally(() => resolveHandoff(accepted))
-          // Keep the accepted transport alive without making it part of the
-          // Canvas caller's event-loop ownership. It is released only by the
-          // matching terminal event or the single host-shutdown hook above.
+          // Keep the accepted transport alive until the matching terminal
+          // event; the single host-shutdown hook above is the other cleanup
+          // path and never changes the business receipt.
           child.unref()
           continue
         }

@@ -299,7 +299,7 @@ describe('main-thread handoff routing', () => {
     expect((await readReceipt(harness.roundPath)).status).toBe('accepted')
   })
 
-  it('does not interrupt a long-lived accepted transport or keep the caller referenced', async () => {
+  it('keeps an accepted long-lived transport until its matching terminal event, then reclaims it', async () => {
     const harness = await createHarness('long_lived_transport', `
       console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_long_lived' } } }))
       setTimeout(() => {
