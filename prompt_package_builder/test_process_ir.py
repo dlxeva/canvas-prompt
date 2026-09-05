@@ -16,6 +16,50 @@ from process_ir import compile_process_ir
 from validate_process_ir import validate_process_ir
 
 
+class SpatialRelationThresholdTests(unittest.TestCase):
+    def test_axis_thresholds_are_independent_at_and_below_forty_pixels(self):
+        values = (-100, -40, -39, 0, 39, 40, 100)
+        for dx in values:
+            for dy in values:
+                with self.subTest(dx=dx, dy=dy):
+                    objects = [
+                        {"object_id": "obj_a", "bounds": {"x": 0, "y": 0, "width": 20, "height": 20}},
+                        {
+                            "object_id": "obj_b",
+                            "bounds": {"x": dx, "y": dy, "width": 20, "height": 20},
+                        },
+                    ]
+                    axis_relations = {
+                        item["relation"]
+                        for item in _spatial_relations(objects)
+                        if item["relation"] in {"left_of", "right_of", "above", "below"}
+                    }
+                    expected = set()
+                    if abs(dx) >= 40:
+                        expected.add("left_of" if dx > 0 else "right_of")
+                    if abs(dy) >= 40:
+                        expected.add("above" if dy > 0 else "below")
+                    self.assertEqual(expected, axis_relations)
+
+    def test_same_center_axis_never_gets_an_orthogonal_relation(self):
+        horizontal = _spatial_relations([
+            {"object_id": "obj_a", "bounds": {"x": 0, "y": 0, "width": 20, "height": 20}},
+            {"object_id": "obj_b", "bounds": {"x": 100, "y": 0, "width": 20, "height": 20}},
+        ])
+        vertical = _spatial_relations([
+            {"object_id": "obj_a", "bounds": {"x": 0, "y": 0, "width": 20, "height": 20}},
+            {"object_id": "obj_b", "bounds": {"x": 0, "y": 100, "width": 20, "height": 20}},
+        ])
+        horizontal_names = {item["relation"] for item in horizontal}
+        vertical_names = {item["relation"] for item in vertical}
+        self.assertIn("left_of", horizontal_names)
+        self.assertNotIn("above", horizontal_names)
+        self.assertNotIn("below", horizontal_names)
+        self.assertIn("above", vertical_names)
+        self.assertNotIn("left_of", vertical_names)
+        self.assertNotIn("right_of", vertical_names)
+
+
 class LayoutTransformObservationTests(unittest.TestCase):
     def test_spatial_relations_do_not_emit_geometry_confidence_constants(self):
         objects = [

@@ -128,6 +128,7 @@ async function resolveRoundArtifact(packageId, artifact, canvasPromptDir) {
   const parts = ROUND_ARTIFACTS[artifact];
   const candidate = resolve(canvasPromptDir, 'rounds', packageId, ...parts);
   return readTrustedCanvasArtifact(candidate, [parts.at(-1)], {
+    canvasPromptDir,
     maxBytes: artifact === 'prompt_package' ? MAX_RAW_PACKAGE_BYTES : MAX_ARTIFACT_BYTES,
   });
 }

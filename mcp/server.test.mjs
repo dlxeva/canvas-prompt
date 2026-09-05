@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { sessionScopeKey, threadScopeKey } from '../app/conversation-scope.mjs';
 
 process.env.CANVAS_PROMPT_MCP_TEST = '1';
-const { encodeResponse, negotiateProtocolVersion, latestPackageResponse, readTrustedCanvasArtifact, TOOLS, PROJECT_SCOPE_ERROR } = await import('./server.mjs');
+const { encodeResponse, negotiateProtocolVersion, latestPackageResponse, readTrustedCanvasArtifact, resolveRoundArtifact, TOOLS, PROJECT_SCOPE_ERROR } = await import('./server.mjs');
 
 test('MCP emits newline-delimited JSON for modern stdio hosts and preserves Content-Length compatibility', () => {
   const message = { jsonrpc: '2.0', id: 1, result: {} };
@@ -237,6 +237,36 @@ test('round artifact reads resolve the published Process IR path from the single
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
   }
+});
+
+test('round artifact reader honors an explicit canvas directory and rejects external paths', async (t) => {
+  const root = await mkdtemp(resolve(tmpdir(), 'canvas-mcp-explicit-round-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const canvasDir = resolve(root, 'canvas-board');
+  const roundDir = resolve(canvasDir, 'rounds', 'pp_explicit', 'engine');
+  await mkdir(roundDir, { recursive: true });
+  const processPath = resolve(roundDir, 'process-ir.json');
+  await writeFile(processPath, JSON.stringify({ schema_version: 'process-ir-v0.8' }));
+
+  const trusted = await resolveRoundArtifact('pp_explicit', 'process_ir', canvasDir);
+  assert.equal(trusted.path, await realpath(processPath));
+  assert.equal(JSON.parse(trusted.contents).schema_version, 'process-ir-v0.8');
+
+  const externalPath = resolve(root, 'outside', 'process-ir.json');
+  await mkdir(resolve(root, 'outside'), { recursive: true });
+  await writeFile(externalPath, '{}');
+  await assert.rejects(
+    readTrustedCanvasArtifact(externalPath, ['process-ir.json'], { canvasPromptDir: canvasDir }),
+    /outside the active project canvas storage/,
+  );
+
+  const symlinkPath = resolve(roundDir, 'process-ir.json');
+  await rm(symlinkPath, { force: true });
+  await symlink(externalPath, symlinkPath);
+  await assert.rejects(
+    resolveRoundArtifact('pp_explicit', 'process_ir', canvasDir),
+    /outside the active project canvas storage/,
+  );
 });
 
 test('MCP reads the single board latest package regardless of configured project/thread', async (t) => {
