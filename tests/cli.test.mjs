@@ -260,6 +260,120 @@ test('read-recovery rereads the compiled round with a new context and supersedes
   assert.equal(readFileSync(join(roundDir, 'engine', 'minimal-context-pack.json'), 'utf8'), archivedPack)
 })
 
+test('read-recovery continues only from an explicit prior receipt and retains bounded corrections', () => {
+  const root = mkdtempSync(join(tmpdir(), 'canvas-prompt-read-recovery-chain-'))
+  const home = join(root, 'home')
+  const project = join(root, 'project')
+  mkdirSync(project, { recursive: true })
+
+  const boardDir = join(home, '.canvas-prompt', 'board')
+  const packageId = 'pp_canvas_round_fixture_001'
+  const fixturePath = resolve('prompt_package_builder/fixtures/context-source-canvas-round.json')
+  const promptPackage = readFileSync(fixturePath, 'utf8')
+  const roundDir = join(boardDir, 'rounds', packageId)
+  mkdirSync(roundDir, { recursive: true })
+  writeFileSync(join(roundDir, 'prompt-package.json'), promptPackage)
+  writeFileSync(join(boardDir, 'latest-prompt-package.json'), promptPackage)
+
+  const compile = spawnSync('python3', [
+    resolve('prompt_package_builder/compile_runtime_package.py'),
+    '--input', join(roundDir, 'prompt-package.json'),
+    '--output-dir', join(roundDir, 'engine'),
+  ], { encoding: 'utf8' })
+  assert.equal(compile.status, 0, compile.stderr)
+  const archivedPolicy = readFileSync(join(roundDir, 'engine', 'continuity-policy.json'), 'utf8')
+  const archivedPack = readFileSync(join(roundDir, 'engine', 'minimal-context-pack.json'), 'utf8')
+
+  const firstResult = runWithEnvironment(
+    { HOME: home },
+    'read-recovery', '--project', project,
+    '--correction', '第一条纠正：保留用户原话，不要把候选当结论。',
+  )
+  assert.equal(firstResult.status, 0, firstResult.stderr)
+  const first = JSON.parse(firstResult.stdout)
+  const firstReceiptPath = join(root, 'first-recovery.json')
+  writeFileSync(firstReceiptPath, firstResult.stdout)
+
+  const secondResult = runWithEnvironment(
+    { HOME: home },
+    'read-recovery', '--project', project,
+    '--previous-recovery', firstReceiptPath,
+    '--correction', '第二条纠正：只按当前 round 的证据继续。',
+  )
+  assert.equal(secondResult.status, 0, secondResult.stderr)
+  const second = JSON.parse(secondResult.stdout)
+  assert.equal(second.source.recovery_input, 'explicit_previous_recovery_receipt')
+  assert.equal(second.source.previous_context_id, first.source.context_id)
+  assert.equal(second.context_pack.parent_context_id, first.source.context_id)
+  assert.deepEqual(second.continuity_policy.continuity.context_lineage, [
+    'ctx_round_pp_canvas_round_fixture_001',
+    first.source.context_id,
+    second.source.context_id,
+  ])
+  assert.deepEqual(
+    second.continuity_policy.continuity.reconciliation.correction_history.map((item) => item.text),
+    ['第一条纠正：保留用户原话，不要把候选当结论。', '第二条纠正：只按当前 round 的证据继续。'],
+  )
+  assert.equal(second.continuity_policy.continuity.status, 'reconciled')
+  assert.equal(second.continuity_policy.continuity.reconciliation.previous_context_id, first.source.context_id)
+  assert.equal(second.continuity_policy.continuity.supersedes[0].context_id, first.source.context_id)
+  assert.equal(second.delivery.archive_mutated, false)
+  assert.equal(second.delivery.execution_authorized, false)
+  assert.equal(second.context_pack.execution_authorized, false)
+  assert.equal(second.context_pack.constraints.execution_authorized, false)
+  assert.ok(second.continuity_policy.continuity.reconciliation.correction_history.every((item) => {
+    return item.status === 'user_stated'
+      && item.source_layer === 'user_input'
+      && !Object.hasOwn(item, 'claim_ids')
+      && !Object.hasOwn(item, 'evidence_refs')
+  }))
+  assert.equal(readFileSync(join(roundDir, 'engine', 'continuity-policy.json'), 'utf8'), archivedPolicy)
+  assert.equal(readFileSync(join(roundDir, 'engine', 'minimal-context-pack.json'), 'utf8'), archivedPack)
+})
+
+test('read-recovery rejects an explicit receipt from another round without touching the archive', () => {
+  const root = mkdtempSync(join(tmpdir(), 'canvas-prompt-read-recovery-cross-round-'))
+  const home = join(root, 'home')
+  const project = join(root, 'project')
+  mkdirSync(project, { recursive: true })
+
+  const boardDir = join(home, '.canvas-prompt', 'board')
+  const packageId = 'pp_canvas_round_fixture_001'
+  const fixturePath = resolve('prompt_package_builder/fixtures/context-source-canvas-round.json')
+  const promptPackage = readFileSync(fixturePath, 'utf8')
+  const roundDir = join(boardDir, 'rounds', packageId)
+  mkdirSync(roundDir, { recursive: true })
+  writeFileSync(join(roundDir, 'prompt-package.json'), promptPackage)
+  writeFileSync(join(boardDir, 'latest-prompt-package.json'), promptPackage)
+  const compile = spawnSync('python3', [
+    resolve('prompt_package_builder/compile_runtime_package.py'),
+    '--input', join(roundDir, 'prompt-package.json'),
+    '--output-dir', join(roundDir, 'engine'),
+  ], { encoding: 'utf8' })
+  assert.equal(compile.status, 0, compile.stderr)
+  const archivedPolicy = readFileSync(join(roundDir, 'engine', 'continuity-policy.json'), 'utf8')
+  const archivedPack = readFileSync(join(roundDir, 'engine', 'minimal-context-pack.json'), 'utf8')
+
+  const firstResult = runWithEnvironment({ HOME: home }, 'read-recovery', '--project', project, '--correction', '先读当前 round。')
+  assert.equal(firstResult.status, 0, firstResult.stderr)
+  const foreign = JSON.parse(firstResult.stdout)
+  foreign.context_pack.package_id = 'pp_other_round'
+  foreign.continuity_policy.identity_receipt.package_id = 'pp_other_round'
+  const foreignReceiptPath = join(root, 'foreign-recovery.json')
+  writeFileSync(foreignReceiptPath, JSON.stringify(foreign))
+
+  const rejected = runWithEnvironment(
+    { HOME: home },
+    'read-recovery', '--project', project,
+    '--previous-recovery', foreignReceiptPath,
+    '--correction', '不要跨 round 接续。',
+  )
+  assert.equal(rejected.status, 1)
+  assert.match(rejected.stderr, /不同 round/)
+  assert.equal(readFileSync(join(roundDir, 'engine', 'continuity-policy.json'), 'utf8'), archivedPolicy)
+  assert.equal(readFileSync(join(roundDir, 'engine', 'minimal-context-pack.json'), 'utf8'), archivedPack)
+})
+
 test('read reports an error when no prompt package exists on the board', () => {
   const root = mkdtempSync(join(tmpdir(), 'canvas-prompt-read-empty-'))
   const home = join(root, 'home')

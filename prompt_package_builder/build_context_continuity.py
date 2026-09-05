@@ -60,6 +60,8 @@ FORBIDDEN_KEYS = {
 
 _MAX_EVIDENCE_REFS = 5
 _MAX_TEXT = 500
+MAX_CORRECTION_HISTORY = 5
+MAX_CONTEXT_LINEAGE = 8
 
 
 def _record(value: Any) -> dict[str, Any]:
@@ -87,6 +89,13 @@ def _bounded_text(value: Any) -> str:
     if not isinstance(value, str):
         value = "" if value is None else str(value)
     return " ".join(value.split())[:_MAX_TEXT]
+
+
+def _bounded_text_with_status(value: Any) -> tuple[str, bool]:
+    if not isinstance(value, str):
+        value = "" if value is None else str(value)
+    normalized = " ".join(value.split())
+    return normalized[:_MAX_TEXT], len(normalized) > _MAX_TEXT
 
 
 def _evidence_refs(item: dict[str, Any]) -> list[str]:
@@ -389,7 +398,7 @@ def _normalise_correction(value: Any) -> dict[str, Any] | None:
     if value is None:
         return None
     if isinstance(value, str):
-        text = _bounded_text(value)
+        text, text_truncated = _bounded_text_with_status(value)
         if not text:
             return None
         return {
@@ -399,10 +408,11 @@ def _normalise_correction(value: Any) -> dict[str, Any] | None:
             "claim_ids": [],
             "evidence_refs": [],
             "provenance": "explicit_user_correction",
+            "text_truncated": text_truncated,
         }
     if not isinstance(value, dict):
         raise TypeError("correction must be bounded text or an object")
-    text = _bounded_text(value.get("text") or value.get("content"))
+    text, text_truncated = _bounded_text_with_status(value.get("text") or value.get("content"))
     if not text:
         raise ValueError("correction object requires bounded text")
     return {
@@ -412,7 +422,84 @@ def _normalise_correction(value: Any) -> dict[str, Any] | None:
         "claim_ids": _unique_strings(value.get("claim_ids", [])),
         "evidence_refs": _unique_strings(value.get("evidence_refs", []), _MAX_EVIDENCE_REFS),
         "provenance": "explicit_user_correction",
+        "text_truncated": text_truncated,
     }
+
+
+def _history_entry(value: Any) -> dict[str, Any] | None:
+    """Keep only bounded, explicitly user-authored correction history.
+
+    History is carried between recovery receipts, so it must never include
+    compiler candidates, old claims, or evidence IDs that belong to a prior
+    Context Pack.  Those references are intentionally omitted here.
+    """
+    if not isinstance(value, dict) or value.get("status") == "none":
+        return None
+    # Check the original provenance before normalising text.  Normalisation
+    # intentionally emits the safe user-input shape, so checking afterwards
+    # would let an inferred/compiler candidate be rewritten into fake user
+    # correction history.
+    if value.get("status") != "user_stated" or value.get("source_layer") != "user_input":
+        return None
+    if value.get("provenance") != "explicit_user_correction":
+        return None
+    try:
+        normalized = _normalise_correction(value)
+    except (TypeError, ValueError):
+        return None
+    if not normalized:
+        return None
+    return {
+        "status": "user_stated",
+        "source_layer": "user_input",
+        "text": normalized["text"],
+        "provenance": "explicit_user_correction",
+        "text_truncated": bool(value.get("text_truncated")) or bool(normalized.get("text_truncated")),
+    }
+
+
+def _correction_history(
+    previous_policy: dict[str, Any] | None,
+    correction: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], bool]:
+    previous_reconciliation = _record(_record(previous_policy).get("continuity")).get("reconciliation")
+    previous_reconciliation = _record(previous_reconciliation)
+    raw_history = previous_reconciliation.get("correction_history")
+    values = raw_history if isinstance(raw_history, list) else [previous_reconciliation.get("correction")]
+    history = [entry for entry in (_history_entry(value) for value in values) if entry is not None]
+    current_entry = _history_entry(correction)
+    if current_entry is not None:
+        history.append(current_entry)
+    inherited_truncation = previous_reconciliation.get("correction_history_truncated") is True
+    truncated = inherited_truncation or len(history) > MAX_CORRECTION_HISTORY
+    return history[-MAX_CORRECTION_HISTORY:], truncated
+
+
+def _context_lineage(
+    previous_policy: dict[str, Any] | None,
+    previous_context_id: str | None,
+    current_context_id: str | None,
+    *,
+    carry_previous: bool,
+) -> tuple[list[str], bool]:
+    """Build a bounded explicit context chain; never infer hidden history."""
+    values: list[str] = []
+    if carry_previous:
+        previous_continuity = _record(_record(previous_policy).get("continuity"))
+        prior_lineage = previous_continuity.get("context_lineage")
+        if isinstance(prior_lineage, list):
+            values.extend(item for item in prior_lineage if isinstance(item, str) and item)
+        if previous_context_id and previous_context_id not in values:
+            values.append(previous_context_id)
+    if current_context_id:
+        values.append(current_context_id)
+    deduped: list[str] = []
+    for value in values:
+        if value not in deduped:
+            deduped.append(value)
+    inherited_truncation = _record(_record(previous_policy).get("continuity")).get("context_lineage_truncated") is True
+    truncated = inherited_truncation or len(deduped) > MAX_CONTEXT_LINEAGE
+    return deduped[-MAX_CONTEXT_LINEAGE:], truncated
 
 
 def _previous_identity(
@@ -425,6 +512,23 @@ def _previous_identity(
         gate = _record(previous_policy).get("snapshot_gate") if isinstance(previous_policy, dict) else {}
         return _identity_receipt(previous_context_pack, _record(gate))
     return _identity_from_value(previous_policy)
+
+
+def _previous_inputs_mismatch(
+    previous_policy: dict[str, Any] | None,
+    previous_context_pack: dict[str, Any] | None,
+) -> bool:
+    """Detect a recovery receipt whose policy and pack are not one context."""
+    if not isinstance(previous_policy, dict) or not isinstance(previous_context_pack, dict):
+        return False
+    policy_identity = _identity_from_value(previous_policy)
+    gate = _record(previous_policy.get("snapshot_gate"))
+    pack_identity = _identity_receipt(previous_context_pack, gate)
+    policy_context_id = _optional_string(policy_identity.get("context_id"))
+    pack_context_id = _optional_string(pack_identity.get("context_id"))
+    if policy_context_id and pack_context_id and policy_context_id != pack_context_id:
+        return True
+    return not _same_source_identity(policy_identity, pack_identity)
 
 
 def _superseded_record(identity: dict[str, Any], *, reason: str) -> dict[str, Any]:
@@ -451,94 +555,147 @@ def _continuity(
     previous_identity = _previous_identity(previous_policy, previous_context_pack)
     previous_id = _optional_string(previous_identity.get("context_id"))
     correction_value = _normalise_correction(correction)
-    if read_mode == "initial" or not previous_id:
+    correction_history, correction_history_truncated = _correction_history(
+        previous_policy if read_mode != "initial" else None,
+        correction_value,
+    )
+    previous_inputs_mismatch = _previous_inputs_mismatch(previous_policy, previous_context_pack)
+
+    def result(
+        *,
+        status: str,
+        response_decision: str,
+        reconciliation_status: str,
+        identity_match: bool | None,
+        lineage: str,
+        supersedes: list[dict[str, Any]],
+        lineage_context_id: str | None = previous_id,
+        carry_previous_lineage: bool = False,
+        previous_context_id: str | None = previous_id,
+    ) -> dict[str, Any]:
+        context_lineage, context_lineage_truncated = _context_lineage(
+            previous_policy,
+            lineage_context_id,
+            current_id,
+            carry_previous=carry_previous_lineage,
+        )
         return {
             "version": CONTINUITY_VERSION,
-            "read_mode": "initial",
-            "status": "current",
-            "response_decision": "answer_current_context",
+            "read_mode": "initial" if read_mode == "initial" else "re_read",
+            "status": status,
+            "response_decision": response_decision,
             "current_context_id": current_id,
             "parent_context_id": _optional_string(context_pack.get("parent_context_id")),
-            "supersedes": [],
+            "context_lineage": context_lineage,
+            "context_lineage_truncated": context_lineage_truncated,
+            "supersedes": supersedes,
             "reconciliation": {
-                "status": "not_applicable",
-                "previous_context_id": None,
+                "status": reconciliation_status,
+                "previous_context_id": previous_context_id,
                 "current_context_id": current_id,
-                "identity_match": None,
-                "lineage": "initial",
+                "identity_match": identity_match,
+                "lineage": lineage,
                 "correction": correction_value or {"status": "none"},
+                "correction_history": correction_history,
+                "correction_history_limit": MAX_CORRECTION_HISTORY,
+                "correction_history_truncated": correction_history_truncated,
                 "reuse_superseded_context": False,
             },
         }
+
+    if read_mode == "initial":
+        return result(
+            status="current",
+            response_decision="answer_current_context",
+            reconciliation_status="not_applicable",
+            identity_match=None,
+            lineage="initial",
+            supersedes=[],
+            lineage_context_id=None,
+            carry_previous_lineage=False,
+            previous_context_id=None,
+        )
+
+    if not previous_id:
+        # A recovery without an explicit previous receipt is not allowed to
+        # silently become an initial context.  The CLI normally rejects this
+        # earlier; keep the pure policy builder fail-closed for direct callers.
+        return result(
+            status="needs_re_read",
+            response_decision="block_until_new_context",
+            reconciliation_status="previous_superseded",
+            identity_match=False,
+            lineage="missing_previous_context",
+            supersedes=[],
+            lineage_context_id=None,
+            carry_previous_lineage=False,
+        )
 
     if previous_policy and _record(previous_policy.get("continuity")).get("status") == "superseded":
-        return {
-            "version": CONTINUITY_VERSION,
-            "read_mode": "re_read",
-            "status": "needs_re_read",
-            "response_decision": "block_until_new_context",
-            "current_context_id": current_id,
-            "parent_context_id": _optional_string(context_pack.get("parent_context_id")),
-            "supersedes": [],
-            "reconciliation": {
-                "status": "previous_superseded",
-                "previous_context_id": previous_id,
-                "current_context_id": current_id,
-                "identity_match": False,
-                "lineage": "blocked",
-                "correction": correction_value or {"status": "none"},
-                "reuse_superseded_context": False,
-            },
-        }
+        return result(
+            status="needs_re_read",
+            response_decision="block_until_new_context",
+            reconciliation_status="previous_superseded",
+            identity_match=False,
+            lineage="blocked",
+            supersedes=[],
+            carry_previous_lineage=False,
+        )
+
+    if previous_inputs_mismatch:
+        return result(
+            status="identity_mismatch",
+            response_decision="block_cross_context_reconciliation",
+            reconciliation_status="identity_mismatch",
+            identity_match=False,
+            lineage="previous_receipt_mismatch",
+            supersedes=[_superseded_record(previous_identity, reason="previous_receipt_mismatch")],
+            carry_previous_lineage=False,
+        )
 
     if current_id and current_id == previous_id:
-        status = "needs_re_read"
-        response_decision = "block_until_new_context"
-        reconciliation_status = "same_context"
-        identity_match = False
-        lineage = "same_context"
-        supersedes: list[dict[str, Any]] = []
-    elif _same_source_identity(current_identity, previous_identity):
-        status = "reconciled"
-        response_decision = "answer_current_context_only"
-        reconciliation_status = "reconciled"
-        identity_match = True
-        parent_id = _optional_string(context_pack.get("parent_context_id"))
-        if parent_id and parent_id != previous_id:
-            status = "identity_mismatch"
-            response_decision = "block_cross_context_reconciliation"
-            reconciliation_status = "identity_mismatch"
-            identity_match = False
-            lineage = "parent_context_mismatch"
-        else:
-            lineage = "explicit" if parent_id else "not_recorded"
-        supersedes = [_superseded_record(previous_identity, reason="re_read")]
-    else:
-        status = "identity_mismatch"
-        response_decision = "block_cross_context_reconciliation"
-        reconciliation_status = "identity_mismatch"
-        identity_match = False
-        lineage = "source_identity_mismatch"
-        supersedes = [_superseded_record(previous_identity, reason="new_source_not_reconciled")]
+        return result(
+            status="needs_re_read",
+            response_decision="block_until_new_context",
+            reconciliation_status="same_context",
+            identity_match=False,
+            lineage="same_context",
+            supersedes=[],
+            carry_previous_lineage=False,
+        )
 
-    return {
-        "version": CONTINUITY_VERSION,
-        "read_mode": "re_read",
-        "status": status,
-        "response_decision": response_decision,
-        "current_context_id": current_id,
-        "parent_context_id": _optional_string(context_pack.get("parent_context_id")),
-        "supersedes": supersedes,
-        "reconciliation": {
-            "status": reconciliation_status,
-            "previous_context_id": previous_id,
-            "current_context_id": current_id,
-            "identity_match": identity_match,
-            "lineage": lineage,
-            "correction": correction_value or {"status": "none"},
-            "reuse_superseded_context": False,
-        },
-    }
+    if not _same_source_identity(current_identity, previous_identity):
+        return result(
+            status="identity_mismatch",
+            response_decision="block_cross_context_reconciliation",
+            reconciliation_status="identity_mismatch",
+            identity_match=False,
+            lineage="source_identity_mismatch",
+            supersedes=[_superseded_record(previous_identity, reason="new_source_not_reconciled")],
+            carry_previous_lineage=False,
+        )
+
+    parent_id = _optional_string(context_pack.get("parent_context_id"))
+    if parent_id and parent_id != previous_id:
+        return result(
+            status="identity_mismatch",
+            response_decision="block_cross_context_reconciliation",
+            reconciliation_status="identity_mismatch",
+            identity_match=False,
+            lineage="parent_context_mismatch",
+            supersedes=[_superseded_record(previous_identity, reason="parent_context_mismatch")],
+            carry_previous_lineage=False,
+        )
+
+    return result(
+        status="reconciled",
+        response_decision="answer_current_context_only",
+        reconciliation_status="reconciled",
+        identity_match=True,
+        lineage="explicit" if parent_id else "not_recorded",
+        supersedes=[_superseded_record(previous_identity, reason="re_read")],
+        carry_previous_lineage=True,
+    )
 
 
 def build_context_continuity_policy(
@@ -724,6 +881,15 @@ def mark_context_response_superseded(
                 "blocked_actions": ["external_file_write", "material_canvas_change", "send_or_publish"],
             }
     current_id = _optional_string(result.get("context_id"))
+    old_continuity = _record(result.get("continuity"))
+    correction_history, correction_history_truncated = _correction_history(result, None)
+    context_lineage, context_lineage_truncated = _context_lineage(
+        result,
+        current_id,
+        current_id,
+        carry_previous=True,
+    )
+    old_reconciliation = _record(old_continuity.get("reconciliation"))
     result["continuity"] = {
         "version": CONTINUITY_VERSION,
         "read_mode": "re_read",
@@ -731,6 +897,8 @@ def mark_context_response_superseded(
         "response_decision": "do_not_reuse",
         "current_context_id": current_id,
         "parent_context_id": None,
+        "context_lineage": context_lineage,
+        "context_lineage_truncated": context_lineage_truncated,
         "supersedes": [],
         "reconciliation": {
             "status": "not_applicable",
@@ -740,7 +908,10 @@ def mark_context_response_superseded(
             "lineage": "superseded",
             "superseded_by_context_id": new_context_id,
             "reason": _bounded_text(reason) or "re_read",
-            "correction": {"status": "none"},
+            "correction": old_reconciliation.get("correction") or {"status": "none"},
+            "correction_history": correction_history,
+            "correction_history_limit": MAX_CORRECTION_HISTORY,
+            "correction_history_truncated": correction_history_truncated,
             "reuse_superseded_context": False,
         },
     }

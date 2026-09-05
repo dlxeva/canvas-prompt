@@ -14,6 +14,8 @@ try:  # package import
         CONTINUITY_STATUSES,
         CONTINUITY_VERSION,
         FORBIDDEN_KEYS,
+        MAX_CONTEXT_LINEAGE,
+        MAX_CORRECTION_HISTORY,
         READ_MODES,
         RECONCILIATION_STATUSES,
     )
@@ -23,6 +25,8 @@ except ImportError:  # existing script-style imports
         CONTINUITY_STATUSES,
         CONTINUITY_VERSION,
         FORBIDDEN_KEYS,
+        MAX_CONTEXT_LINEAGE,
+        MAX_CORRECTION_HISTORY,
         READ_MODES,
         RECONCILIATION_STATUSES,
     )
@@ -340,6 +344,8 @@ def _validate_correction(correction: Any, context_pack: dict[str, Any] | None, e
         errors.append("continuity correction must remain user_input/user_stated")
     if not isinstance(correction.get("text"), str) or not correction["text"].strip():
         errors.append("continuity correction text must be non-empty")
+    if "text_truncated" in correction and not isinstance(correction.get("text_truncated"), bool):
+        errors.append("continuity correction text_truncated must be boolean")
     claim_ids = _strings(correction.get("claim_ids"), "continuity.reconciliation.correction.claim_ids", errors)
     refs = _strings(correction.get("evidence_refs"), "continuity.reconciliation.correction.evidence_refs", errors, max_items=MAX_EVIDENCE_REFS)
     claims, _, _, evidence = _ids_from_pack(context_pack)
@@ -349,6 +355,38 @@ def _validate_correction(correction: Any, context_pack: dict[str, Any] | None, e
     for ref in refs:
         if isinstance(context_pack, dict) and ref not in evidence:
             errors.append(f"continuity correction contains unknown evidence ID {ref}")
+
+
+def _validate_correction_history(reconciliation: dict[str, Any], errors: list[str]) -> None:
+    history = reconciliation.get("correction_history")
+    if not isinstance(history, list):
+        errors.append("continuity.reconciliation.correction_history must be a list")
+        history = []
+    if len(history) > MAX_CORRECTION_HISTORY:
+        errors.append(f"continuity.reconciliation.correction_history exceeds {MAX_CORRECTION_HISTORY}")
+    if reconciliation.get("correction_history_limit") != MAX_CORRECTION_HISTORY:
+        errors.append("continuity.reconciliation.correction_history_limit is invalid")
+    if not isinstance(reconciliation.get("correction_history_truncated"), bool):
+        errors.append("continuity.reconciliation.correction_history_truncated must be boolean")
+    allowed_keys = {"status", "source_layer", "text", "provenance", "text_truncated"}
+    for index, item in enumerate(history):
+        path = f"continuity.reconciliation.correction_history[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{path} must be an object")
+            continue
+        if set(item) - allowed_keys:
+            errors.append(f"{path} must not carry claims, candidates, or prior evidence references")
+        if item.get("status") != "user_stated" or item.get("source_layer") != "user_input":
+            errors.append(f"{path} must remain user_input/user_stated")
+        if item.get("provenance") != "explicit_user_correction":
+            errors.append(f"{path}.provenance must be explicit_user_correction")
+        text = item.get("text")
+        if not isinstance(text, str) or not text.strip():
+            errors.append(f"{path}.text must be non-empty")
+        elif len(text) > 500:
+            errors.append(f"{path}.text exceeds the bounded correction text length")
+        if not isinstance(item.get("text_truncated"), bool):
+            errors.append(f"{path}.text_truncated must be boolean")
 
 
 def _validate_continuity(
@@ -377,6 +415,21 @@ def _validate_continuity(
         errors.append("continuity.response_decision is invalid")
     if continuity.get("current_context_id") != value.get("context_id"):
         errors.append("continuity.current_context_id must match policy.context_id")
+    lineage = continuity.get("context_lineage")
+    if not isinstance(lineage, list) or not lineage:
+        errors.append("continuity.context_lineage must be a non-empty list")
+        lineage = []
+    elif len(lineage) > MAX_CONTEXT_LINEAGE:
+        errors.append(f"continuity.context_lineage exceeds {MAX_CONTEXT_LINEAGE}")
+    valid_lineage = [item for item in lineage if isinstance(item, str) and item]
+    if len(valid_lineage) != len(lineage):
+        errors.append("continuity.context_lineage must contain non-empty context IDs")
+    if len(set(valid_lineage)) != len(valid_lineage):
+        errors.append("continuity.context_lineage must not repeat context IDs")
+    if lineage and lineage[-1] != value.get("context_id"):
+        errors.append("continuity.context_lineage must end at the current context")
+    if not isinstance(continuity.get("context_lineage_truncated"), bool):
+        errors.append("continuity.context_lineage_truncated must be boolean")
     parent = continuity.get("parent_context_id")
     if parent is not None and not isinstance(parent, str):
         errors.append("continuity.parent_context_id must be text or null")
@@ -414,6 +467,7 @@ def _validate_continuity(
     if reconciliation.get("identity_match") not in {True, False, None}:
         errors.append("continuity.reconciliation.identity_match must be boolean or null")
     _validate_correction(reconciliation.get("correction"), context_pack, errors)
+    _validate_correction_history(reconciliation, errors)
     status = continuity.get("status")
     rec_status = reconciliation.get("status")
     expected_decisions = {
@@ -432,6 +486,8 @@ def _validate_continuity(
             errors.append("reconciled continuity requires re_read, reconciled status, and a superseded context")
         if reconciliation.get("identity_match") is not True:
             errors.append("reconciled continuity requires identity_match=true")
+        if continuity.get("parent_context_id") != reconciliation.get("previous_context_id"):
+            errors.append("reconciled continuity parent_context_id must point to previous_context_id")
     if status == "identity_mismatch" and rec_status != "identity_mismatch":
         errors.append("identity_mismatch continuity requires identity_mismatch reconciliation")
     if status == "needs_re_read" and rec_status not in {"same_context", "previous_superseded"}:

@@ -136,6 +136,149 @@ class ContextContinuityTests(unittest.TestCase):
         self.assertFalse(policy["execution_authorized"])
         self.assertEqual([], validate_context_continuity_policy(policy, current))
 
+    def test_re_read_carries_bounded_user_correction_history_and_context_lineage(self):
+        source = load_json("context-source-canvas-round.json")
+        initial = adapt_canvas_round(source, context_id="ctx_chain_initial")
+        first = adapt_canvas_round(
+            source,
+            context_id="ctx_chain_first",
+            parent_context_id=initial["context_id"],
+        )
+        second = adapt_canvas_round(
+            source,
+            context_id="ctx_chain_second",
+            parent_context_id=first["context_id"],
+        )
+        initial_policy = build_context_continuity_policy(initial)
+        first_policy = reconcile_context_response(
+            initial_policy,
+            first,
+            previous_context_pack=initial,
+            correction="第一条纠正：保留用户原话，不要把候选当结论。",
+        )
+        second_policy = reconcile_context_response(
+            first_policy,
+            second,
+            previous_context_pack=first,
+            correction="第二条纠正：只按当前 round 的证据继续。",
+        )
+
+        continuity = second_policy["continuity"]
+        reconciliation = continuity["reconciliation"]
+        self.assertEqual("reconciled", continuity["status"])
+        self.assertEqual(first["context_id"], continuity["parent_context_id"])
+        self.assertEqual(
+            [initial["context_id"], first["context_id"], second["context_id"]],
+            continuity["context_lineage"],
+        )
+        self.assertEqual(first["context_id"], reconciliation["previous_context_id"])
+        self.assertEqual(
+            [
+                "第一条纠正：保留用户原话，不要把候选当结论。",
+                "第二条纠正：只按当前 round 的证据继续。",
+            ],
+            [item["text"] for item in reconciliation["correction_history"]],
+        )
+        self.assertFalse(reconciliation["correction_history_truncated"])
+        self.assertTrue(all(
+            item["status"] == "user_stated"
+            and item["source_layer"] == "user_input"
+            and "claim_ids" not in item
+            and "evidence_refs" not in item
+            for item in reconciliation["correction_history"]
+        ))
+        self.assertFalse(second_policy["execution_authorized"])
+        self.assertEqual([], validate_context_continuity_policy(second_policy, second))
+
+    def test_re_read_drops_inferred_entries_from_inherited_correction_history(self):
+        source = load_json("context-source-canvas-round.json")
+        initial = adapt_canvas_round(source, context_id="ctx_history_initial")
+        first = adapt_canvas_round(source, context_id="ctx_history_first", parent_context_id=initial["context_id"])
+        second = adapt_canvas_round(source, context_id="ctx_history_second", parent_context_id=first["context_id"])
+        initial_policy = build_context_continuity_policy(initial)
+        first_policy = reconcile_context_response(
+            initial_policy,
+            first,
+            previous_context_pack=initial,
+            correction="保留第一条用户纠正。",
+        )
+        first_policy["continuity"]["reconciliation"]["correction_history"].append({
+            "status": "inferred",
+            "source_layer": "compiler_candidate",
+            "text": "模型推断不可进入用户纠正历史",
+            "provenance": "model_output",
+            "text_truncated": False,
+        })
+        second_policy = reconcile_context_response(
+            first_policy,
+            second,
+            previous_context_pack=first,
+            correction="保留第二条用户纠正。",
+        )
+
+        history = second_policy["continuity"]["reconciliation"]["correction_history"]
+        self.assertEqual(
+            ["保留第一条用户纠正。", "保留第二条用户纠正。"],
+            [item["text"] for item in history],
+        )
+        self.assertEqual([], validate_context_continuity_policy(second_policy, second))
+
+    def test_correction_history_is_bounded_and_marks_truncation(self):
+        source = load_json("context-source-canvas-round.json")
+        previous = adapt_canvas_round(source, context_id="ctx_budget_000")
+        previous_policy = build_context_continuity_policy(previous)
+        for index in range(1, 7):
+            current = adapt_canvas_round(
+                source,
+                context_id=f"ctx_budget_{index:03d}",
+                parent_context_id=previous["context_id"],
+            )
+            previous_policy = reconcile_context_response(
+                previous_policy,
+                current,
+                previous_context_pack=previous,
+                correction=f"第 {index} 条纠正。",
+            )
+            previous = current
+
+        reconciliation = previous_policy["continuity"]["reconciliation"]
+        self.assertEqual(5, len(reconciliation["correction_history"]))
+        self.assertTrue(reconciliation["correction_history_truncated"])
+        self.assertEqual(
+            ["第 2 条纠正。", "第 3 条纠正。", "第 4 条纠正。", "第 5 条纠正。", "第 6 条纠正。"],
+            [item["text"] for item in reconciliation["correction_history"]],
+        )
+        self.assertEqual([], validate_context_continuity_policy(previous_policy, previous))
+
+    def test_overlong_correction_is_bounded_and_explicitly_marked(self):
+        source = load_json("context-source-canvas-round.json")
+        previous = adapt_canvas_round(source, context_id="ctx_text_initial")
+        current = adapt_canvas_round(source, context_id="ctx_text_current", parent_context_id=previous["context_id"])
+        policy = reconcile_context_response(
+            build_context_continuity_policy(previous),
+            current,
+            previous_context_pack=previous,
+            correction="x" * 700,
+        )
+
+        correction = policy["continuity"]["reconciliation"]["correction"]
+        history = policy["continuity"]["reconciliation"]["correction_history"]
+        self.assertEqual(500, len(correction["text"]))
+        self.assertTrue(correction["text_truncated"])
+        self.assertEqual(500, len(history[0]["text"]))
+        self.assertTrue(history[0]["text_truncated"])
+        self.assertEqual([], validate_context_continuity_policy(policy, current))
+
+        next_pack = adapt_canvas_round(source, context_id="ctx_text_next", parent_context_id=current["context_id"])
+        chained = reconcile_context_response(
+            policy,
+            next_pack,
+            previous_context_pack=current,
+            correction="第二条短纠正。",
+        )
+        self.assertTrue(chained["continuity"]["reconciliation"]["correction_history"][0]["text_truncated"])
+        self.assertEqual([], validate_context_continuity_policy(chained, next_pack))
+
     def test_same_context_reread_fails_closed_until_new_context_receipt(self):
         previous = pack_from("minimal-context-pack-positive.json", "ctx_same")
         previous_policy = build_context_continuity_policy(previous)
