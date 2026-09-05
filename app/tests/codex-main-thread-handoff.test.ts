@@ -283,6 +283,20 @@ describe('main-thread handoff routing', () => {
     expect((await readReceipt(harness.roundPath)).status).toBe('accepted')
   })
 
+  it('does not interrupt a long-lived accepted transport or keep the caller referenced', async () => {
+    const harness = await createHarness('long_lived_transport', `
+      console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_long_lived' } } }))
+      setTimeout(() => markTerminal('still-alive'), 80)
+      setTimeout(() => { markTerminal('released'); process.exit(0) }, 180)
+    `)
+    const result = await startHandoff(harness)
+    expect(result).toMatchObject({ status: 'accepted', accepted: true, expected_turn_id: 'turn_long_lived' })
+    await waitFor(() => readFile(harness.markerPath, 'utf8'), (value) => value === 'still-alive', 'long-lived transport')
+    expect((await readReceipt(harness.roundPath)).status).toBe('accepted')
+    await waitFor(() => readFile(harness.markerPath, 'utf8'), (value) => value === 'released', 'long-lived transport release')
+    expect((await readReceipt(harness.roundPath)).status).toBe('accepted')
+  })
+
   it('keeps the accepted receipt when the App Server exits after acceptance', async () => {
     const harness = await createHarness('accepted_exit', `
       console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_exit' } } }))

@@ -10,6 +10,14 @@ export type HandoffReceipt = {
   reason?: string
 }
 
+const HISTORICAL_ACCEPTED_STATUSES = new Set([
+  'accepted_timeout',
+  'accepted_observer_lost',
+  'completed_failed',
+  'completed_cancelled',
+  'accepted_failed',
+])
+
 /**
  * A local archive and a Codex delivery are separate facts. Never turn an
  * engine/archive success into a delivery success unless the handoff receipt
@@ -19,10 +27,10 @@ export function deriveExportReceiptStatus(handoff: HandoffReceipt | null | undef
   if (handoff?.status === 'archived') return 'archived'
   if (handoff?.delivered || handoff?.status === 'delivered') return 'delivered'
   // The whiteboard promises receipt by the current conversation, not a
-  // successful downstream model response. Preserve the old accepted-prefixed
-  // and completed-prefixed receipt names when reading archived rounds.
+  // successful downstream model response. Preserve only known historical
+  // receipt names when reading archived rounds; unknown statuses stay failed.
   const historicalStatus = handoff?.status ?? ''
-  if (handoff?.accepted || historicalStatus === 'accepted' || historicalStatus.startsWith('accepted_') || historicalStatus.startsWith('completed_')) return 'accepted'
+  if (handoff?.accepted || historicalStatus === 'accepted' || HISTORICAL_ACCEPTED_STATUSES.has(historicalStatus)) return 'accepted'
   if (handoff?.status === 'failed' || handoff?.status === 'timed_out') return 'failed'
   if (handoff?.attempted) return 'failed'
   return 'archived'

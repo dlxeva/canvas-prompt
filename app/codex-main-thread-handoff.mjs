@@ -216,6 +216,15 @@ export async function handoffToMainThread({
       stdio: ['pipe', 'pipe', 'pipe'],
       env: appServerEnvironment(),
     })
+    // An accepted turn owns the transport until the receiving host releases
+    // it. Reclaim that transport only when this Canvas service itself exits;
+    // never use the cleanup hook to infer or rewrite downstream turn state.
+    const cleanupChildOnHostExit = () => {
+      if (child.killed || child.exitCode !== null || child.signalCode !== null) return
+      try { child.kill('SIGTERM') } catch { /* the child may have exited concurrently */ }
+    }
+    const releaseHostExitCleanup = () => process.removeListener('exit', cleanupChildOnHostExit)
+    process.once('exit', cleanupChildOnHostExit)
     let buffer = ''
     let settled = false
     let initialized = false
@@ -330,6 +339,7 @@ export async function handoffToMainThread({
     child.stderr.on('data', () => undefined)
     child.once('error', (error) => finish(failureReceipt(error.message)))
     child.once('exit', (code) => {
+      releaseHostExitCleanup()
       if (!settled) finish(failureReceipt(`主对话桥接已退出 (${code ?? 'unknown'})`), { terminate: false })
     })
     send({
