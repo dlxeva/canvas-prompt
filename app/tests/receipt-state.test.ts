@@ -13,6 +13,8 @@ describe('export receipt truthfulness', () => {
     [{ attempted: true, status: 'completed_failed', accepted: true, delivered: false }, 'accepted'],
     [{ attempted: true, status: 'completed_cancelled', accepted: true, delivered: false }, 'accepted'],
     [{ attempted: true, status: 'accepted_failed', accepted: true, delivered: false }, 'accepted'],
+    [{ attempted: true, status: 'accepted_future', accepted: false, delivered: false }, 'failed'],
+    [{ attempted: true, status: 'completed_future', accepted: false, delivered: false }, 'failed'],
     [{ attempted: true, status: 'accepted', accepted: true, delivered: false }, 'accepted'],
     [{ attempted: true, status: 'delivered', accepted: true, delivered: true }, 'delivered'],
   ] as const)('maps %j to %s', (handoff, expected) => {
