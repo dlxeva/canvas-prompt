@@ -1,0 +1,49 @@
+{
+  "compact_package": {
+    "meta": {
+      "format": "compact_timeline_aware",
+      "package_id": "pp_mcpack_dense_handwriting",
+      "version": "2.6"
+    },
+    "final_canvas_snapshot": {
+      "format": "png",
+      "width": 800,
+      "height": 600,
+      "availability": "available"
+    },
+    "compact_caption_summary": [],
+    "process_ir_summary": {
+      "source_provenance": {
+        "package_id": "pp_mcpack_dense_handwriting",
+        "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "compiler_version": "process-ir-compiler-v0.7"
+      }
+    }
+  },
+  "process_ir": {
+    "schema_version": "process-ir-v0.8",
+    "source": {
+      "package_id": "pp_mcpack_dense_handwriting",
+      "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "compiler_version": "process-ir-compiler-v0.7"
+    },
+    "speech_anchors": [],
+    "objects": [
+      {"object_id": "obj_dense", "object_type": "freehand_group", "bounds": {"x": 240, "y": 180, "width": 300, "height": 170}}
+    ],
+    "spatial_relations": [
+      {"object_ids": ["obj_dense", "obj_dense"], "relation": "overlaps", "assertion_level": "observation"}
+    ],
+    "reference_candidates": [],
+    "ink_relation_candidates": [],
+    "ink_circle_candidates": [],
+    "ink_annotation_candidates": [
+      {"mark_id": "dense_group", "kind": "scribble_like", "candidate_object_ids": ["obj_dense"], "assertion_level": "observation", "resolution_status": "unresolved"}
+    ],
+    "ocr_observations": [],
+    "quality": {
+      "ink_trace": {"geometry_status": "available", "stroke_count": 17, "trajectory_count": 17},
+      "ocr_model_context_policy": "review_only_pending_cross_modal_validation"
+    }
+  }
+}

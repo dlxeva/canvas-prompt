@@ -1,0 +1,91 @@
+{
+  "compact_package": {
+    "meta": {
+      "format": "compact_timeline_aware",
+      "package_id": "pp_mcpack_positive",
+      "version": "2.6"
+    },
+    "final_canvas_snapshot": {
+      "format": "png",
+      "width": 320,
+      "height": 200,
+      "availability": "available"
+    },
+    "compact_caption_summary": [
+      {
+        "caption_id": "seg_007",
+        "timestamp_start_ms": 22000,
+        "timestamp_end_ms": 24800,
+        "summary": "圈里的这个是入口，箭头指向右边的结果。"
+      }
+    ],
+    "process_ir_summary": {
+      "source_provenance": {
+        "package_id": "pp_mcpack_positive",
+        "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "compiler_version": "process-ir-compiler-v0.7"
+      }
+    }
+  },
+  "process_ir": {
+    "schema_version": "process-ir-v0.8",
+    "source": {
+      "package_id": "pp_mcpack_positive",
+      "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "compiler_version": "process-ir-compiler-v0.7"
+    },
+    "speech_anchors": [
+      {
+        "caption_id": "seg_007",
+        "start_ms": 22000,
+        "end_ms": 24800,
+        "text": "圈里的这个是入口，箭头指向右边的结果。"
+      }
+    ],
+    "objects": [
+      {
+        "object_id": "obj_A",
+        "label": "入口",
+        "bounds": {"x": 20, "y": 40, "width": 80, "height": 60}
+      },
+      {
+        "object_id": "obj_B",
+        "label": "结果",
+        "bounds": {"x": 220, "y": 40, "width": 80, "height": 60}
+      }
+    ],
+    "spatial_relations": [],
+    "reference_candidates": [],
+    "ink_relation_candidates": [
+      {
+        "relation_id": "rel_001",
+        "stroke_id": "stroke_arrow_01",
+        "endpoint_candidates": {
+          "start_object_id": "obj_A",
+          "end_object_id": "obj_B",
+          "start_distance": 12.4,
+          "end_distance": 9.7
+        },
+        "geometry": {"point_count": 8, "direct_distance": 190, "path_to_direct_ratio": 1.02},
+        "temporal_evidence": {"anchor_timestamps_ms": [21300, 24800], "connection_timestamp_ms": 23000},
+        "evidence_sources": ["arrow_geometry", "object_binding"],
+        "assertion_level": "observation",
+        "resolution_status": "unresolved"
+      }
+    ],
+    "ink_arrowhead_candidates": [
+      {
+        "shaft_relation_id": "rel_001",
+        "candidate_visual_direction": "path_start_to_path_end",
+        "resolution_status": "unresolved",
+        "assertion_level": "observation"
+      }
+    ],
+    "ink_circle_candidates": [],
+    "ink_annotation_candidates": [],
+    "ocr_observations": [],
+    "quality": {
+      "ink_trace": {"geometry_status": "available"}
+    }
+  }
+}

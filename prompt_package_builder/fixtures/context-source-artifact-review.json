@@ -1,0 +1,154 @@
+{
+  "schema_version": "artifact-review/0.2-draft",
+  "package_id": "arp_fixture_review_001",
+  "created_at": "2026-08-08T08:00:00.000Z",
+  "artifact": {
+    "artifact_id": "art_fixture_review_001",
+    "artifact_kind": "pdf",
+    "source_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "source_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "page_count": 2,
+    "read_only": true
+  },
+  "pages": [
+    {
+      "page_id": "page_1111111111111111_1",
+      "page_number": 1,
+      "render_box": {"width": 612, "height": 792, "unit": "pdf_point"},
+      "rotation_degrees": 0
+    },
+    {
+      "page_id": "page_1111111111111111_2",
+      "page_number": 2,
+      "render_box": {"width": 612, "height": 792, "unit": "pdf_point"},
+      "rotation_degrees": 0
+    }
+  ],
+  "page_visits": [
+    {"page_number": 1, "at_ms": 1200},
+    {"page_number": 2, "at_ms": 4200}
+  ],
+  "annotations": [
+    {
+      "annotation_id": "ann_candidate_001",
+      "page_id": "page_1111111111111111_1",
+      "kind": "circle",
+      "region": {
+        "coordinate_space": "page_normalized_v1",
+        "x_ratio": 0.08,
+        "y_ratio": 0.16,
+        "width_ratio": 0.24,
+        "height_ratio": 0.12
+      },
+      "gesture_points": [
+        {"x_ratio": 0.08, "y_ratio": 0.16},
+        {"x_ratio": 0.32, "y_ratio": 0.28}
+      ],
+      "created_at_ms": 1600,
+      "voice_window": {
+        "start_ms": 1400,
+        "end_ms": 2300,
+        "transcript_segment_ids": ["voice_fixture_001"]
+      },
+      "binding_status": "candidate",
+      "evidence_ids": ["ev_ann_candidate_001", "ev_voice_fixture_001"]
+    },
+    {
+      "annotation_id": "ann_confirmed_001",
+      "page_id": "page_1111111111111111_2",
+      "kind": "arrow",
+      "region": {
+        "coordinate_space": "page_normalized_v1",
+        "x_ratio": 0.40,
+        "y_ratio": 0.44,
+        "width_ratio": 0.28,
+        "height_ratio": 0.06
+      },
+      "gesture_points": [
+        {"x_ratio": 0.40, "y_ratio": 0.47},
+        {"x_ratio": 0.68, "y_ratio": 0.47}
+      ],
+      "created_at_ms": 4600,
+      "voice_window": {
+        "start_ms": 4300,
+        "end_ms": 5200,
+        "transcript_segment_ids": ["voice_fixture_002"]
+      },
+      "binding_status": "confirmed",
+      "evidence_ids": ["ev_ann_confirmed_001", "ev_voice_fixture_002", "ev_confirm_confirmed_001"]
+    }
+  ],
+  "voice_segments": [
+    {
+      "segment_id": "voice_fixture_001",
+      "start_ms": 1400,
+      "end_ms": 2300,
+      "text": "请看第一页左上角这个圈选。",
+      "confidence": 0.96
+    },
+    {
+      "segment_id": "voice_fixture_002",
+      "start_ms": 4300,
+      "end_ms": 5200,
+      "text": "对，第二页这条箭头就是需要修改的位置。",
+      "confidence": 0.91
+    }
+  ],
+  "reference_resolutions": [
+    {
+      "resolution_id": "ref_fixture_001",
+      "voice_segment_id": "voice_fixture_001",
+      "page_number": 1,
+      "status": "unique_evidence",
+      "annotation_id": "ann_candidate_001",
+      "evidence_ids": ["ev_ann_candidate_001", "ev_voice_fixture_001"]
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "ev_ann_candidate_001",
+      "kind": "annotation",
+      "page_id": "page_1111111111111111_1",
+      "annotation_id": "ann_candidate_001",
+      "assertion_level": "observation",
+      "time_window_ms": {"start_ms": 1600, "end_ms": 1600}
+    },
+    {
+      "evidence_id": "ev_ann_confirmed_001",
+      "kind": "annotation",
+      "page_id": "page_1111111111111111_2",
+      "annotation_id": "ann_confirmed_001",
+      "assertion_level": "observation",
+      "time_window_ms": {"start_ms": 4600, "end_ms": 4600}
+    },
+    {
+      "evidence_id": "ev_voice_fixture_001",
+      "kind": "voice_segment",
+      "assertion_level": "raw",
+      "time_window_ms": {"start_ms": 1400, "end_ms": 2300}
+    },
+    {
+      "evidence_id": "ev_voice_fixture_002",
+      "kind": "voice_segment",
+      "assertion_level": "raw",
+      "time_window_ms": {"start_ms": 4300, "end_ms": 5200}
+    },
+    {
+      "evidence_id": "ev_confirm_confirmed_001",
+      "kind": "clarification_response",
+      "annotation_id": "ann_confirmed_001",
+      "assertion_level": "explicit_user_assertion",
+      "time_window_ms": {"start_ms": 5200, "end_ms": 5200}
+    }
+  ],
+  "privacy": {
+    "processing": "local_only",
+    "source_bytes_in_export": false,
+    "retention": "private_local_until_deleted",
+    "redaction_status": "not_reviewed"
+  },
+  "review_state": {
+    "interpretation_status": "clarification_required",
+    "execution_authorized": false
+  }
+}

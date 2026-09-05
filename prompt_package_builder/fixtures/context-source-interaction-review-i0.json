@@ -1,0 +1,100 @@
+{
+  "schema": "interaction-review-package/0.1",
+  "package_id": "irp_fixture_001",
+  "created_at": "2026-08-08T08:20:00.000Z",
+  "artifact": {
+    "artifact_id": "controlled-ai-web-prototype",
+    "adapter_id": "i0-controlled-web",
+    "source_version": "i0-synthetic-2026-08-08",
+    "kind": "controlled-web-flow"
+  },
+  "capture": {
+    "mode": "explicit-review-session",
+    "session_id": "fixture_001",
+    "started_at": "2026-08-08T08:18:00.000Z",
+    "ended_at": "2026-08-08T08:20:00.000Z",
+    "background_monitoring": false,
+    "allowed_routes": ["/generate", "/review"],
+    "privacy": {
+      "sensitive_fields": "excluded-by-default",
+      "audio": "not-captured",
+      "retention": "browser-memory-until-explicit-discard-or-page-close"
+    }
+  },
+  "retention": {
+    "capture_buffer": {
+      "storage": "browser-memory",
+      "state": "retained",
+      "clear_trigger": "explicit-discard-or-page-close"
+    },
+    "exported_copy": {"management": "user-controlled-after-download"},
+    "deletion_receipt": null
+  },
+  "events": [
+    {
+      "id": "evt_generate_001",
+      "kind": "click",
+      "route": "/generate",
+      "element_id": "generate-run",
+      "at_ms": 1200,
+      "before_snapshot_id": "snap_001",
+      "after_snapshot_id": "snap_002",
+      "privacy": "captured"
+    }
+  ],
+  "snapshots": {
+    "snap_001": {"route": "/generate", "state": {"generation": "idle"}},
+    "snap_002": {"route": "/review", "state": {"generation": "complete", "result_count": 1}}
+  },
+  "feedback": [
+    {
+      "id": "fb_001",
+      "text": "点击生成后，结果出现得太突然，希望先看到进度。",
+      "time_window": {"start_ms": 0, "end_ms": 1200},
+      "evidence_ids": ["ev_evt_generate_001", "ev_fb_001"],
+      "anchor": {"route": "/generate", "element_id": "generate-run", "binding": "confirmed"},
+      "confirmation": {"status": "confirmed-by-reviewer"}
+    },
+    {
+      "id": "fb_002",
+      "text": "这个结果卡片还需要再看一下。",
+      "time_window": {"start_ms": 1300, "end_ms": 1800},
+      "evidence_ids": ["ev_fb_002"],
+      "anchor": {"route": "/review", "region_candidate": "review-card-region", "binding": "ambiguous"},
+      "confirmation": {"status": "needs_clarification"}
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev_evt_generate_001",
+      "kind": "interaction_event",
+      "event_id": "evt_generate_001",
+      "route": "/generate",
+      "element_id": "generate-run",
+      "at_ms": 1200
+    },
+    {"id": "ev_fb_001", "kind": "feedback", "feedback_id": "fb_001", "at_ms": 1200},
+    {"id": "ev_fb_002", "kind": "feedback", "feedback_id": "fb_002", "at_ms": 1800}
+  ],
+  "proposals": [
+    {
+      "id": "prop_001",
+      "title": "在生成按钮后加入可见进度",
+      "evidence_ids": ["ev_evt_generate_001", "ev_fb_001"],
+      "execution": "proposal-only",
+      "confirmation": {"status": "pending"}
+    }
+  ],
+  "summary": {
+    "did": "走过 /generate；关键操作：generate-run。",
+    "happened": "记录 1 个受控事件，其中 0 个敏感输入已排除。",
+    "issue": "点击生成后，结果出现得太突然，希望先看到进度。",
+    "desired_change": "prop_001:pending"
+  },
+  "agent_boundary": "Agent may propose changes only. Prototype mutation requires explicit per-proposal confirmation.",
+  "integrity": {
+    "algorithm": "SHA-256",
+    "scope": "stable JSON with integrity.value blank",
+    "value": ""
+  }
+}

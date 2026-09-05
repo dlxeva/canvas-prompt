@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { existsSync } from 'node:fs'
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
-import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
+import { homedir, tmpdir } from 'node:os'
 import { resolveConversationScope, threadScopeKey, validSessionId, validThreadId } from '../app/conversation-scope.mjs'
 import { migrateLegacyArchive } from '../app/legacy-archive-migration.mjs'
 
@@ -153,6 +154,14 @@ const launchPreflight = async () => {
     }
   }
 }
+const runPythonJson = (args) => {
+  const result = spawnSync('python3', args, { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 })
+  if (result.status !== 0) {
+    throw new Error(String(result.stderr || result.stdout || `Python command failed (${result.status ?? 'unknown'})`).trim())
+  }
+  const lines = String(result.stdout || '').trim().split('\n').filter(Boolean)
+  return lines.length ? JSON.parse(lines.at(-1)) : null
+}
 const allowsExternalAsr = (environment = process.env) => environment.CANVAS_PROMPT_ALLOW_EXTERNAL_ASR === '1' || Boolean(environment.CANVAS_PROMPT_ASR_URL)
 const probeAsr = async (environment = process.env) => {
   const endpoint = asrUrl(environment)
@@ -231,6 +240,7 @@ Usage:
   canvas-prompt setup [--core-only]
   canvas-prompt open [--project <dir>] [--conversation-only] [--host codex|workbuddy|local]
   canvas-prompt read [--project <dir>]
+  canvas-prompt read-recovery [--project <dir>] [--correction <text>]
   canvas-prompt read-artifact-review [--project <dir>]
   canvas-prompt init [--project <dir>] [--thread-id <id>] [--conversation-only]
   canvas-prompt doctor [--project <dir>] [--thread-id <id>] [--conversation-only]
@@ -243,7 +253,10 @@ reuses validated existing dependencies. The local ASR model downloads on first
 start. A supplied thread ID is provenance only, never inferred from project
 history. init prints the single-board MCP configuration. migrate copies complete
 legacy archives without deleting or scanning any source. read prints the latest
-completed prompt package from the single active board. read-artifact-review
+completed prompt package from the single active board. read-recovery rereads
+the latest compiled round with a fresh context ID, records the prior policy as
+superseded in the bounded response, and does not mutate the round archive.
+read-artifact-review
 prints the latest compact PDF/PPTX review. Both use the same code paths as their
 canvas_prompt MCP tools.`)
 
@@ -300,20 +313,85 @@ try {
         asr,
         mcp_config: mcpConfig(project, boundThreadId),
       }, null, 2))
-    } else if (command === 'read' || command === 'read-artifact-review') {
+    } else if (command === 'read' || command === 'read-recovery' || command === 'read-artifact-review') {
       // Maintained CLI fallback for get_latest_prompt_package. Uses the exact
       // same code path as the canvas_prompt MCP server. This is NOT a
       // temporary Bash/Python read — it is a first-class CLI command that
       // imports and calls the MCP server's handler directly.
       process.env.CANVAS_PROMPT_MCP_TEST = '1'
       const { handleGetLatestPromptPackage, handleGetLatestArtifactReview } = await import('../mcp/server.mjs')
-      const response = command === 'read'
-        ? await handleGetLatestPromptPackage({})
-        : await handleGetLatestArtifactReview({})
+      const response = command === 'read-artifact-review'
+        ? await handleGetLatestArtifactReview({})
+        : await handleGetLatestPromptPackage({})
       const text = response.content?.[0]?.text
       if (response.isError) {
         console.error(text)
         process.exitCode = 1
+      } else if (command === 'read-recovery') {
+        const latest = JSON.parse(text)
+        const source = latest.source ?? {}
+        const required = ['continuity_policy_path', 'minimal_context_pack_path', 'compact_package_path', 'process_ir_path']
+        if (required.some((key) => typeof source[key] !== 'string' || !existsSync(source[key]))) {
+          throw new Error('最新 round 缺少 continuity policy、Minimal Context Pack 或编译产物；请先导出一个新的完整 round。')
+        }
+        const previousPack = JSON.parse(await readFile(source.minimal_context_pack_path, 'utf8'))
+        const recoveryDir = await mkdtemp(resolve(tmpdir(), 'canvas-prompt-read-recovery-'))
+        try {
+          const contextId = `ctx_reread_${randomUUID().replaceAll('-', '')}`
+          const contextPackPath = resolve(recoveryDir, 'minimal-context-pack.json')
+          const continuityPath = resolve(recoveryDir, 'continuity-policy.json')
+          runPythonJson([
+            resolve(rootDir, 'prompt_package_builder', 'build_minimal_context_pack.py'),
+            '--compact-package', source.compact_package_path,
+            '--process-ir', source.process_ir_path,
+            '--output', contextPackPath,
+            '--context-id', contextId,
+            '--parent-context-id', previousPack.context_id,
+            '--task-kind', 'understand',
+            '--question', '重新读取最新 round，并比较旧理解、用户纠正与新理解。',
+          ])
+          const contextPack = JSON.parse(await readFile(contextPackPath, 'utf8'))
+          // The compact/Process IR pair is intentionally independent of the
+          // raw archive. Preserve only the prior bounded round identity when
+          // the same immutable package is re-read; never copy archive tracks.
+          for (const key of ['round_id', 'captured_at', 'snapshot_index']) {
+            if (contextPack[key] == null && previousPack[key] != null) contextPack[key] = previousPack[key]
+          }
+          if (contextPack.round_id && contextPack.source && previousPack.source?.round_id_source) {
+            contextPack.source.round_id_source = previousPack.source.round_id_source
+          }
+          await writeFile(contextPackPath, `${JSON.stringify(contextPack, null, 2)}\n`, 'utf8')
+          const continuityArgs = [
+            resolve(rootDir, 'prompt_package_builder', 'build_context_continuity.py'),
+            contextPackPath,
+            '--output', continuityPath,
+            '--previous-context-pack', source.minimal_context_pack_path,
+            '--previous-policy', source.continuity_policy_path,
+            '--read-mode', 're_read',
+          ]
+          const correction = flag('--correction')
+          if (correction) continuityArgs.push('--correction', correction)
+          runPythonJson(continuityArgs)
+          const continuity = JSON.parse(await readFile(continuityPath, 'utf8'))
+          console.log(JSON.stringify({
+            package: latest.package,
+            source: {
+              ...source,
+              read_mode: 're_read',
+              previous_context_id: previousPack.context_id,
+              context_id: contextPack.context_id,
+            },
+            context_pack: contextPack,
+            continuity_policy: continuity,
+            delivery: {
+              mode: 'bounded_re_read',
+              archive_mutated: false,
+              execution_authorized: false,
+            },
+          }))
+        } finally {
+          await rm(recoveryDir, { recursive: true, force: true })
+        }
       } else {
         console.log(text)
       }

@@ -1,0 +1,22 @@
+{
+  "same_round_reread": {
+    "source_fixture": "context-source-canvas-round.json",
+    "previous_context_id": "ctx_continuity_old",
+    "current_context_id": "ctx_continuity_new",
+    "parent_context_id": "ctx_continuity_old",
+    "correction": "上一轮读错了，请只按这次最终快照和本轮语音重新复述。"
+  },
+  "identity_mismatch": {
+    "previous_source_fixture": "context-source-canvas-round.json",
+    "current_source_fixture": "minimal-context-pack-response-policy-snapshot-unavailable.json",
+    "previous_context_id": "ctx_continuity_old_source",
+    "current_context_id": "ctx_continuity_new_source",
+    "parent_context_id": "ctx_continuity_old_source",
+    "correction": "请先确认你读取的是哪一轮。"
+  },
+  "safety": {
+    "execution_authorized": false,
+    "superseded_status": "superseded",
+    "reconciliation_status": "reconciled"
+  }
+}

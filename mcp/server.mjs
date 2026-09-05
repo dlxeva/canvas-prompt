@@ -57,6 +57,8 @@ const ROUND_ARTIFACTS = {
   prompt_package: ['prompt-package.json'],
   compact_package: ['engine', 'compact-package.json'],
   process_ir: ['engine', 'process-ir.json'],
+  minimal_context_pack: ['engine', 'minimal-context-pack.json'],
+  continuity_policy: ['engine', 'continuity-policy.json'],
   manifest: ['round.json'],
   handoff: ['handoff.json'],
 };
@@ -178,6 +180,8 @@ function packageEnginePaths(filePath, packageId, rawPackage) {
   return {
     raw_package_path: filePath,
     ...(roundDir ? {
+      continuity_policy_path: resolve(roundDir, 'engine', 'continuity-policy.json'),
+      minimal_context_pack_path: resolve(roundDir, 'engine', 'minimal-context-pack.json'),
       compact_package_path: resolve(roundDir, 'engine', 'compact-package.json'),
       process_ir_path: resolve(roundDir, 'engine', 'process-ir.json'),
       canvas_snapshot_path: resolve(roundDir, 'canvas-snapshot.png'),
@@ -194,7 +198,7 @@ function latestPackageResponse(rawPackage, filePath) {
     delivery: {
       inline_image_data: 'excluded',
       max_text_bytes: MAX_LATEST_PACKAGE_TEXT_BYTES,
-      preferred_reading_order: ['compact_package_path', 'process_ir_path', 'raw_package_path'],
+      preferred_reading_order: ['continuity_policy_path', 'minimal_context_pack_path', 'compact_package_path', 'process_ir_path', 'raw_package_path'],
     },
   };
   const text = JSON.stringify(response);
@@ -220,7 +224,7 @@ function latestPackageResponse(rawPackage, filePath) {
       max_text_bytes: MAX_LATEST_PACKAGE_TEXT_BYTES,
       output_truncated: true,
       omitted_fields: ['strokes', 'pointer_track.samples', 'canvas_snapshot.keyframes'],
-      preferred_reading_order: ['compact_package_path', 'process_ir_path', 'raw_package_path'],
+      preferred_reading_order: ['continuity_policy_path', 'minimal_context_pack_path', 'compact_package_path', 'process_ir_path', 'raw_package_path'],
     },
   });
 }
@@ -505,7 +509,7 @@ const TOOLS = [
         },
         artifact: {
           type: 'string',
-          enum: ['prompt_package', 'compact_package', 'process_ir', 'manifest', 'handoff'],
+          enum: ['prompt_package', 'continuity_policy', 'minimal_context_pack', 'compact_package', 'process_ir', 'manifest', 'handoff'],
           description: 'One approved immutable-round artifact kind.',
         },
         session_id: {

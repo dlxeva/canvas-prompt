@@ -46,7 +46,10 @@ test('latest package response excludes inline image data while retaining image m
   assert.equal(response.package.canvas_snapshot.keyframes[0].image.format, 'webp');
   assert.equal(response.package.transcript.full_text, '保留语音内容');
   assert.equal(response.source.raw_package_path, '/tmp/project/.canvas-prompt/latest-prompt-package.json');
+  assert.equal(response.source.continuity_policy_path, '/tmp/project/.canvas-prompt/rounds/pp_fixture/engine/continuity-policy.json');
+  assert.equal(response.source.minimal_context_pack_path, '/tmp/project/.canvas-prompt/rounds/pp_fixture/engine/minimal-context-pack.json');
   assert.equal(response.source.compact_package_path, '/tmp/project/.canvas-prompt/rounds/pp_fixture/engine/compact-package.json');
+  assert.deepEqual(response.delivery.preferred_reading_order.slice(0, 2), ['continuity_policy_path', 'minimal_context_pack_path']);
 });
 
 test('latest package response exposes an archived editable original only from its own round', async (t) => {
@@ -77,6 +80,8 @@ test('public MCP schema exposes only fixed-scope round reads, never caller paths
   assert.equal(schema.includes('transcript_path'), false);
   assert.equal(schema.includes('Optional absolute replacement path'), false);
   assert.equal(schema.includes('"path"'), false);
+  assert.match(schema, /continuity_policy/);
+  assert.match(schema, /minimal_context_pack/);
   assert.match(schema, /package_id/);
 });
 
@@ -205,6 +210,8 @@ test('round artifact reads resolve the published Process IR path from the single
   await writeFile(resolve(home, '.canvas-prompt', 'board', 'rounds', 'pp_round', 'prompt-package.json'), JSON.stringify({ meta: { package_id: 'pp_round' } }));
   await writeFile(resolve(roundDir, 'process-ir.json'), JSON.stringify({ schema_version: 'process-ir-v0.4', source: { package_id: 'pp_round' } }));
   await writeFile(resolve(roundDir, 'compact-package.json'), JSON.stringify({ schema_version: 'compact-package-v2.2', source_provenance: { package_id: 'pp_round' } }));
+  await writeFile(resolve(roundDir, 'minimal-context-pack.json'), JSON.stringify({ contract: 'canvas-prompt/minimal-context-pack/0.1-draft', context_id: 'ctx_round' }));
+  await writeFile(resolve(roundDir, 'continuity-policy.json'), JSON.stringify({ contract: 'canvas-prompt/context-response-policy/0.1-draft', context_id: 'ctx_round', execution_authorized: false }));
 
   const previousProject = process.env.CANVAS_PROMPT_PROJECT_DIR;
   const previousHome = process.env.HOME;
@@ -214,10 +221,16 @@ test('round artifact reads resolve the published Process IR path from the single
   try {
     const processIr = await scoped.handleGetRoundArtifact({ package_id: 'pp_round', artifact: 'process_ir' });
     const compact = await scoped.handleGetRoundArtifact({ package_id: 'pp_round', artifact: 'compact_package' });
+    const contextPack = await scoped.handleGetRoundArtifact({ package_id: 'pp_round', artifact: 'minimal_context_pack' });
+    const continuity = await scoped.handleGetRoundArtifact({ package_id: 'pp_round', artifact: 'continuity_policy' });
     assert.equal(processIr.isError, undefined);
     assert.equal(compact.isError, undefined);
+    assert.equal(contextPack.isError, undefined);
+    assert.equal(continuity.isError, undefined);
     assert.equal(JSON.parse(processIr.content[0].text).source.package_id, 'pp_round');
     assert.equal(JSON.parse(compact.content[0].text).source_provenance.package_id, 'pp_round');
+    assert.equal(JSON.parse(contextPack.content[0].text).context_id, 'ctx_round');
+    assert.equal(JSON.parse(continuity.content[0].text).execution_authorized, false);
   } finally {
     if (previousProject === undefined) delete process.env.CANVAS_PROMPT_PROJECT_DIR;
     else process.env.CANVAS_PROMPT_PROJECT_DIR = previousProject;

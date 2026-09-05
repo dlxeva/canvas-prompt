@@ -1,0 +1,78 @@
+{
+  "compact_package": {
+    "meta": {
+      "format": "compact_timeline_aware",
+      "package_id": "pp_response_policy_unavailable",
+      "version": "2.6"
+    },
+    "compact_caption_summary": [
+      {
+        "caption_id": "seg_visual_words",
+        "timestamp_start_ms": 1200,
+        "timestamp_end_ms": 2800,
+        "summary": "画面左侧的 A 指向右侧的 B，但请先确认你真的读到了最终画面。"
+      }
+    ],
+    "process_ir_summary": {
+      "source_provenance": {
+        "package_id": "pp_response_policy_unavailable",
+        "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "compiler_version": "process-ir-compiler-v0.7"
+      }
+    }
+  },
+  "process_ir": {
+    "schema_version": "process-ir-v0.8",
+    "source": {
+      "package_id": "pp_response_policy_unavailable",
+      "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "compiler_version": "process-ir-compiler-v0.7"
+    },
+    "speech_anchors": [
+      {
+        "caption_id": "seg_visual_words",
+        "start_ms": 1200,
+        "end_ms": 2800,
+        "text": "画面左侧的 A 指向右侧的 B，但请先确认你真的读到了最终画面。"
+      }
+    ],
+    "objects": [
+      {
+        "object_id": "obj_A",
+        "label": "A",
+        "bounds": {"x": 20, "y": 40, "width": 80, "height": 60}
+      },
+      {
+        "object_id": "obj_B",
+        "label": "B",
+        "bounds": {"x": 220, "y": 40, "width": 80, "height": 60}
+      }
+    ],
+    "spatial_relations": [],
+    "reference_candidates": [],
+    "ink_relation_candidates": [
+      {
+        "relation_id": "rel_without_snapshot",
+        "stroke_id": "stroke_without_snapshot",
+        "endpoint_candidates": {
+          "start_object_id": "obj_A",
+          "end_object_id": "obj_B",
+          "start_distance": 11.0,
+          "end_distance": 12.0
+        },
+        "geometry": {"point_count": 6, "direct_distance": 190, "path_to_direct_ratio": 1.04},
+        "temporal_evidence": {"anchor_timestamps_ms": [1100, 2800], "connection_timestamp_ms": 2100},
+        "evidence_sources": ["arrow_geometry", "object_binding"],
+        "assertion_level": "observation",
+        "resolution_status": "unresolved"
+      }
+    ],
+    "ink_arrowhead_candidates": [],
+    "ink_circle_candidates": [],
+    "ink_annotation_candidates": [],
+    "ocr_observations": [],
+    "quality": {
+      "ink_trace": {"geometry_status": "available"}
+    }
+  }
+}
