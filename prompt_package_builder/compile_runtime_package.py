@@ -22,13 +22,18 @@ for directory in (str(BUILDER_DIR), str(VALIDATORS_DIR)):
         sys.path.insert(0, directory)
 
 from browser_package_to_fixture import adapt, read_json, save_fixture  # noqa: E402
-from build_compact_package import build_compact_package, save_json  # noqa: E402
+from build_compact_package import build_compact_package_from_adapted, save_json  # noqa: E402
 from validate_compact_package import validate_package  # noqa: E402
 from validate_process_ir import validate_process_ir  # noqa: E402
 
 
-def compile_runtime_package(input_path: Path, output_dir: Path) -> dict[str, Any]:
-    """Persist Process IR and Compact Package for exactly one exported round."""
+def compile_runtime_package(input_path: Path, output_dir: Path, debug_fixture_dir: Path | None = None) -> dict[str, Any]:
+    """Persist Process IR and Compact Package for exactly one exported round.
+
+    The compact builder consumes the adapted tracks in memory.  A fixture tree
+    is written only when an explicit debug destination is requested, preserving
+    the legacy fixture builder for inspection and archive compatibility.
+    """
     package = read_json(input_path)
     adapted = adapt(package)
     process_ir = adapted["process_ir"]
@@ -36,19 +41,19 @@ def compile_runtime_package(input_path: Path, output_dir: Path) -> dict[str, Any
     if process_errors:
         raise ValueError("Process IR validation failed: " + "; ".join(process_errors))
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    fixture_dir = output_dir / "engine-inputs"
-    save_fixture(adapted, fixture_dir)
-    compact = build_compact_package(fixture_dir)
+    if debug_fixture_dir is not None:
+        save_fixture(adapted, debug_fixture_dir)
+    compact = build_compact_package_from_adapted(adapted)
     compact_errors, compact_warnings = validate_package(compact)
     if compact_errors:
         raise ValueError("Compact Package validation failed: " + "; ".join(compact_errors))
 
+    output_dir.mkdir(parents=True, exist_ok=True)
     compact_path = output_dir / "compact-package.json"
     save_json(compact_path, compact)
-    # engine-inputs is an implementation fixture directory.  The persisted
-    # Process IR is a public round artifact, shared by MCP, handoff and manual
-    # inspection, so it must have one stable path beside compact-package.json.
+    # The persisted Process IR is a public round artifact, shared by MCP,
+    # handoff and manual inspection, so it has one stable path beside the
+    # compact package.
     process_path = output_dir / "process-ir.json"
     save_json(process_path, process_ir)
     provenance = (process_ir.get("source") or {})
@@ -77,9 +82,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--debug-fixture-dir",
+        type=Path,
+        default=None,
+        help="Explicitly export adapted fixture tracks for inspection or legacy builder comparison.",
+    )
     args = parser.parse_args()
     try:
-        result = compile_runtime_package(args.input, args.output_dir)
+        result = compile_runtime_package(args.input, args.output_dir, args.debug_fixture_dir)
     except Exception as error:
         print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False), file=sys.stderr)
         raise SystemExit(1)

@@ -122,16 +122,16 @@ def _spatial_relations(objects: list[dict[str, Any]]) -> list[dict[str, Any]]:
             vertical_overlap = max(0.0, min(lbottom, rbottom) - max(ly, ry))
             pair = {"object_ids": [left["object_id"], right["object_id"]], "assertion_level": "observation"}
             if lx <= rx and ly <= ry and lright >= rright and lbottom >= rbottom:
-                relations.append({**pair, "relation": "contains", "confidence": 0.98})
+                relations.append({**pair, "relation": "contains"})
             elif rx <= lx and ry <= ly and rright >= lright and rbottom >= lbottom:
-                relations.append({**pair, "relation": "contained_by", "confidence": 0.98})
+                relations.append({**pair, "relation": "contained_by"})
             elif horizontal_overlap > 0 and vertical_overlap > 0:
-                relations.append({**pair, "relation": "overlaps", "confidence": 0.9})
+                relations.append({**pair, "relation": "overlaps"})
             else:
                 gap_x = max(lx - rright, rx - lright, 0.0)
                 gap_y = max(ly - rbottom, ry - lbottom, 0.0)
                 if (gap_x * gap_x + gap_y * gap_y) ** 0.5 <= 80:
-                    relations.append({**pair, "relation": "near", "confidence": 0.7})
+                    relations.append({**pair, "relation": "near"})
             if len(relations) >= MAX_SPATIAL_RELATIONS:
                 return relations
             if abs(lcx - rcx) >= 40 or abs(lcy - rcy) >= 40:
@@ -141,7 +141,7 @@ def _spatial_relations(objects: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 ):
                     if len(relations) >= MAX_SPATIAL_RELATIONS:
                         return relations
-                    relations.append({**pair, "relation": relation, "confidence": 0.99})
+                    relations.append({**pair, "relation": relation})
             if len(relations) >= MAX_SPATIAL_RELATIONS:
                 return relations
     return relations

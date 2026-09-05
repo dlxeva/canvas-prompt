@@ -107,7 +107,9 @@ async function readMacPasteboardPng(board: 'general' | 'drag') {
 }
 
 type EngineResult = { ok: boolean; error?: string; process_ir_path?: string; compact_package_path?: string }
-type HandoffStatus = 'archived' | 'accepted' | 'delivered' | 'accepted_timeout' | 'accepted_observer_lost' | 'completed_failed' | 'completed_cancelled' | 'accepted_failed' | 'failed' | 'timed_out'
+// New handoffs stop at host acceptance. Keep the string escape hatch because
+// archived rounds can still contain statuses emitted by older observers.
+type HandoffStatus = 'archived' | 'accepted' | 'delivered' | 'failed' | (string & {})
 type HandoffResult = { status?: HandoffStatus; attempted: boolean; accepted?: boolean; delivered: boolean; host?: 'codex' | 'local' | 'workbuddy'; threadId?: string; reason?: string; turn?: unknown; handoff_attempt_id?: string }
 type RoundRecord = {
   package_id: string

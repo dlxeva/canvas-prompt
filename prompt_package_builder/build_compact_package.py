@@ -489,39 +489,17 @@ CONSTRAINTS = {
 }
 
 
-def build_compact_package(fixture_dir: Path) -> dict:
-    """构建 Compact Prompt Package"""
+def build_compact_package_from_adapted(adapted: dict, source_fixture: str = "in-memory") -> dict:
+    """构建 Compact Prompt Package，不把已适配的输入往返写入磁盘。"""
 
-    # 加载输入文件
-    caption_data = load_json(fixture_dir / "caption_track.json")
-    # 支持两种格式：直接列表 或 包含 caption_track 字段的对象
-    if isinstance(caption_data, list):
-        caption_track = caption_data
-    else:
-        caption_track = caption_data.get("caption_track", [])
-
-    semantic_data = load_json(fixture_dir / "semantic_event_track.generated.json")
-    semantic_events_raw = semantic_data.get("semantic_events", [])
-
-    object_data = load_json(fixture_dir / "object_state_track.json")
-    object_state_track = object_data.get("object_state_track", [])
-
-    canvas_data = load_json(fixture_dir / "canvas_event_track.json")
-    canvas_event_track = canvas_data.get("canvas_event_track", [])
-
-    fusion_data = load_json(fixture_dir / "timeline_fusion.json")
-    fusion_items = fusion_data.get("fusion_items", [])
-
-    # final_canvas_snapshot
-    snapshot_path = fixture_dir / "ab_test" / "final_canvas_snapshot.json"
-    if snapshot_path.exists():
-        snapshot_data = load_json(snapshot_path)
-    else:
-        snapshot_data = {"note": "snapshot not found"}
-    snapshot_data = compact_snapshot(snapshot_data)
-
-    process_ir_path = fixture_dir / "process_ir.json"
-    process_ir = load_json(process_ir_path) if process_ir_path.exists() else {}
+    caption_track = adapted.get("caption_track") or []
+    semantic_events_raw = adapted.get("semantic_events") or []
+    object_state_track = adapted.get("object_state_track") or []
+    canvas_event_track = adapted.get("canvas_event_track") or []
+    fusion_items = adapted.get("timeline_fusion") or []
+    snapshot_data = compact_snapshot(adapted.get("final_canvas_snapshot") or {})
+    process_ir = adapted.get("process_ir") or {}
+    state_frames = (adapted.get("state_frame_track") or [])[:8]
 
     # 构建各子结构
     transcript = build_transcript(caption_track)
@@ -534,9 +512,6 @@ def build_compact_package(fixture_dir: Path) -> dict:
     ocr_observations = build_ocr_observations(process_ir)
     review_marks = build_review_marks(process_ir)
     view_transform_observations = build_view_transform_observations(process_ir)
-    state_frame_path = fixture_dir / "state_frame_track.json"
-    state_frames = (load_json(state_frame_path).get("state_frames", []) if state_frame_path.exists() else [])[:8]
-
     # 组装 package
     package = {
         "meta": {
@@ -544,7 +519,7 @@ def build_compact_package(fixture_dir: Path) -> dict:
             "version": "2.6",
             "created_at": datetime.now(timezone.utc).isoformat(),
             "format": "compact_timeline_aware",
-            "source_fixture": str(fixture_dir.name),
+            "source_fixture": source_fixture,
         },
         "final_canvas_snapshot": snapshot_data,
         "state_frames": state_frames,
@@ -589,6 +564,40 @@ def build_compact_package(fixture_dir: Path) -> dict:
     }
 
     return package
+
+
+def build_compact_package(fixture_dir: Path) -> dict:
+    """从显式 fixture 目录构建 Compact Prompt Package。"""
+
+    caption_data = load_json(fixture_dir / "caption_track.json")
+    # 支持两种格式：直接列表 或 包含 caption_track 字段的对象
+    caption_track = caption_data if isinstance(caption_data, list) else caption_data.get("caption_track", [])
+
+    semantic_data = load_json(fixture_dir / "semantic_event_track.generated.json")
+    object_data = load_json(fixture_dir / "object_state_track.json")
+    canvas_data = load_json(fixture_dir / "canvas_event_track.json")
+    fusion_data = load_json(fixture_dir / "timeline_fusion.json")
+
+    snapshot_path = fixture_dir / "ab_test" / "final_canvas_snapshot.json"
+    snapshot_data = load_json(snapshot_path) if snapshot_path.exists() else {"note": "snapshot not found"}
+    process_ir_path = fixture_dir / "process_ir.json"
+    process_ir = load_json(process_ir_path) if process_ir_path.exists() else {}
+    state_frame_path = fixture_dir / "state_frame_track.json"
+    state_frames = load_json(state_frame_path).get("state_frames", []) if state_frame_path.exists() else []
+
+    return build_compact_package_from_adapted(
+        {
+            "caption_track": caption_track,
+            "semantic_events": semantic_data.get("semantic_events", []),
+            "object_state_track": object_data.get("object_state_track", []),
+            "canvas_event_track": canvas_data.get("canvas_event_track", []),
+            "timeline_fusion": fusion_data.get("fusion_items", []),
+            "final_canvas_snapshot": snapshot_data,
+            "state_frame_track": state_frames,
+            "process_ir": process_ir,
+        },
+        source_fixture=str(fixture_dir.name),
+    )
 
 
 def build_report(package: dict, fixture_dir: Path, out_path: Path) -> str:
