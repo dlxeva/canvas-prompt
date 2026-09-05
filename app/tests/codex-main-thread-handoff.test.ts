@@ -48,6 +48,7 @@ async function createRound(project: string, packageId: string, exportedAt = new 
 
 async function installFakeAppServer(root: string, name: string, canonicalProject: string, turnStartBehavior: string) {
   const markerPath = resolve(root, `${name}.terminal`)
+  const eventPath = resolve(root, `${name}.event`)
   const turnStartPath = resolve(root, `${name}.turn-start.json`)
   const scriptPath = resolve(root, `${name}.mjs`)
   const commandPath = resolve(root, name)
@@ -55,7 +56,9 @@ async function installFakeAppServer(root: string, name: string, canonicalProject
     import { writeFileSync } from 'node:fs'
     import readline from 'node:readline'
     const markerPath = ${JSON.stringify(markerPath)}
+    const eventPath = ${JSON.stringify(eventPath)}
     const markTerminal = (value) => { try { writeFileSync(markerPath, value) } catch {} }
+    const markEvent = (value) => { try { writeFileSync(eventPath, value) } catch {} }
     process.on('SIGTERM', () => { markTerminal('sigterm'); process.exit(0) })
     const rl = readline.createInterface({ input: process.stdin })
     for await (const line of rl) {
@@ -71,7 +74,7 @@ async function installFakeAppServer(root: string, name: string, canonicalProject
   `)
   await writeFile(commandPath, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(scriptPath)}\n`)
   await chmod(commandPath, 0o755)
-  return { commandPath, markerPath, turnStartPath }
+  return { commandPath, markerPath, eventPath, turnStartPath }
 }
 
 const temporaryRoots: string[] = []
@@ -286,14 +289,34 @@ describe('main-thread handoff routing', () => {
   it('does not interrupt a long-lived accepted transport or keep the caller referenced', async () => {
     const harness = await createHarness('long_lived_transport', `
       console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_long_lived' } } }))
-      setTimeout(() => markTerminal('still-alive'), 80)
-      setTimeout(() => { markTerminal('released'); process.exit(0) }, 180)
+      setTimeout(() => {
+        markEvent('completed')
+        console.log(JSON.stringify({ method: 'turn/completed', params: { turn: { id: 'turn_long_lived' } } }))
+      }, 80)
     `)
     const result = await startHandoff(harness)
     expect(result).toMatchObject({ status: 'accepted', accepted: true, expected_turn_id: 'turn_long_lived' })
-    await waitFor(() => readFile(harness.markerPath, 'utf8'), (value) => value === 'still-alive', 'long-lived transport')
+    await waitFor(() => readFile(harness.eventPath, 'utf8'), (value) => value === 'completed', 'long-lived completion event')
+    await waitFor(() => readFile(harness.markerPath, 'utf8'), (value) => value === 'sigterm', 'long-lived transport release')
     expect((await readReceipt(harness.roundPath)).status).toBe('accepted')
-    await waitFor(() => readFile(harness.markerPath, 'utf8'), (value) => value === 'released', 'long-lived transport release')
+  })
+
+  it('does not release a long-lived transport for a terminal event from another turn', async () => {
+    const harness = await createHarness('wrong_turn_lifecycle', `
+      console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_expected' } } }))
+      setTimeout(() => {
+        markEvent('wrong-turn')
+        console.log(JSON.stringify({ method: 'turn/completed', params: { turn: { id: 'turn_other' } } }))
+      }, 60)
+      setTimeout(() => markTerminal('still-alive'), 100)
+      setTimeout(() => { markTerminal('self-released'); process.exit(0) }, 180)
+    `)
+    const result = await startHandoff(harness)
+    expect(result).toMatchObject({ status: 'accepted', accepted: true, expected_turn_id: 'turn_expected' })
+    await waitFor(() => readFile(harness.eventPath, 'utf8'), (value) => value === 'wrong-turn', 'wrong-turn event')
+    await waitFor(() => readFile(harness.markerPath, 'utf8'), (value) => value === 'still-alive', 'unreleased transport')
+    expect((await readReceipt(harness.roundPath)).status).toBe('accepted')
+    await waitFor(() => readFile(harness.markerPath, 'utf8'), (value) => value === 'self-released', 'fake transport release')
     expect((await readReceipt(harness.roundPath)).status).toBe('accepted')
   })
 

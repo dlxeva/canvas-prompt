@@ -14,6 +14,18 @@ import { isRoundHandoffCancelled } from './round-lifecycle.mjs'
 // minute instead of reporting a false send failure.
 const HANDOFF_STARTUP_TIMEOUT_MS = 60_000
 
+// Accepted app-server transports are long-lived until the receiving host
+// reports a terminal event. Keep one process-level cleanup hook for all
+// accepted transports so a Canvas service shutdown cannot orphan them; this
+// hook never writes or changes a handoff receipt.
+const activeAcceptedTransports = new Set()
+process.once('exit', () => {
+  for (const child of activeAcceptedTransports) {
+    try { child.kill('SIGTERM') } catch { /* the child may have exited concurrently */ }
+  }
+  activeAcceptedTransports.clear()
+})
+
 export function isVerifiedMainThreadBinding(value, projectDir) {
   // Project cwd and recency are not an identity for the conversation that is
   // currently visible in a Desktop host. A binding is usable only when the
@@ -216,17 +228,10 @@ export async function handoffToMainThread({
       stdio: ['pipe', 'pipe', 'pipe'],
       env: appServerEnvironment(),
     })
-    // An accepted turn owns the transport until the receiving host releases
-    // it. Reclaim that transport only when this Canvas service itself exits;
-    // never use the cleanup hook to infer or rewrite downstream turn state.
-    const cleanupChildOnHostExit = () => {
-      if (child.killed || child.exitCode !== null || child.signalCode !== null) return
-      try { child.kill('SIGTERM') } catch { /* the child may have exited concurrently */ }
-    }
-    const releaseHostExitCleanup = () => process.removeListener('exit', cleanupChildOnHostExit)
-    process.once('exit', cleanupChildOnHostExit)
     let buffer = ''
     let settled = false
+    let handoffAccepted = false
+    let transportReleased = false
     let initialized = false
     let resumed = false
     let stage = 'spawned'
@@ -256,8 +261,25 @@ export async function handoffToMainThread({
         if (!line.trim()) continue
         let message
         try { message = JSON.parse(line) } catch { continue }
-        // Once turn/start has been accepted, stop interpreting app-server
-        // events. The receiving conversation owns downstream progress.
+        if (handoffAccepted) {
+          // This is transport lifecycle cleanup only. The receiving host owns
+          // downstream progress, so terminal events never rewrite handoff.json.
+          const terminalEvent = message.method === 'turn/completed'
+            || message.method === 'turn/failed'
+            || message.method === 'turn/cancelled'
+          if (terminalEvent && turnIdFrom(message.params) === expectedTurnId && !transportReleased) {
+            transportReleased = true
+            activeAcceptedTransports.delete(child)
+            child.stdout.removeAllListeners('data')
+            child.stderr.removeAllListeners('data')
+            child.stdout.resume()
+            child.stderr.resume()
+            child.stdin.end()
+            if (!child.killed) child.kill('SIGTERM')
+            child.unref()
+          }
+          continue
+        }
         if (settled) continue
         if (message.id === 1 && message.result && !initialized) {
           initialized = true
@@ -321,11 +343,13 @@ export async function handoffToMainThread({
             visible_receipt: { requested: true, client_user_message_id: receiptMessageId, snapshot_attached: Boolean(snapshotPath) },
             accepted_at: new Date().toISOString(), turn: message.result ?? null,
           })
+          handoffAccepted = true
+          activeAcceptedTransports.add(child)
           settled = true
           void statusWriter.write(accepted).finally(() => resolveHandoff(accepted))
-          // The handoff must remain alive long enough for the receiving host to
-          // consume the accepted turn, but this caller no longer keeps the
-          // process referenced or watches its downstream events.
+          // Keep the accepted transport alive without making it part of the
+          // Canvas caller's event-loop ownership. It is released only by the
+          // matching terminal event or the single host-shutdown hook above.
           child.unref()
           continue
         }
@@ -339,7 +363,7 @@ export async function handoffToMainThread({
     child.stderr.on('data', () => undefined)
     child.once('error', (error) => finish(failureReceipt(error.message)))
     child.once('exit', (code) => {
-      releaseHostExitCleanup()
+      activeAcceptedTransports.delete(child)
       if (!settled) finish(failureReceipt(`主对话桥接已退出 (${code ?? 'unknown'})`), { terminate: false })
     })
     send({
