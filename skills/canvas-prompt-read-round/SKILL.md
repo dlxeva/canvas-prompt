@@ -63,7 +63,7 @@ shown as the primary product wording.
 - Treat stroke geometry, timestamps, transform events, OCR, and speech as distinct sources. They can support each other but do not become the same fact.
 - Do not identify a hand-drawn object, arrow direction, visual target, or user intent solely from temporal proximity.
 - Do not let OCR override a clearer spoken statement; report a conflict if both are present.
-- Treat the immutable round's `handoff.json` as the delivery receipt. Say “saved locally” when only the archive exists, “accepted and processing” after `turn/start`, and “delivered” only after the matching Codex turn completes. Never upgrade an accepted, timed-out, or failed receipt to delivered from inference.
+- Treat the immutable round's `handoff.json` as the delivery receipt. Say “saved locally” when only the archive exists and “accepted” after `turn/start` confirms host receipt. New handoffs do not observe downstream Codex completion, so never upgrade an accepted receipt to “delivered” from inference; preserve historical delivered receipts when reading old archives.
 - Keep the response in the Codex conversation unless the user explicitly asks for an AI addition to the canvas.
 
 ## Response shape

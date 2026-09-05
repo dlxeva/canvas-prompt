@@ -296,7 +296,6 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
   const stateFrameTimer = useRef<number | null>(null)
   const stateFrameMaxTimer = useRef<number | null>(null)
   const activeSessionId = useRef(0)
-  const activeHandoffPackageId = useRef<string | null>(null)
   const sessionLocale = useRef<Locale>(locale)
 
   useEffect(() => {
@@ -450,7 +449,6 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
     setCompiledPackage(null)
     setLastRecording(null)
     setTranscription(null)
-    activeHandoffPackageId.current = null
     setExportStatus('idle')
     setImageNotice(null)
     const start = Date.now()
@@ -653,31 +651,6 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
       audioRunning.current = false
       transcriberRef.current = null
       windowedAsrRef.current = null
-    }
-  }
-
-  const pollHandoffReceipt = async (packageId: string) => {
-    activeHandoffPackageId.current = packageId
-    const deadline = Date.now() + 80_000
-    while (Date.now() < deadline && activeHandoffPackageId.current === packageId) {
-      await new Promise((resolvePoll) => window.setTimeout(resolvePoll, 1_000))
-      try {
-        const response = await fetch('/api/rounds', { cache: 'no-store' })
-        if (!response.ok) continue
-        const result = await response.json() as { rounds?: StoredRound[] }
-        const round = result.rounds?.find((item) => item.package_id === packageId)
-        const receipt = round?.handoff ?? null
-        const status = deriveExportReceiptStatus(receipt)
-        if (receipt) setHandoffReceipt(receipt)
-        if (status === 'delivered' || status === 'failed') {
-          setExportStatus(status)
-          setWorkflowMessage(`本轮内容已整理完成。在当前对话输入「${CANONICAL_CONTINUATION_COMMAND}」。`)
-          return
-        }
-      } catch {
-        // The durable handoff receipt remains the source of truth. A transient
-        // polling failure must not downgrade an already accepted round.
-      }
     }
   }
 

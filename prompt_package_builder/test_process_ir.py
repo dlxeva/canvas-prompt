@@ -11,12 +11,36 @@ VALIDATORS_DIR = MODULE_DIR.parent / "validators"
 if str(VALIDATORS_DIR) not in sys.path:
     sys.path.insert(0, str(VALIDATORS_DIR))
 from build_compact_package import build_structural_observations
-from process_ir import _arrowhead_candidates, _ink_annotation_candidates, _ink_check_candidates, _ink_circle_candidates, _ink_cross_candidates, _layout_transform_observations, _paired_symbol_choice_candidates, _reference_candidates
+from process_ir import _arrowhead_candidates, _ink_annotation_candidates, _ink_check_candidates, _ink_circle_candidates, _ink_cross_candidates, _layout_transform_observations, _paired_symbol_choice_candidates, _reference_candidates, _spatial_relations
 from process_ir import compile_process_ir
 from validate_process_ir import validate_process_ir
 
 
 class LayoutTransformObservationTests(unittest.TestCase):
+    def test_spatial_relations_do_not_emit_geometry_confidence_constants(self):
+        objects = [
+            {"object_id": "obj_outer", "bounds": {"x": 0, "y": 0, "width": 200, "height": 200}},
+            {"object_id": "obj_inner", "bounds": {"x": 20, "y": 20, "width": 40, "height": 40}},
+            {"object_id": "obj_right", "bounds": {"x": 280, "y": 20, "width": 40, "height": 40}},
+        ]
+
+        relations = _spatial_relations(objects)
+
+        self.assertTrue(relations)
+        self.assertTrue(all("confidence" not in relation for relation in relations))
+
+    def test_historical_spatial_relation_confidence_remains_validator_compatible(self):
+        objects = [
+            {"object_id": "obj_outer", "bounds": {"x": 0, "y": 0, "width": 200, "height": 200}},
+            {"object_id": "obj_inner", "bounds": {"x": 20, "y": 20, "width": 40, "height": 40}},
+        ]
+        process_ir = compile_process_ir({"meta": {"package_id": "pp_historical_geometry"}}, [], [], objects)
+        historical = deepcopy(process_ir)
+        for relation in historical["spatial_relations"]:
+            relation["confidence"] = 0.98
+
+        self.assertEqual([], validate_process_ir(historical))
+
     def test_real_handwritten_anchor_modes_preserve_arrow_and_region_evidence(self):
         fixture_path = MODULE_DIR / "fixtures" / "handwriting-visual-anchor-modes.json"
         package = json.loads(fixture_path.read_text(encoding="utf-8"))

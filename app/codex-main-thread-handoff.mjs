@@ -6,14 +6,9 @@ import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { isRoundHandoffCancelled } from './round-lifecycle.mjs'
 
-// The receipt is persisted as soon as the target turn accepts it.  This guard
-// only bounds the optional completion watcher, so it must never leave the UI
-// looking as if export itself is still running.
-// Acceptance is the user-facing completion point: the person can continue in
-// the main conversation immediately.  Completion is a background observer
-// only, so it must accommodate a genuinely long model turn rather than turn a
-// healthy handoff into an artificial timeout after 75 seconds.
-export const HANDOFF_COMPLETION_TIMEOUT_MS = 10 * 60_000
+// The receipt is persisted as soon as the target turn accepts it.  Acceptance
+// is the handoff boundary; downstream model progress belongs to the receiving
+// conversation and is not observed or rewritten by the Canvas service.
 // Resuming a large legacy Desktop thread can take longer than the original
 // 20-second handshake budget. This is still pre-acceptance, so wait a bounded
 // minute instead of reporting a false send failure.
@@ -87,10 +82,7 @@ async function persistHandoffStatus(roundPath, result) {
   }
 }
 
-/**
- * Serialize all receipt writes. Explicit Codex terminal states are never
- * overwritten by a later observer event from the same App Server process.
- */
+/** Serialize receipt writes and make the first handoff result terminal. */
 export function createHandoffStatusWriter(roundPath, persist = persistHandoffStatus) {
   let queue = Promise.resolve()
   let terminal = false
@@ -99,7 +91,7 @@ export function createHandoffStatusWriter(roundPath, persist = persistHandoffSta
       queue = queue.then(async () => {
         if (terminal) return
         await persist(roundPath, result)
-        if (['delivered', 'completed_failed', 'completed_cancelled'].includes(result.status)) terminal = true
+        if (['archived', 'accepted', 'failed'].includes(result.status)) terminal = true
       })
       return queue
     },
@@ -110,10 +102,6 @@ export function createHandoffStatusWriter(roundPath, persist = persistHandoffSta
 export function turnIdFrom(value) {
   const candidate = value?.turn?.id ?? value?.turn_id ?? value?.id
   return typeof candidate === 'string' && candidate.trim() ? candidate : null
-}
-
-export function matchesExpectedTurn(expectedTurnId, completed) {
-  return Boolean(expectedTurnId) && turnIdFrom(completed) === expectedTurnId
 }
 
 /**
@@ -211,7 +199,6 @@ export async function handoffToMainThread({
   engine,
   appServerCommand = undefined,
   startupTimeoutMs = HANDOFF_STARTUP_TIMEOUT_MS,
-  completionTimeoutMs = HANDOFF_COMPLETION_TIMEOUT_MS,
   handoffAttemptId = randomUUID(),
   mainThreadId,
 }) {
@@ -242,7 +229,6 @@ export async function handoffToMainThread({
     let targetThreadId = selectedThread.threadId
     let expectedTurnId = null
     let startupTimer = null
-    let completionTimer = null
     const statusWriter = createHandoffStatusWriter(roundPath)
 
     const withAttempt = (result) => ({ ...result, handoff_attempt_id: handoffAttemptId })
@@ -250,7 +236,6 @@ export async function handoffToMainThread({
       if (settled) return
       settled = true
       if (startupTimer) clearTimeout(startupTimer)
-      if (completionTimer) clearTimeout(completionTimer)
       if (terminate) child.kill('SIGTERM')
       const receipt = withAttempt(result)
       void statusWriter.write(receipt).finally(() => resolveHandoff(receipt))
@@ -267,6 +252,9 @@ export async function handoffToMainThread({
         if (!line.trim()) continue
         let message
         try { message = JSON.parse(line) } catch { continue }
+        // Once turn/start has been accepted, stop interpreting app-server
+        // events. The receiving conversation owns downstream progress.
+        if (settled) continue
         if (message.id === 1 && message.result && !initialized) {
           initialized = true
           stage = 'initialized'
@@ -321,61 +309,28 @@ export async function handoffToMainThread({
               reason: '主对话未返回有效的 turn ID，本轮未确认接收。',
             })
           }
-          // A turn has only been accepted here; killing app-server at this
-          // point aborts that turn before Desktop can receive it. Keep this
-          // process alive until the server reports completion or times out.
           stage = 'turn_accepted'
           if (startupTimer) clearTimeout(startupTimer)
-          completionTimer = setTimeout(() => finish({
-            status: 'accepted_timeout', stage, attempted: true, accepted: true, delivered: false,
-            threadId: targetThreadId, expected_turn_id: expectedTurnId,
-            reason: `主对话已接受本轮，但未在 ${Math.round(completionTimeoutMs / 1000)} 秒内报告完成。`,
-          }), completionTimeoutMs)
           const accepted = withAttempt({
             status: 'accepted', stage, attempted: true, accepted: true, delivered: false,
             threadId: targetThreadId, expected_turn_id: expectedTurnId,
             visible_receipt: { requested: true, client_user_message_id: receiptMessageId, snapshot_attached: Boolean(snapshotPath) },
             accepted_at: new Date().toISOString(), turn: message.result ?? null,
           })
-          void statusWriter.write(accepted)
-          resolveHandoff(accepted)
+          settled = true
+          void statusWriter.write(accepted).finally(() => resolveHandoff(accepted))
+          // The handoff must remain alive long enough for the receiving host to
+          // consume the accepted turn, but this caller no longer keeps the
+          // process referenced or watches its downstream events.
+          child.unref()
           continue
-        }
-        if (message.method === 'turn/completed') {
-          if (!matchesExpectedTurn(expectedTurnId, message.params)) continue
-          stage = 'turn_completed'
-          const completed = {
-            status: 'delivered', stage, attempted: true, accepted: true, delivered: true,
-            threadId: targetThreadId, expected_turn_id: expectedTurnId,
-            visible_receipt: { requested: true, client_user_message_id: receiptMessageId, snapshot_attached: Boolean(snapshotPath) },
-            completed_at: new Date().toISOString(), turn: message.params?.turn ?? null,
-          }
-          return finish(completed)
-        }
-        if (message.method === 'turn/failed' || message.method === 'turn/cancelled') {
-          if (!matchesExpectedTurn(expectedTurnId, message.params)) continue
-          const cancelled = message.method === 'turn/cancelled'
-          stage = cancelled ? 'turn_cancelled' : 'turn_failed'
-          return finish({
-            status: cancelled ? 'completed_cancelled' : 'completed_failed',
-            stage, attempted: true, accepted: true, delivered: false,
-            threadId: targetThreadId, expected_turn_id: expectedTurnId,
-            completed_at: new Date().toISOString(),
-            reason: message.params?.error?.message ?? message.params?.reason ?? (cancelled ? '主对话取消了本轮处理。' : '主对话未能完成本轮处理。'),
-            turn: message.params?.turn ?? null,
-          })
         }
       }
     })
-    const failureReceipt = (reason) => expectedTurnId
-      ? {
-          status: 'accepted_observer_lost', stage, attempted: true, accepted: true, delivered: false,
-          threadId: targetThreadId ?? undefined, expected_turn_id: expectedTurnId, reason,
-        }
-      : {
-          status: 'failed', stage, attempted: true, accepted: false, delivered: false,
-          threadId: targetThreadId ?? undefined, reason,
-        }
+    const failureReceipt = (reason) => ({
+      status: 'failed', stage, attempted: true, accepted: false, delivered: false,
+      threadId: targetThreadId ?? undefined, reason,
+    })
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', () => undefined)
     child.once('error', (error) => finish(failureReceipt(error.message)))

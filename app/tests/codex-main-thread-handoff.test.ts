@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import { deleteRoundAndUpdateLatest } from '../round-store.mjs'
-import { HANDOFF_COMPLETION_TIMEOUT_MS, appServerCommandCandidates, appServerEnvironment, createHandoffStatusWriter, deliveryReceiptMessageId, handoffMessage, handoffToMainThread, isVerifiedMainThreadBinding, matchesExpectedTurn, resolveAppServerCommand, selectMainThreadId, visibleReceiptMessage } from '../codex-main-thread-handoff.mjs'
+import { appServerCommandCandidates, appServerEnvironment, createHandoffStatusWriter, deliveryReceiptMessageId, handoffMessage, handoffToMainThread, isVerifiedMainThreadBinding, resolveAppServerCommand, selectMainThreadId, visibleReceiptMessage } from '../codex-main-thread-handoff.mjs'
 
 async function waitFor<T>(read: () => Promise<T>, accept: (value: T) => boolean, label: string, timeoutMs = 1_500): Promise<T> {
   const deadline = Date.now() + timeoutMs
@@ -105,8 +105,6 @@ function startHandoff(harness: Awaited<ReturnType<typeof createHarness>>, overri
     // two seconds is intermittently too short when the browser bundle tests
     // are compiling in parallel.
     startupTimeoutMs: 5_000,
-    completionTimeoutMs: 500,
-    focusThread: async () => false,
     ...overrides,
   })
 }
@@ -118,16 +116,13 @@ function nameFromRound(roundPath: string) {
 describe('main-thread handoff routing', () => {
   const projectDir = '/workspaces/canvas-prompt'
 
-  it('keeps completion observation long enough for a real main-thread response', () => {
-    expect(HANDOFF_COMPLETION_TIMEOUT_MS).toBeGreaterThanOrEqual(10 * 60_000)
-  })
-
-  it('keeps the public handoff declaration aligned with terminal receipt states', async () => {
+  it('keeps the public handoff declaration aligned with host receipt states', async () => {
     const declaration = await readFile(resolve(import.meta.dirname, '..', 'codex-main-thread-handoff.d.ts'), 'utf8')
     expect(declaration).toContain("| 'archived'")
-    expect(declaration).toContain("'accepted_observer_lost'")
-    expect(declaration).toContain("'completed_failed'")
-    expect(declaration).toContain("'completed_cancelled'")
+    expect(declaration).toContain("| 'accepted'")
+    expect(declaration).toContain("| 'failed'")
+    expect(declaration).not.toContain('completionTimeoutMs')
+    expect(declaration).not.toContain('HANDOFF_COMPLETION_TIMEOUT_MS')
     expect(declaration).toContain('handoffAttemptId?: string')
   })
 
@@ -152,12 +147,6 @@ describe('main-thread handoff routing', () => {
     const result = await handoffToMainThread({ projectDir: harness.project, packagePath: resolve(harness.roundPath, 'prompt-package.json'), roundPath: harness.roundPath, engine: { ok: true }, appServerCommand: harness.commandPath })
     expect(result).toMatchObject({ status: 'archived', attempted: false, accepted: false, delivered: false })
     expect((await readReceipt(harness.roundPath)).stage).toBe('host_context_unavailable')
-  })
-
-  it('accepts completion only for the turn that this handoff started', () => {
-    expect(matchesExpectedTurn('turn_expected', { turn: { id: 'turn_other' } })).toBe(false)
-    expect(matchesExpectedTurn('turn_expected', { turn: { id: 'turn_expected' } })).toBe(true)
-    expect(matchesExpectedTurn(null, { turn: { id: 'turn_expected' } })).toBe(false)
   })
 
   it('uses an explicit app-server command before PATH discovery', () => {
@@ -247,7 +236,7 @@ describe('main-thread handoff routing', () => {
     expect(environment.PATH.split(':').length).toBeGreaterThan(1)
   })
 
-  it('serializes terminal transitions and never regresses an explicit Codex terminal state', async () => {
+  it('serializes receipt transitions and never rewrites a host terminal state', async () => {
     const writes: string[] = []
     let releaseAccepted!: () => void
     let acceptedEntered!: () => void
@@ -262,13 +251,11 @@ describe('main-thread handoff routing', () => {
     })
     void writer.write({ status: 'accepted' })
     await acceptedStarted
-    void writer.write({ status: 'accepted_timeout' })
-    void writer.write({ status: 'delivered' })
-    void writer.write({ status: 'completed_failed' })
-    void writer.write({ status: 'delivered' })
+    void writer.write({ status: 'failed' })
+    void writer.write({ status: 'accepted' })
     releaseAccepted()
     await writer.flush()
-    expect(writes).toEqual(['accepted', 'accepted_timeout', 'delivered'])
+    expect(writes).toEqual(['accepted'])
   })
 
   it('never accepts turn/start without a valid turn ID', async () => {
@@ -286,65 +273,55 @@ describe('main-thread handoff routing', () => {
     const harness = await createHarness('no_forced_navigation', `
       console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_stays_put' } } }))
     `)
-    const result = await startHandoff(harness, { completionTimeoutMs: 60, focusThread: async () => { focusCalls += 1; return true } })
+    const result = await startHandoff(harness, { focusThread: async () => { focusCalls += 1; return true } })
     expect(result).toMatchObject({ status: 'accepted', accepted: true })
     expect(result.activationRequested).toBeUndefined()
     expect(focusCalls).toBe(0)
-    await waitForReceipt(harness.roundPath, 'accepted_timeout')
+    await waitForReceipt(harness.roundPath, 'accepted')
   })
 
-  it('records accepted_timeout after a valid turn is accepted but never completes', async () => {
-    const harness = await createHarness('accepted_timeout', `
-      console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_timeout' } } }))
+  it('does not observe downstream completion after host acceptance', async () => {
+    const harness = await createHarness('accepted_without_observer', `
+      console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_without_observer' } } }))
+      setTimeout(() => console.log(JSON.stringify({ method: 'turn/completed', params: { turn: { id: 'turn_without_observer' } } })), 25)
+      setTimeout(() => { markTerminal('completed'); process.exit(0) }, 45)
     `)
-    const result = await startHandoff(harness, { completionTimeoutMs: 60 })
-    expect(result).toMatchObject({ status: 'accepted', accepted: true, delivered: false, expected_turn_id: 'turn_timeout' })
-    const receipt = await waitForReceipt(harness.roundPath, 'accepted_timeout')
-    expect(receipt).toMatchObject({ accepted: true, delivered: false, expected_turn_id: 'turn_timeout' })
+    const result = await startHandoff(harness)
+    expect(result).toMatchObject({ status: 'accepted', accepted: true, delivered: false, expected_turn_id: 'turn_without_observer' })
+    await waitForReceipt(harness.roundPath, 'accepted')
+    await waitFor(() => access(harness.markerPath).then(() => true), Boolean, 'downstream completion marker')
+    await delay(20)
+    expect((await readReceipt(harness.roundPath)).status).toBe('accepted')
   })
 
-  it('records accepted_observer_lost when the App Server exits after acceptance', async () => {
+  it('keeps the accepted receipt when the App Server exits after acceptance', async () => {
     const harness = await createHarness('accepted_exit', `
       console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_exit' } } }))
       setTimeout(() => { markTerminal('exit'); process.exit(17) }, 25)
     `)
     const result = await startHandoff(harness)
     expect(result).toMatchObject({ status: 'accepted', accepted: true, expected_turn_id: 'turn_exit' })
-    const receipt = await waitForReceipt(harness.roundPath, 'accepted_observer_lost')
+    const receipt = await waitForReceipt(harness.roundPath, 'accepted')
     expect(receipt).toMatchObject({ accepted: true, delivered: false, expected_turn_id: 'turn_exit' })
+    await waitFor(() => access(harness.markerPath).then(() => true), Boolean, 'exit marker')
+    expect((await readReceipt(harness.roundPath)).status).toBe('accepted')
   })
 
-  it('ignores unrelated completion and delivers only the matching turn', async () => {
+  it('ignores downstream completion and failure events after host acceptance', async () => {
     const harness = await createHarness('matching_completion', `
       console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_expected' } } }))
       setTimeout(() => console.log(JSON.stringify({ method: 'turn/completed', params: { turn: { id: 'turn_other' } } })), 10)
-      setTimeout(() => console.log(JSON.stringify({ method: 'turn/completed', params: { turn: { id: 'turn_expected' } } })), 35)
+      setTimeout(() => console.log(JSON.stringify({ method: 'turn/failed', params: { turn: { id: 'turn_expected' }, error: { message: 'downstream reason' } } })), 20)
+      setTimeout(() => { markTerminal('ignored'); process.exit(0) }, 35)
     `)
     const result = await startHandoff(harness)
     expect(result).toMatchObject({ status: 'accepted', expected_turn_id: 'turn_expected' })
-    const delivered = await waitForReceipt(harness.roundPath, 'delivered')
-    expect(delivered).toMatchObject({ accepted: true, delivered: true, expected_turn_id: 'turn_expected' })
+    await waitForReceipt(harness.roundPath, 'accepted')
+    await waitFor(() => access(harness.markerPath).then(() => true), Boolean, 'ignored event marker')
+    expect((await readReceipt(harness.roundPath)).status).toBe('accepted')
   })
 
-  it.each([
-    ['failed', 'turn/failed', 'completed_failed'],
-    ['cancelled', 'turn/cancelled', 'completed_cancelled'],
-  ])('records only the matching turn/%s terminal state', async (_kind, event, expectedStatus) => {
-    const harness = await createHarness(`terminal_${expectedStatus}`, `
-      console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_expected' } } }))
-      setTimeout(() => console.log(JSON.stringify({ method: ${JSON.stringify(event)}, params: { turn: { id: 'turn_other' } } })), 10)
-      setTimeout(() => console.log(JSON.stringify({ method: ${JSON.stringify(event)}, params: { turn: { id: 'turn_expected' }, error: { message: 'terminal reason' } } })), 25)
-      setTimeout(() => console.log(JSON.stringify({ method: 'turn/completed', params: { turn: { id: 'turn_expected' } } })), 45)
-    `)
-    const result = await startHandoff(harness)
-    expect(result).toMatchObject({ status: 'accepted', expected_turn_id: 'turn_expected' })
-    const receipt = await waitForReceipt(harness.roundPath, expectedStatus)
-    expect(receipt).toMatchObject({ accepted: true, delivered: false, expected_turn_id: 'turn_expected', reason: 'terminal reason' })
-    await delay(80)
-    expect((await readReceipt(harness.roundPath)).status).toBe(expectedStatus)
-  })
-
-  it('keeps concurrent A/B handoffs isolated through matching completion', async () => {
+  it('keeps concurrent A/B host receipts isolated', async () => {
     const root = await mkdtemp(join(tmpdir(), 'canvas-handoff-ab-'))
     temporaryRoots.push(root)
     const project = resolve(root, 'project')
@@ -354,45 +331,41 @@ describe('main-thread handoff routing', () => {
     const roundB = await createRound(project, 'round_b', '2026-01-02T00:00:00.000Z')
     const serverA = await installFakeAppServer(root, 'server_a', canonicalProject, `
       console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_a' } } }))
-      setTimeout(() => console.log(JSON.stringify({ method: 'turn/completed', params: { turn: { id: 'turn_a' } } })), 35)
+      setTimeout(() => { markTerminal('accepted'); process.exit(0) }, 35)
     `)
     const serverB = await installFakeAppServer(root, 'server_b', canonicalProject, `
       console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_b' } } }))
-      setTimeout(() => console.log(JSON.stringify({ method: 'turn/completed', params: { turn: { id: 'turn_b' } } })), 10)
+      setTimeout(() => { markTerminal('accepted'); process.exit(0) }, 10)
     `)
-    const base = { projectDir: project, engine: { ok: true }, startupTimeoutMs: 5_000, completionTimeoutMs: 500, focusThread: async () => false }
+    const base = { projectDir: project, engine: { ok: true }, startupTimeoutMs: 5_000 }
     const [acceptedA, acceptedB] = await Promise.all([
       handoffToMainThread({ ...base, packagePath: resolve(roundA.roundPath, 'prompt-package.json'), roundPath: roundA.roundPath, appServerCommand: serverA.commandPath, mainThreadId: 'thread_server_a' }),
       handoffToMainThread({ ...base, packagePath: resolve(roundB.roundPath, 'prompt-package.json'), roundPath: roundB.roundPath, appServerCommand: serverB.commandPath, mainThreadId: 'thread_server_b' }),
     ])
     expect(acceptedA).toMatchObject({ status: 'accepted', expected_turn_id: 'turn_a' })
     expect(acceptedB, JSON.stringify(acceptedB)).toMatchObject({ status: 'accepted', expected_turn_id: 'turn_b' })
-    const [deliveredA, deliveredB] = await Promise.all([
-      waitForReceipt(roundA.roundPath, 'delivered'),
-      waitForReceipt(roundB.roundPath, 'delivered'),
-    ])
-    expect(deliveredA.expected_turn_id).toBe('turn_a')
-    expect(deliveredB.expected_turn_id).toBe('turn_b')
+    await delay(60)
+    const [receiptA, receiptB] = await Promise.all([readReceipt(roundA.roundPath), readReceipt(roundB.roundPath)])
+    expect(receiptA).toMatchObject({ status: 'accepted', expected_turn_id: 'turn_a' })
+    expect(receiptB).toMatchObject({ status: 'accepted', expected_turn_id: 'turn_b' })
   })
 
   it.each([
     ['completion', `
       console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_deleted' } } }))
-      setTimeout(() => console.log(JSON.stringify({ method: 'turn/completed', params: { turn: { id: 'turn_deleted' } } })), 80)
-    `, 500],
-    ['timeout', `
-      console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_deleted' } } }))
-    `, 80],
+      setTimeout(() => console.log(JSON.stringify({ method: 'turn/completed', params: { turn: { id: 'turn_deleted' } } })), 40)
+      setTimeout(() => { markTerminal('completion'); process.exit(0) }, 80)
+    `],
     ['exit', `
       console.log(JSON.stringify({ id: 4, result: { turn: { id: 'turn_deleted' } } }))
       setTimeout(() => { markTerminal('exit'); process.exit(19) }, 80)
-    `, 500],
-  ])('does not recreate a deleted accepted round after late %s', async (kind, behavior, completionTimeoutMs) => {
+    `],
+  ])('does not recreate a deleted accepted round after late %s', async (kind, behavior) => {
     const harness = await createHarness(`deleted_${kind}`, behavior)
     const roundsDir = resolve(harness.project, '.canvas-prompt', 'rounds')
     const latestPackagePath = resolve(harness.project, '.canvas-prompt', 'latest-prompt-package.json')
     await writeFile(latestPackagePath, harness.packageContents)
-    const accepted = await startHandoff(harness, { completionTimeoutMs })
+    const accepted = await startHandoff(harness)
     expect(accepted, JSON.stringify(accepted)).toMatchObject({ status: 'accepted', accepted: true })
     await deleteRoundAndUpdateLatest({ roundsDir, latestPackagePath, packageId: `deleted_${kind}` })
     await expect(access(harness.roundPath)).rejects.toMatchObject({ code: 'ENOENT' })

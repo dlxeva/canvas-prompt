@@ -10,6 +10,7 @@ ROOT = MODULE_DIR.parent
 if str(MODULE_DIR) not in sys.path:
     sys.path.insert(0, str(MODULE_DIR))
 from compile_runtime_package import compile_runtime_package
+from build_compact_package import build_compact_package
 VALIDATORS_DIR = ROOT / "validators"
 if str(VALIDATORS_DIR) not in sys.path:
     sys.path.insert(0, str(VALIDATORS_DIR))
@@ -155,19 +156,44 @@ class RuntimeArtifactPathTests(unittest.TestCase):
             self.assertTrue(process_path.exists())
             self.assertEqual(str(process_path), result["process_ir_path"])
             self.assertEqual("pp_runtime_path", json.loads(process_path.read_text(encoding="utf-8"))["source"]["package_id"])
-            self.assertTrue((root / "engine" / "engine-inputs" / "process_ir.json").exists())
+            self.assertFalse((root / "engine" / "engine-inputs").exists())
             self.assertEqual([], validate_process_ir(json.loads(process_path.read_text(encoding="utf-8"))))
             compact = json.loads((root / "engine" / "compact-package.json").read_text(encoding="utf-8"))
             errors, _warnings = validate_package(compact)
             self.assertEqual([], errors)
             self.assertEqual("process-ir-v0.8", compact["process_ir_summary"]["schema_version"])
             self.assertEqual("2.6", compact["meta"]["version"])
+            self.assertEqual("in-memory", compact["meta"]["source_fixture"])
 
             legacy_compact = deepcopy(compact)
             legacy_compact["meta"]["version"] = "2.2"
             legacy_compact["structural_observations"].pop("handdrawn_circle_candidates")
             legacy_errors, _warnings = validate_package(legacy_compact)
             self.assertEqual([], legacy_errors)
+
+    def test_explicit_debug_fixture_export_matches_legacy_builder(self):
+        fixture_path = MODULE_DIR / "fixtures" / "handwriting-relation-regression.json"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            debug_fixture_dir = root / "debug-fixture"
+            result = compile_runtime_package(
+                fixture_path,
+                root / "engine",
+                debug_fixture_dir=debug_fixture_dir,
+            )
+
+            self.assertTrue((debug_fixture_dir / "process_ir.json").exists())
+            self.assertFalse((root / "engine" / "engine-inputs").exists())
+            compiled = json.loads(Path(result["compact_package_path"]).read_text(encoding="utf-8"))
+            legacy = build_compact_package(debug_fixture_dir)
+
+            def comparable(package):
+                normalized = deepcopy(package)
+                for field in ("package_id", "created_at", "source_fixture"):
+                    normalized["meta"].pop(field, None)
+                return normalized
+
+            self.assertEqual(comparable(legacy), comparable(compiled))
 
 
 if __name__ == "__main__":
