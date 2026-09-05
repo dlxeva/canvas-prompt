@@ -85,7 +85,12 @@ class ContextContinuityTests(unittest.TestCase):
         self.assertEqual("ctx_round_receipt", receipt["context_id"])
         self.assertEqual("available", receipt["snapshot"]["status"])
         self.assertEqual("available", receipt["time"]["status"])
-        self.assertEqual(["observed", "inferred", "unknown"], policy["answer_strategy"]["opening_sections"])
+        self.assertEqual(["observed", "user_stated", "inferred", "unknown"], policy["answer_strategy"]["opening_sections"])
+        self.assertEqual(
+            ["identity_receipt", "observed", "user_stated", "inferred", "unknown", "confirmed"],
+            policy["answer_strategy"]["response_sequence"],
+        )
+        self.assertTrue(policy["answer_strategy"]["identity_receipt_required"])
         self.assertFalse(policy["execution_authorized"])
         self.assertEqual([], walk_keys(policy, {
             "canvas_event_track", "timeline_fusion", "caption_track", "strokes", "stroke_points",
@@ -104,6 +109,44 @@ class ContextContinuityTests(unittest.TestCase):
         self.assertIn("unres_ocr_unavailable", sections["unknown"]["unresolved_ids"])
         self.assertEqual("candidate_only_not_a_user_decision", sections["inferred"]["candidate_boundary"])
         self.assertEqual([], validate_context_continuity_policy(policy, pack))
+
+    def test_opening_keeps_user_statements_and_corrections_out_of_inference(self):
+        pack = pack_from("minimal-context-pack-positive.json", "ctx_user_stated")
+        initial = build_context_continuity_policy(pack)
+        sections = initial["understanding"]
+
+        self.assertEqual("user_input", sections["user_stated"]["source_layer"])
+        self.assertIn("clm_speech_001", sections["user_stated"]["claim_ids"])
+        self.assertNotIn("clm_speech_001", sections["inferred"]["claim_ids"])
+        self.assertEqual([], sections["user_stated"]["candidate_ids"])
+        self.assertEqual([], sections["user_stated"]["correction_history"])
+
+        current = pack_from(
+            "minimal-context-pack-positive.json",
+            "ctx_user_stated_reread",
+            parent_context_id=pack["context_id"],
+        )
+        reread = reconcile_context_response(
+            initial,
+            current,
+            previous_context_pack=pack,
+            correction="用户纠正：这只是待看标记，不是采用决定。",
+        )
+        user_section = reread["understanding"]["user_stated"]
+        self.assertEqual(
+            ["用户纠正：这只是待看标记，不是采用决定。"],
+            [item["text"] for item in user_section["correction_history"]],
+        )
+        self.assertEqual([], reread["understanding"]["inferred"].get("correction_history", []))
+        self.assertEqual([], validate_context_continuity_policy(reread, current))
+
+    def test_validator_rejects_inference_ids_in_user_stated_section(self):
+        pack = pack_from("minimal-context-pack-positive.json", "ctx_user_stated_invalid")
+        policy = build_context_continuity_policy(pack)
+        policy["understanding"]["user_stated"]["candidate_ids"] = ["rel_001"]
+
+        errors = validate_context_continuity_policy(policy, pack)
+        self.assertTrue(any("must not carry inference" in error for error in errors))
 
     def test_re_read_reconciles_same_round_and_supersedes_old_context(self):
         fixture = load_json("context-continuity-recovery.json")["same_round_reread"]

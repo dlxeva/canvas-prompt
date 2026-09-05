@@ -134,14 +134,25 @@ def _spatial_relations(objects: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     relations.append({**pair, "relation": "near", "confidence": 0.7})
             if len(relations) >= MAX_SPATIAL_RELATIONS:
                 return relations
-            if abs(lcx - rcx) >= 40 or abs(lcy - rcy) >= 40:
-                for relation in (
-                    "left_of" if lcx < rcx else "right_of",
-                    "above" if lcy < rcy else "below",
-                ):
-                    if len(relations) >= MAX_SPATIAL_RELATIONS:
-                        return relations
-                    relations.append({**pair, "relation": relation, "confidence": 0.99})
+            # Apply the saturation threshold independently on each axis.  A
+            # horizontal separation must never manufacture a vertical
+            # relation for objects with the same centre y, and vice versa.
+            if abs(lcx - rcx) >= 40:
+                if len(relations) >= MAX_SPATIAL_RELATIONS:
+                    return relations
+                relations.append({
+                    **pair,
+                    "relation": "left_of" if lcx < rcx else "right_of",
+                    "confidence": 0.99,
+                })
+            if abs(lcy - rcy) >= 40:
+                if len(relations) >= MAX_SPATIAL_RELATIONS:
+                    return relations
+                relations.append({
+                    **pair,
+                    "relation": "above" if lcy < rcy else "below",
+                    "confidence": 0.99,
+                })
             if len(relations) >= MAX_SPATIAL_RELATIONS:
                 return relations
     return relations

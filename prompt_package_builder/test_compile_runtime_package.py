@@ -33,7 +33,16 @@ class RuntimeArtifactPathTests(unittest.TestCase):
         self.assertEqual("round_fixture_001", context_pack["round_id"])
         self.assertEqual("round_fixture_001", continuity["identity_receipt"]["round_id"])
         self.assertEqual(context_pack["context_id"], continuity["identity_receipt"]["context_id"])
-        self.assertEqual(["observed", "inferred", "unknown"], continuity["answer_strategy"]["opening_sections"])
+        self.assertEqual(["observed", "user_stated", "inferred", "unknown"], continuity["answer_strategy"]["opening_sections"])
+        self.assertEqual(
+            ["identity_receipt", "observed", "user_stated", "inferred", "unknown", "confirmed"],
+            continuity["answer_strategy"]["response_sequence"],
+        )
+        self.assertTrue(continuity["answer_strategy"]["answer_contract"]["identity_receipt"]["required"])
+        self.assertEqual(
+            ["round_id", "context_id", "snapshot.status"],
+            continuity["answer_strategy"]["answer_contract"]["identity_receipt"]["user_visible"]["fields"],
+        )
         self.assertFalse(continuity["execution_authorized"])
         self.assertEqual([], validate_minimal_context_pack(context_pack))
         self.assertEqual([], validate_context_continuity_policy(continuity, context_pack))

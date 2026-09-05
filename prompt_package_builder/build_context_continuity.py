@@ -3,8 +3,8 @@
 
 This module is intentionally an additive policy adapter.  It keeps the
 MCPack-02 ``contract`` and its evidence-layer selection intact, then adds a
-small identity receipt, an observed/inferred/unknown opening, an explicit
-confirmation gate, and bounded re-read/reconcile lineage.  It never reads the
+small identity receipt, an observed/user-stated/inferred/unknown opening, an
+explicit confirmation gate, and bounded re-read/reconcile lineage.  It never reads the
 round archive, calls a model, mutates Prompt Package/Process IR, or authorizes
 an external action.
 """
@@ -62,6 +62,26 @@ _MAX_EVIDENCE_REFS = 5
 _MAX_TEXT = 500
 MAX_CORRECTION_HISTORY = 5
 MAX_CONTEXT_LINEAGE = 8
+
+# The continuity policy carries the answer contract consumed by a downstream
+# reader/model.  The identity receipt is a separate first item; user-authored
+# statements and corrections get their own section and can never be folded
+# into the inference section.
+ANSWER_CONTRACT_VERSION = "0.1-draft"
+ANSWER_SECTION_ORDER = ("observed", "user_stated", "inferred", "unknown", "confirmed")
+ANSWER_OPENING_SECTIONS = ("observed", "user_stated", "inferred", "unknown")
+IDENTITY_RECEIPT_FIELDS = (
+    "package_id",
+    "round_id",
+    "context_id",
+    "context_version",
+    "snapshot.status",
+    "snapshot.index",
+    "time.window_ms",
+    "source.compiler_version",
+    "source.content_sha256",
+)
+USER_VISIBLE_RECEIPT_FIELDS = ("round_id", "context_id", "snapshot.status")
 
 
 def _record(value: Any) -> dict[str, Any]:
@@ -290,7 +310,77 @@ def _same_source_identity(current: dict[str, Any], previous: dict[str, Any]) -> 
     return True
 
 
-def _understanding(context_pack: dict[str, Any], *, visual_allowed: bool) -> dict[str, Any]:
+def _safe_correction_history(value: Any) -> list[dict[str, Any]]:
+    """Return only the bounded user-authored correction entries for display.
+
+    ``_correction_history`` already strips claims and evidence references.  A
+    second defensive projection keeps the answer section safe when this
+    helper is called with a policy assembled by an older caller.
+    """
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for item in value[:MAX_CORRECTION_HISTORY]:
+        entry = _history_entry(item)
+        if entry is not None:
+            result.append(entry)
+    return result
+
+
+def _answer_contract() -> dict[str, Any]:
+    """Describe the one response sequence shared by policy and skill readers."""
+    return {
+        "version": ANSWER_CONTRACT_VERSION,
+        "response_sequence": ["identity_receipt", *ANSWER_SECTION_ORDER],
+        "identity_receipt": {
+            "required": True,
+            "placement": "first",
+            # These fields are the machine-verifiable receipt retained in the
+            # policy.  A model/user-facing answer only echoes the compact
+            # subset below; it need not print hashes or every bounded field.
+            "fields": list(IDENTITY_RECEIPT_FIELDS),
+            "user_visible": {
+                "required": True,
+                "placement": "first",
+                "fields": list(USER_VISIBLE_RECEIPT_FIELDS),
+            },
+        },
+        "sections": {
+            "observed": {
+                "source_layer": "visual_observation",
+                "description": "直接可见的最终快照事实",
+            },
+            "user_stated": {
+                "source_layer": "user_input",
+                "status": "user_stated",
+                "description": "用户说明与纠正；不得放入 inferred",
+            },
+            "inferred": {
+                "source_layer": "compiler_candidate",
+                "description": "候选解释；不得升级为决定或执行指令",
+            },
+            "unknown": {
+                "source_layer": "unresolved",
+                "description": "未决、冲突和不可用证据",
+            },
+            "confirmed": {
+                "source_layer": "confirmation",
+                "description": "用户明确确认的范围，不向邻近候选扩张",
+            },
+        },
+        "correction_section": "user_stated",
+        "user_input_not_inferred": True,
+        "omit_empty_sections": True,
+        "execution_authorized": False,
+    }
+
+
+def _understanding(
+    context_pack: dict[str, Any],
+    *,
+    visual_allowed: bool,
+    correction_history: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     claims = _items(context_pack.get("claims"))
     candidates = _items(context_pack.get("relation_candidates"))
     unresolved = _items(context_pack.get("unresolved"))
@@ -299,6 +389,11 @@ def _understanding(context_pack: dict[str, Any], *, visual_allowed: bool) -> dic
         if item.get("source_layer") == "visual_observation" and item.get("status") == "observed"
     ]
     observed_claims = all_observed_claims if visual_allowed else []
+    user_stated_claims = [
+        item for item in claims
+        if item.get("source_layer") == "user_input" and item.get("status") == "user_stated"
+    ]
+    safe_corrections = _safe_correction_history(correction_history)
     inferred_claims = [item for item in claims if item.get("status") == "inferred"]
     compiler_candidates = [item for item in candidates if item.get("status") in {"unresolved", "confirmed"}]
     unavailable_claims = [item for item in claims if item.get("source_layer") == "unavailable"]
@@ -321,6 +416,17 @@ def _understanding(context_pack: dict[str, Any], *, visual_allowed: bool) -> dic
             "candidate_ids": [],
             "unresolved_ids": [],
             "evidence_refs": _refs(observed_claims),
+        },
+        "user_stated": {
+            "label": "用户说明/纠正",
+            "source_layer": "user_input",
+            "source_layers": ["user_input"],
+            "status": "user_stated" if user_stated_claims or safe_corrections else "empty",
+            "claim_ids": _claim_ids(user_stated_claims),
+            "candidate_ids": [],
+            "unresolved_ids": [],
+            "evidence_refs": _refs(user_stated_claims),
+            "correction_history": safe_corrections,
         },
         "inferred": {
             "label": "我推断",
@@ -740,14 +846,21 @@ def build_context_continuity_policy(
     if mode == "re_read" and continuity["read_mode"] != "re_read":
         continuity["read_mode"] = "re_read"
     policy["identity_receipt"] = identity_receipt
+    reconciliation = _record(continuity.get("reconciliation"))
     policy["understanding"] = _understanding(
         context_pack,
         visual_allowed=policy["snapshot_gate"].get("decision") == "allow_visual_claims",
+        correction_history=reconciliation.get("correction_history"),
     )
     policy["confirmation_gate"] = _confirmation_gate(context_pack)
     policy["continuity"] = continuity
     policy["constraints"]["continuity_recovery"] = "superseded_contexts_are_not_reusable"
-    policy["answer_strategy"]["opening_sections"] = ["observed", "inferred", "unknown"]
+    policy["answer_strategy"]["opening_sections"] = list(ANSWER_OPENING_SECTIONS)
+    policy["answer_strategy"]["response_sequence"] = ["identity_receipt", *ANSWER_SECTION_ORDER]
+    policy["answer_strategy"]["identity_receipt_required"] = True
+    policy["answer_strategy"]["identity_receipt_placement"] = "first"
+    policy["answer_strategy"]["user_stated_section"] = "user_stated"
+    policy["answer_strategy"]["answer_contract"] = _answer_contract()
     policy["answer_strategy"]["rule_ids"] = [
         *policy["answer_strategy"].get("rule_ids", []),
         "identity_receipt_precedes_answer",
@@ -864,8 +977,22 @@ def mark_context_response_superseded(
                     "evidence_refs": _unique_strings(item.get("evidence_refs", []), _MAX_EVIDENCE_REFS),
                 }
 
+            fallback_continuity = _record(result.get("continuity"))
+            fallback_reconciliation = _record(fallback_continuity.get("reconciliation"))
+            fallback_history = _safe_correction_history(fallback_reconciliation.get("correction_history"))
             result["understanding"] = {
                 "observed": fallback_section("observed", "visual_observation", "observed"),
+                "user_stated": {
+                    "label": "用户说明/纠正",
+                    "source_layer": "user_input",
+                    "source_layers": ["user_input"],
+                    "status": "user_stated" if fallback_history else "empty",
+                    "claim_ids": [],
+                    "candidate_ids": [],
+                    "unresolved_ids": [],
+                    "evidence_refs": [],
+                    "correction_history": fallback_history,
+                },
                 "inferred": fallback_section("inferred", "compiler_candidate", "inferred"),
                 "unknown": fallback_section("unknown", "unresolved", "unknown"),
                 "confirmed": fallback_section("confirmed", "confirmation", "empty"),
@@ -920,6 +1047,12 @@ def mark_context_response_superseded(
     result["constraints"]["continuity_recovery"] = "superseded_contexts_are_not_reusable"
     result["execution_authorized"] = False
     result["answer_strategy"] = _record(result.get("answer_strategy"))
+    result["answer_strategy"]["opening_sections"] = list(ANSWER_OPENING_SECTIONS)
+    result["answer_strategy"]["response_sequence"] = ["identity_receipt", *ANSWER_SECTION_ORDER]
+    result["answer_strategy"]["identity_receipt_required"] = True
+    result["answer_strategy"]["identity_receipt_placement"] = "first"
+    result["answer_strategy"]["user_stated_section"] = "user_stated"
+    result["answer_strategy"]["answer_contract"] = _answer_contract()
     rules = _unique_strings(result["answer_strategy"].get("rule_ids", []))
     if "superseded_context_is_not_reused" not in rules:
         rules.append("superseded_context_is_not_reused")

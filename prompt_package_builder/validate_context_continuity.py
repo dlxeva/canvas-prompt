@@ -13,7 +13,12 @@ try:  # package import
     from .build_context_continuity import (  # type: ignore
         CONTINUITY_STATUSES,
         CONTINUITY_VERSION,
+        ANSWER_CONTRACT_VERSION,
+        ANSWER_OPENING_SECTIONS,
+        ANSWER_SECTION_ORDER,
         FORBIDDEN_KEYS,
+        IDENTITY_RECEIPT_FIELDS,
+        USER_VISIBLE_RECEIPT_FIELDS,
         MAX_CONTEXT_LINEAGE,
         MAX_CORRECTION_HISTORY,
         READ_MODES,
@@ -24,7 +29,12 @@ except ImportError:  # existing script-style imports
     from build_context_continuity import (  # noqa: F401
         CONTINUITY_STATUSES,
         CONTINUITY_VERSION,
+        ANSWER_CONTRACT_VERSION,
+        ANSWER_OPENING_SECTIONS,
+        ANSWER_SECTION_ORDER,
         FORBIDDEN_KEYS,
+        IDENTITY_RECEIPT_FIELDS,
+        USER_VISIBLE_RECEIPT_FIELDS,
         MAX_CONTEXT_LINEAGE,
         MAX_CORRECTION_HISTORY,
         READ_MODES,
@@ -36,7 +46,7 @@ except ImportError:  # existing script-style imports
 SOURCE_LAYERS = {"visual_observation", "user_input", "compiler_candidate", "confirmation", "unresolved", "unavailable"}
 SNAPSHOT_STATES = {"available", "degraded", "unavailable", "conflicting"}
 REQUIRED_FIELDS = {"identity_receipt", "understanding", "confirmation_gate", "continuity"}
-SECTION_NAMES = {"observed", "inferred", "unknown", "confirmed"}
+SECTION_NAMES = set(ANSWER_SECTION_ORDER)
 MAX_EVIDENCE_REFS = 5
 
 
@@ -187,6 +197,89 @@ def _validate_identity_receipt(value: dict[str, Any], context_pack: dict[str, An
                 errors.append(f"identity_receipt.time.evidence_refs contains unknown evidence ID {ref}")
 
 
+def _validate_answer_contract(value: dict[str, Any], errors: list[str]) -> None:
+    """Validate the response sequence shared by policy and read-round skill."""
+    strategy = _record(value.get("answer_strategy"))
+    contract = strategy.get("answer_contract")
+    if not isinstance(contract, dict):
+        errors.append("answer_strategy.answer_contract must be an object")
+        return
+    if contract.get("version") != ANSWER_CONTRACT_VERSION:
+        errors.append("answer_strategy.answer_contract.version is invalid")
+    expected_sequence = ["identity_receipt", *ANSWER_SECTION_ORDER]
+    if contract.get("response_sequence") != expected_sequence:
+        errors.append("answer_strategy.answer_contract.response_sequence must start with identity_receipt and preserve source order")
+    receipt_contract = contract.get("identity_receipt")
+    if not isinstance(receipt_contract, dict):
+        errors.append("answer_strategy.answer_contract.identity_receipt must be an object")
+    else:
+        if receipt_contract.get("required") is not True:
+            errors.append("answer_strategy.answer_contract.identity_receipt.required must be true")
+        if receipt_contract.get("placement") != "first":
+            errors.append("answer_strategy.answer_contract.identity_receipt.placement must be first")
+        fields = _strings(
+            receipt_contract.get("fields"),
+            "answer_strategy.answer_contract.identity_receipt.fields",
+            errors,
+        )
+        if fields != list(IDENTITY_RECEIPT_FIELDS):
+            errors.append("answer_strategy.answer_contract.identity_receipt.fields are invalid")
+        user_visible = receipt_contract.get("user_visible")
+        if not isinstance(user_visible, dict):
+            errors.append("answer_strategy.answer_contract.identity_receipt.user_visible must be an object")
+        else:
+            if user_visible.get("required") is not True:
+                errors.append("answer_strategy.answer_contract.identity_receipt.user_visible.required must be true")
+            if user_visible.get("placement") != "first":
+                errors.append("answer_strategy.answer_contract.identity_receipt.user_visible.placement must be first")
+            visible_fields = _strings(
+                user_visible.get("fields"),
+                "answer_strategy.answer_contract.identity_receipt.user_visible.fields",
+                errors,
+            )
+            if visible_fields != list(USER_VISIBLE_RECEIPT_FIELDS):
+                errors.append("answer_strategy.answer_contract.identity_receipt.user_visible.fields are invalid")
+    sections = contract.get("sections")
+    if not isinstance(sections, dict):
+        errors.append("answer_strategy.answer_contract.sections must be an object")
+    else:
+        expected_layers = {
+            "observed": "visual_observation",
+            "user_stated": "user_input",
+            "inferred": "compiler_candidate",
+            "unknown": "unresolved",
+            "confirmed": "confirmation",
+        }
+        if set(sections) != set(expected_layers):
+            errors.append("answer_strategy.answer_contract.sections must cover every answer section exactly once")
+        for name, source_layer in expected_layers.items():
+            section = sections.get(name)
+            if not isinstance(section, dict):
+                errors.append(f"answer_strategy.answer_contract.sections.{name} must be an object")
+                continue
+            if section.get("source_layer") != source_layer:
+                errors.append(f"answer_strategy.answer_contract.sections.{name}.source_layer must equal {source_layer}")
+    if contract.get("correction_section") != "user_stated":
+        errors.append("answer_strategy.answer_contract.correction_section must be user_stated")
+    if contract.get("user_input_not_inferred") is not True:
+        errors.append("answer_strategy.answer_contract.user_input_not_inferred must be true")
+    if contract.get("omit_empty_sections") is not True:
+        errors.append("answer_strategy.answer_contract.omit_empty_sections must be true")
+    if contract.get("execution_authorized") is not False:
+        errors.append("answer_strategy.answer_contract.execution_authorized must be false")
+
+    if strategy.get("opening_sections") != list(ANSWER_OPENING_SECTIONS):
+        errors.append("answer_strategy.opening_sections must keep user_stated separate from inferred")
+    if strategy.get("response_sequence") != expected_sequence:
+        errors.append("answer_strategy.response_sequence must start with identity_receipt")
+    if strategy.get("identity_receipt_required") is not True:
+        errors.append("answer_strategy.identity_receipt_required must be true")
+    if strategy.get("identity_receipt_placement") != "first":
+        errors.append("answer_strategy.identity_receipt_placement must be first")
+    if strategy.get("user_stated_section") != "user_stated":
+        errors.append("answer_strategy.user_stated_section must be user_stated")
+
+
 def _validate_section(
     section: Any,
     name: str,
@@ -209,6 +302,7 @@ def _validate_section(
         errors.append(f"{path}.label must be non-empty text")
     expected_layer = {
         "observed": "visual_observation",
+        "user_stated": "user_input",
         "inferred": "compiler_candidate",
         "unknown": "unresolved",
         "confirmed": "confirmation",
@@ -218,7 +312,7 @@ def _validate_section(
     source_layers = _strings(section.get("source_layers"), f"{path}.source_layers", errors)
     if any(layer not in SOURCE_LAYERS for layer in source_layers):
         errors.append(f"{path}.source_layers contains an invalid source layer")
-    if section.get("status") not in {"observed", "inferred", "unknown", "confirmed", "empty"}:
+    if section.get("status") not in {"observed", "user_stated", "inferred", "unknown", "confirmed", "empty"}:
         errors.append(f"{path}.status is invalid")
     claim_ids = _strings(section.get("claim_ids"), f"{path}.claim_ids", errors)
     candidate_ids = _strings(section.get("candidate_ids"), f"{path}.candidate_ids", errors)
@@ -239,6 +333,8 @@ def _validate_section(
             claim = claim_index[claim_id]
             if name == "observed" and not (claim.get("source_layer") == "visual_observation" and claim.get("status") == "observed"):
                 errors.append(f"{path}.claim_ids contains a non-observed claim {claim_id}")
+            if name == "user_stated" and not (claim.get("source_layer") == "user_input" and claim.get("status") == "user_stated"):
+                errors.append(f"{path}.claim_ids contains a non-user-stated claim {claim_id}")
             if name == "inferred" and claim.get("status") != "inferred":
                 errors.append(f"{path}.claim_ids contains a non-inferred claim {claim_id}")
             if name == "confirmed" and not (claim.get("source_layer") == "confirmation" or claim.get("status") == "confirmed"):
@@ -262,6 +358,35 @@ def _validate_section(
     for claim_id in blocked_visual_claim_ids:
         if source_available and (claim_id not in claims or claim_index[claim_id].get("source_layer") != "visual_observation"):
             errors.append(f"{path}.blocked_visual_claim_ids must point to visual observations")
+    if name == "user_stated":
+        if candidate_ids or unresolved_ids or unresolved_candidate_ids or unavailable_claim_ids or blocked_visual_claim_ids:
+            errors.append(f"{path} must not carry inference or unresolved IDs")
+        corrections = section.get("correction_history")
+        if not isinstance(corrections, list):
+            errors.append(f"{path}.correction_history must be a list")
+        elif len(corrections) > MAX_CORRECTION_HISTORY:
+            errors.append(f"{path}.correction_history exceeds {MAX_CORRECTION_HISTORY}")
+        else:
+            allowed_keys = {"status", "source_layer", "text", "provenance", "text_truncated"}
+            for correction_index, correction in enumerate(corrections):
+                correction_path = f"{path}.correction_history[{correction_index}]"
+                if not isinstance(correction, dict):
+                    errors.append(f"{correction_path} must be an object")
+                    continue
+                if set(correction) - allowed_keys:
+                    errors.append(f"{correction_path} must contain only bounded user correction fields")
+                if correction.get("status") != "user_stated" or correction.get("source_layer") != "user_input":
+                    errors.append(f"{correction_path} must remain user_input/user_stated")
+                if correction.get("provenance") != "explicit_user_correction":
+                    errors.append(f"{correction_path}.provenance must be explicit_user_correction")
+                if not isinstance(correction.get("text"), str) or not correction["text"].strip():
+                    errors.append(f"{correction_path}.text must be non-empty")
+                elif len(correction["text"]) > 500:
+                    errors.append(f"{correction_path}.text exceeds the bounded correction text length")
+                if not isinstance(correction.get("text_truncated"), bool):
+                    errors.append(f"{correction_path}.text_truncated must be boolean")
+    elif "correction_history" in section:
+        errors.append(f"{path}.correction_history is only allowed in user_stated")
     return claim_ids, candidate_ids, unresolved_ids
 
 
@@ -507,6 +632,7 @@ def validate_context_continuity_policy(value: Any, context_pack: Any | None = No
     if isinstance(context_pack, dict):
         _context_identity(value, context_pack, errors)
     _validate_identity_receipt(value, context_pack if isinstance(context_pack, dict) else None, errors)
+    _validate_answer_contract(value, errors)
     _validate_understanding(value, context_pack if isinstance(context_pack, dict) else None, errors)
     _validate_confirmation_gate(value, context_pack if isinstance(context_pack, dict) else None, errors)
     _validate_continuity(value, errors, context_pack if isinstance(context_pack, dict) else None)
