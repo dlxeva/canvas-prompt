@@ -6,8 +6,12 @@ on:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,3 +30,15 @@ jobs:
         run: npm --prefix app ci
       - name: Verify complete runtime contract
         run: npm run verify
+      - name: Install isolated browser test tools
+        shell: bash
+        run: |
+          npm install --prefix "$RUNNER_TEMP/canvas-browser-tools" --no-package-lock --ignore-scripts playwright@1.62.1
+          node "$RUNNER_TEMP/canvas-browser-tools/node_modules/playwright/cli.js" install --with-deps chromium
+          echo "CANVAS_PROMPT_PLAYWRIGHT_MODULE=$RUNNER_TEMP/canvas-browser-tools/node_modules/playwright" >> "$GITHUB_ENV"
+          CHROME_PATH=$(node -e 'console.log(require(process.argv[1]).chromium.executablePath())' "$RUNNER_TEMP/canvas-browser-tools/node_modules/playwright")
+          echo "CANVAS_PROMPT_CHROME_PATH=$CHROME_PATH" >> "$GITHUB_ENV"
+      - name: Verify real round export and failure recovery
+        run: npm run test:browser:round-export
+      - name: Verify existing image and PDF review boundaries
+        run: npm run test:browser:artifact-review

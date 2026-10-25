@@ -34,6 +34,31 @@ The smoke test downloads a local ASR model on a cold cache and may take several
 minutes. It is not a substitute for a separate-machine or host-integration
 acceptance test.
 
+## Candidate dev/preview verification
+
+The Vite development server and preview server register the same guarded local
+API. The browser checks use Node.js `22.12+` and Python `3.11+`, allocate random
+loopback ports, and create a temporary `CANVAS_PROMPT_DATA_HOME` and project
+directory for each run. They leave `HOME` and real board/cache data untouched.
+
+```bash
+# Runs dev recovery/retry/media-failure/smoke and preview smoke.
+npm run test:browser:round-export
+
+# Existing Artifact Review entry, handoff, visual failure, responsive and image checks.
+npm run test:browser:artifact-review
+
+# Responsive PDF navigation check.
+node scripts/artifact-review-browser-harness.mjs --scenario responsive
+```
+
+The exact browser setup and optional OCR research setup are documented in
+[`docs/getting-started.md`](docs/getting-started.md) and
+[`docs/getting-started.zh-CN.md`](docs/getting-started.zh-CN.md). These checks
+describe the current candidate checkout. Passing them does not claim a
+published release, human microphone/ASR acceptance, remote-host integration, or
+remote CI verification of real ASR.
+
 ## Pull request notes
 
 State what changed, how it was verified, and what remains unproven. If the

@@ -15,6 +15,7 @@ Canvas Prompt is local-first, not zero-dependency. A clean machine needs:
 | Voice capture | Browser microphone permission | Required only when recording. |
 | PDF review | Bundled PDF.js runtime | Renders selected PDF locally; source file remains read-only. |
 | PPTX review | Local LibreOffice `soffice` executable | Converts selected PPTX to isolated review-only PDF derivative; source presentation not edited. |
+| Optional OCR research | Separate `research/ocr` package | Opt-in only; its dependencies are not part of the root or app install. |
 | AI continuation | Single-board MCP | Reads latest completed single-board round after explicit continuation command. |
 
 PPTX review is available when `soffice` is on `PATH` or `CANVAS_PROMPT_SOFFICE_BIN`
@@ -27,6 +28,18 @@ and the base speech model downloads about **148 MB** into the local cache on
 first start. Exact size and first-start time vary by platform and network. If
 you only need visual context, use `setup --core-only` or set
 `CANVAS_PROMPT_ASR=disabled`.
+
+The default app has no OCR, Paddle, OpenCV, or ONNX engine dependency. The
+optional research smoke can be installed and run in its own directory:
+
+```bash
+cd research/ocr
+npm install --ignore-scripts
+npm run dev
+```
+
+This package owns its OCR runner and cache. It does not change the App,
+Prompt Package, API, MCP, Python, or launcher contracts.
 
 macOS arm64 has current public runtime verification; Intel macOS, Windows, and
 Linux remain acceptance-test targets.
@@ -62,6 +75,69 @@ node bin/canvas-prompt.mjs open --host codex --project /absolute/path/to/active-
 
 Open the URL printed by the launcher. Port `43223` is preferred, fallback is a
 local alternate port.
+
+## Dev/preview API parity and isolated browser checks
+
+`app/vite.config.ts` registers the same `registerCanvasApi` middleware through
+both Vite `configureServer` and `configurePreviewServer`. Dev and preview
+therefore use the same local API boundary, including runtime identity/session,
+token-protected round reads and media/package uploads. Use loopback only:
+
+```bash
+# Development server.
+npm --prefix app run dev -- --host 127.0.0.1 --port 43223 --strictPort
+
+# Preview server, after the production build.
+npm --prefix app run build
+(cd app && node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4173 --strictPort)
+```
+
+The browser harness starts these servers with a random available port and a
+fresh temporary data/project pair. Its default environment is
+`CANVAS_PROMPT_ASR=disabled` and `CANVAS_PROMPT_DELIVERY_MODE=local`.
+
+For an isolated local browser tool directory, set the configurable Playwright
+and browser paths before running the checks:
+
+```bash
+BROWSER_TOOLS="$(mktemp -d "${TMPDIR:-/tmp}/canvas-browser-tools.XXXXXX")"
+npm install --prefix "$BROWSER_TOOLS" --no-package-lock --ignore-scripts playwright@1.62.1
+node "$BROWSER_TOOLS/node_modules/playwright/cli.js" install chromium
+export CANVAS_PROMPT_PLAYWRIGHT_MODULE="$BROWSER_TOOLS/node_modules/playwright"
+export CANVAS_PROMPT_CHROME_PATH="$(node -e 'console.log(require(process.argv[1]).chromium.executablePath())' "$CANVAS_PROMPT_PLAYWRIGHT_MODULE")"
+
+# Or point at an already managed local Chrome executable.
+# export CANVAS_PROMPT_CHROME_PATH="/path/to/Google Chrome"
+```
+
+For the real PPTX-to-PDF smoke, point the converter at an isolated or managed
+LibreOffice executable and check it before running the harness:
+
+```bash
+export CANVAS_PROMPT_SOFFICE_BIN="/path/to/isolated/soffice"
+"$CANVAS_PROMPT_SOFFICE_BIN" --version
+node scripts/artifact-review-browser-harness.mjs --scenario pptx
+```
+
+Run the candidate checks with the same temporary-data boundary:
+
+```bash
+node scripts/round-export-browser-harness.mjs --scenario smoke --server dev
+node scripts/round-export-browser-harness.mjs --scenario smoke --server preview
+npm run test:browser:round-export
+npm run test:browser:artifact-review
+node scripts/artifact-review-browser-harness.mjs --scenario responsive
+```
+
+The round-export `all` command covers dev recovery, explicit upload retry,
+partial media failure, two-round isolation, and preview smoke. The harnesses
+do not override `HOME`, reuse a real board, or claim a published runtime.
+
+The browser checks disable ASR and use a local test route. They do not verify a
+real microphone session, human ASR quality, or remote-host handoff. The remote
+CI browser matrix provisions isolated Playwright/Chromium tools and runs the
+same candidate checks; it does not establish human acceptance or real ASR
+coverage.
 
 ## Other AI terminals, CLI tools, and agents (compatibility path)
 
