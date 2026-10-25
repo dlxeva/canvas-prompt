@@ -1,4 +1,5 @@
 import { createServer, request, type IncomingMessage, type ServerResponse } from 'node:http'
+import { randomUUID } from 'node:crypto'
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
@@ -16,7 +17,8 @@ const server = createServer((req, res) => {
 })
 let root: string
 let origin: string
-const token = 'synthetic-integration-session-token-0123456789'
+// Ephemeral test-only authentication, never a persisted credential.
+const token = randomUUID()
 let calls: string[] = []
 
 function input(id: string, extra: Record<string, unknown> = {}): RoundExportInput {
