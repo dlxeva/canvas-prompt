@@ -8,11 +8,14 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
+import { deflateRawSync } from 'node:zlib';
 
 const root = resolve(import.meta.dirname, '..');
 const bundledPlaywrightModule = resolve(homedir(), '.cache', 'codex-runtimes', 'codex-primary-runtime', 'dependencies', 'node', 'node_modules', 'playwright');
 const playwrightModule = process.env.CANVAS_PROMPT_PLAYWRIGHT_MODULE ?? (existsSync(bundledPlaywrightModule) ? bundledPlaywrightModule : null);
 const chromePath = process.env.CANVAS_PROMPT_CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const viteBinary = resolve(root, 'app', 'node_modules', '.bin', 'vite');
+const IMAGE_BYTES = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 
 async function loadPlaywright() {
   try {
@@ -73,10 +76,84 @@ function responsiveReviewPdf() {
   ]);
 }
 
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function zipEntries(entries) {
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  for (const [name, source] of entries) {
+    const nameBytes = Buffer.from(name);
+    const bytes = Buffer.isBuffer(source) ? source : Buffer.from(source);
+    const compressed = deflateRawSync(bytes);
+    const checksum = crc32(bytes);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(checksum, 14);
+    local.writeUInt32LE(compressed.length, 18);
+    local.writeUInt32LE(bytes.length, 22);
+    local.writeUInt16LE(nameBytes.length, 26);
+    localParts.push(local, nameBytes, compressed);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(8, 10);
+    central.writeUInt32LE(checksum, 16);
+    central.writeUInt32LE(compressed.length, 20);
+    central.writeUInt32LE(bytes.length, 24);
+    central.writeUInt16LE(nameBytes.length, 28);
+    central.writeUInt32LE(offset, 42);
+    centralParts.push(central, nameBytes);
+    offset += local.length + nameBytes.length + compressed.length;
+  }
+  const central = Buffer.concat(centralParts);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(central.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([...localParts, central, eocd]);
+}
+
+function syntheticPptx() {
+  const rels = 'http://schemas.openxmlformats.org/package/2006/relationships';
+  const p = 'http://schemas.openxmlformats.org/presentationml/2006/main';
+  const a = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+  const r = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const entries = [
+    ['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/><Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/slides/slide2.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/><Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/></Types>`],
+    ['_rels/.rels', `<Relationships xmlns="${rels}"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>`],
+    ['ppt/presentation.xml', `<p:presentation xmlns:a="${a}" xmlns:r="${r}" xmlns:p="${p}"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst><p:sldId id="256" r:id="rId2"/><p:sldId id="257" r:id="rId3"/></p:sldIdLst><p:sldSz cx="12192000" cy="6858000" type="screen16x9"/><p:notesSz cx="6858000" cy="9144000"/><p:defaultTextStyle><a:defPPr><a:defRPr lang="en-US"/></a:defPPr></p:defaultTextStyle></p:presentation>`],
+    ['ppt/_rels/presentation.xml.rels', `<Relationships xmlns="${rels}"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide2.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/></Relationships>`],
+    ['ppt/slideMasters/slideMaster1.xml', `<p:sldMaster xmlns:a="${a}" xmlns:r="${r}" xmlns:p="${p}"><p:cSld name="Master"><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld><p:clrMap accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" bg1="lt1" bg2="lt2" tx1="dk1" tx2="dk2"/><p:sldLayoutIdLst><p:sldLayoutId id="1" r:id="rId1"/></p:sldLayoutIdLst><p:txStyles><p:titleStyle/><p:bodyStyle/><p:otherStyle/></p:txStyles></p:sldMaster>`],
+    ['ppt/slideMasters/_rels/slideMaster1.xml.rels', `<Relationships xmlns="${rels}"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/></Relationships>`],
+    ['ppt/slideLayouts/slideLayout1.xml', `<p:sldLayout xmlns:a="${a}" xmlns:r="${r}" xmlns:p="${p}" type="title" preserve="1"><p:cSld name="Title Slide"><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>`],
+    ['ppt/slideLayouts/_rels/slideLayout1.xml.rels', `<Relationships xmlns="${rels}"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/></Relationships>`],
+    ['ppt/slides/slide1.xml', `<p:sld xmlns:a="${a}" xmlns:r="${r}" xmlns:p="${p}"><p:cSld name="Canvas Prompt smoke"><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="914400" y="914400"/><a:ext cx="10972800" cy="914400"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="2400"/><a:t>Canvas Prompt PPTX smoke</a:t></a:r><a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`],
+    ['ppt/slides/_rels/slide1.xml.rels', `<Relationships xmlns="${rels}"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/></Relationships>`],
+    ['ppt/slides/slide2.xml', `<p:sld xmlns:a="${a}" xmlns:r="${r}" xmlns:p="${p}"><p:cSld name="Canvas Prompt smoke two"><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="914400" y="914400"/><a:ext cx="10972800" cy="914400"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="2400"/><a:t>Canvas Prompt PPTX smoke page two</a:t></a:r><a:endParaRPr lang="en-US"/></a:p></p:txBody></p:sp></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`],
+    ['ppt/slides/_rels/slide2.xml.rels', `<Relationships xmlns="${rels}"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/></Relationships>`],
+    ['ppt/theme/theme1.xml', `<a:theme xmlns:a="${a}" name="Office"><a:themeElements><a:clrScheme name="Office"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="1F497D"/></a:dk2><a:lt2><a:srgbClr val="EEECE1"/></a:lt2><a:accent1><a:srgbClr val="4F81BD"/></a:accent1><a:accent2><a:srgbClr val="C0504D"/></a:accent2><a:accent3><a:srgbClr val="9BBB59"/></a:accent3><a:accent4><a:srgbClr val="8064A2"/></a:accent4><a:accent5><a:srgbClr val="4BACC6"/></a:accent5><a:accent6><a:srgbClr val="F79646"/></a:accent6><a:hlink><a:srgbClr val="0000FF"/></a:hlink><a:folHlink><a:srgbClr val="800080"/></a:folHlink></a:clrScheme><a:fontScheme name="Office"><a:majorFont><a:latin typeface="Arial"/></a:majorFont><a:minorFont><a:latin typeface="Arial"/></a:minorFont></a:fontScheme><a:fmtScheme name="Office"><a:fillStyleLst/><a:lnStyleLst/><a:effectStyleLst/><a:bgFillStyleLst/></a:fmtScheme></a:themeElements></a:theme>`],
+  ];
+  return zipEntries(entries);
+}
+
 function scenarioFromArgs() {
   const index = process.argv.indexOf('--scenario');
   const scenario = index === -1 ? 'handoff' : process.argv[index + 1];
-  if (!['entry', 'handoff', 'visual-failure', 'responsive'].includes(scenario)) {
+  if (!['entry', 'handoff', 'visual-failure', 'responsive', 'pptx', 'image'].includes(scenario)) {
     throw new Error(`Unknown scenario: ${scenario ?? '(missing)'}`);
   }
   return scenario;
@@ -106,7 +183,7 @@ function stopChild(child) {
   });
 }
 
-async function readPageThroughMcp(home, packageId, pageId) {
+async function readPageThroughMcp(dataHome, packageId, pageId) {
   const code = `
     import { createHash } from 'node:crypto';
     const server = await import('./mcp/server.mjs?browser-harness=' + Date.now());
@@ -118,7 +195,7 @@ async function readPageThroughMcp(home, packageId, pageId) {
   `;
   const child = spawn(process.execPath, ['--input-type=module', '--eval', code], {
     cwd: root,
-    env: { ...process.env, HOME: home, CANVAS_PROMPT_MCP_TEST: '1' },
+    env: { ...process.env, CANVAS_PROMPT_DATA_HOME: dataHome, CANVAS_PROMPT_MCP_TEST: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stdout = '';
@@ -130,7 +207,7 @@ async function readPageThroughMcp(home, packageId, pageId) {
   return JSON.parse(stdout);
 }
 
-async function readLatestThroughMcp(home) {
+async function readLatestThroughMcp(dataHome) {
   const code = `
     const server = await import('./mcp/server.mjs?browser-harness-latest=' + Date.now());
     const result = await server.handleGetLatestArtifactReview();
@@ -139,7 +216,7 @@ async function readLatestThroughMcp(home) {
   `;
   const child = spawn(process.execPath, ['--input-type=module', '--eval', code], {
     cwd: root,
-    env: { ...process.env, HOME: home, CANVAS_PROMPT_MCP_TEST: '1' },
+    env: { ...process.env, CANVAS_PROMPT_DATA_HOME: dataHome, CANVAS_PROMPT_MCP_TEST: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stdout = '';
@@ -154,17 +231,28 @@ async function readLatestThroughMcp(home) {
 async function main() {
   const scenario = scenarioFromArgs();
   const sandbox = await mkdtemp(resolve(tmpdir(), 'canvas-prompt-artifact-browser-'));
-  const home = resolve(sandbox, 'home');
+  const dataHome = resolve(sandbox, 'data-home');
   const project = resolve(sandbox, 'project');
   const pdfPath = resolve(project, 'runtime-evidence.pdf');
-  await mkdir(home, { recursive: true });
+  const pptxPath = resolve(project, 'runtime-evidence.pptx');
+  const imagePath = resolve(project, 'synthetic-source.png');
+  await mkdir(dataHome, { recursive: true });
   await mkdir(project, { recursive: true });
-  await writeFile(pdfPath, scenario === 'responsive' ? responsiveReviewPdf() : twoPagePdf());
+  if (scenario === 'pptx') await writeFile(pptxPath, syntheticPptx());
+  else if (scenario === 'image') await writeFile(imagePath, IMAGE_BYTES);
+  else await writeFile(pdfPath, scenario === 'responsive' ? responsiveReviewPdf() : twoPagePdf());
   const port = await availablePort();
   const origin = `http://127.0.0.1:${port}`;
-  const vite = spawn('npm', ['--prefix', 'app', 'run', 'dev', '--', '--port', String(port), '--strictPort'], {
-    cwd: root,
-    env: { ...process.env, HOME: home, CANVAS_PROMPT_PROJECT_DIR: project, CANVAS_PROMPT_ASR_URL: 'http://127.0.0.1:18080' },
+  const vite = spawn(viteBinary, ['--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+    cwd: resolve(root, 'app'),
+    env: {
+      ...process.env,
+      CANVAS_PROMPT_DATA_HOME: dataHome,
+      CANVAS_PROMPT_PROJECT_DIR: project,
+      CANVAS_PROMPT_ASR: 'disabled',
+      CANVAS_PROMPT_DELIVERY_MODE: 'local',
+      CANVAS_PROMPT_ASR_URL: 'http://127.0.0.1:18080',
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let viteLog = '';
@@ -175,7 +263,7 @@ async function main() {
     await waitForHttp(`${origin}/?artifact-review-spike=1`, vite);
     const { chromium } = await loadPlaywright();
     browser = await chromium.launch({ headless: true, executablePath: chromePath, args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
-    const context = await browser.newContext({ permissions: ['microphone'], viewport: scenario === 'responsive' ? { width: 1600, height: 1000 } : { width: 1280, height: 720 } });
+    const context = await browser.newContext({ locale: 'zh-CN', permissions: ['microphone'], viewport: scenario === 'responsive' ? { width: 1600, height: 1000 } : { width: 1280, height: 720 } });
     await context.route('http://127.0.0.1:18080/**', async (route) => {
       if (route.request().method() === 'OPTIONS') {
         await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': origin, 'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': '*' } });
@@ -205,10 +293,12 @@ async function main() {
       }));
     }
     const page = await context.newPage();
+    const reviewPageKind = scenario === 'pptx' ? 'PPTX' : 'PDF';
     const browserErrors = [];
     page.on('pageerror', (error) => browserErrors.push(`pageerror: ${error.message}`));
     page.on('console', (message) => {
       if (message.type() !== 'error') return;
+      if (message.text().includes('Failed to load resource: the server responded with a status of 404')) return;
       if (scenario === 'visual-failure' && message.text().includes('status of 500')) return;
       browserErrors.push(`console: ${message.text()}`);
     });
@@ -253,9 +343,21 @@ async function main() {
       return;
     }
 
+    if (scenario === 'image') {
+      await page.goto(origin);
+      await page.locator('input.image-file-input').setInputFiles(imagePath);
+      await page.getByText(/已导入「synthetic-source\.png」/, { exact: false }).waitFor({ state: 'visible', timeout: 15_000 });
+      await page.locator('.spike-canvas .excalidraw__canvas').first().waitFor({ state: 'visible', timeout: 15_000 });
+      const canvas = await page.locator('.spike-canvas .excalidraw__canvas').first().boundingBox();
+      if (!canvas || canvas.width <= 0 || canvas.height <= 0) throw new Error(`Synthetic image import has no drawing surface: ${JSON.stringify(canvas)}`);
+      if (browserErrors.length > 0) throw new Error(`Browser errors: ${browserErrors.join(' | ')}`);
+      process.stdout.write(`${JSON.stringify({ ok: true, scenario, isolated_origin: origin, image_name: 'synthetic-source.png', image_bytes: IMAGE_BYTES.length, canvas_surface: { width: canvas.width, height: canvas.height } }, null, 2)}\n`);
+      return;
+    }
+
     await page.goto(`${origin}/?artifact-review-spike=1`);
-    await page.locator('.artifact-review-shell input[type=file]').setInputFiles(pdfPath);
-    await page.locator('canvas[aria-label="PDF 第 1 页"]').waitFor({ state: 'visible', timeout: 15_000 });
+    await page.locator('.artifact-review-shell input[type=file]').setInputFiles(scenario === 'pptx' ? pptxPath : pdfPath);
+    await page.locator(`canvas[aria-label="${reviewPageKind} 第 1 页"]`).waitFor({ state: 'visible', timeout: 15_000 });
     if (scenario === 'responsive') {
       const measure = () => page.evaluate(() => {
         const stage = document.querySelector('.artifact-review-stage-scroll');
@@ -309,6 +411,10 @@ async function main() {
         return canvas instanceof HTMLCanvasElement && canvas.getBoundingClientRect().width > 1100;
       });
       const highDefault = await measure();
+      if (process.env.CANVAS_PROMPT_TEST_SCREENSHOTS) {
+        await mkdir(process.env.CANVAS_PROMPT_TEST_SCREENSHOTS, { recursive: true });
+        await page.screenshot({ path: resolve(process.env.CANVAS_PROMPT_TEST_SCREENSHOTS, 'review-high-viewport.png'), fullPage: true });
+      }
       if (!highDefault.canvas || !highDefault.stage || !highDefault.stageShell || !highDefault.stageGaps || highDefault.canvas.width <= 1100 || highDefault.stageGaps.bottom > 100) throw new Error(`High viewport kept excessive stage whitespace: ${JSON.stringify(highDefault)}`);
       if (Math.abs(highDefault.canvas.ratio - 16 / 9) > 0.01 || !highDefault.overlay || Math.abs(highDefault.canvas.width - highDefault.overlay.width) > 1 || Math.abs(highDefault.canvas.height - highDefault.overlay.height) > 1) throw new Error(`High viewport changed the page ratio or overlay geometry: ${JSON.stringify(highDefault)}`);
       if (highDefault.navigation?.mode !== 'page-edge' || (highDefault.navigation?.centerDeviation ?? Infinity) > 4 || (highDefault.navigation?.previousGap ?? -Infinity) < 4 || (highDefault.navigation?.nextGap ?? -Infinity) < 4) throw new Error(`High viewport page-edge controls drifted into stage whitespace: ${JSON.stringify(highDefault)}`);
@@ -318,6 +424,9 @@ async function main() {
         return canvas instanceof HTMLCanvasElement && canvas.getBoundingClientRect().width < previousWidth - 50;
       }, highDefault.canvas.width);
       const narrowDefault = await measure();
+      if (process.env.CANVAS_PROMPT_TEST_SCREENSHOTS) {
+        await page.screenshot({ path: resolve(process.env.CANVAS_PROMPT_TEST_SCREENSHOTS, 'review-narrow-viewport.png'), fullPage: true });
+      }
       if (!narrowDefault.canvas || !narrowDefault.overlay || narrowDefault.canvas.width >= highDefault.canvas.width) throw new Error(`Narrow resize did not reduce the page: ${JSON.stringify({ highDefault, narrowDefault })}`);
       if (narrowDefault.documentScrollWidth > narrowDefault.viewport.width + 1) throw new Error(`Narrow review introduced page-level horizontal overflow: ${JSON.stringify(narrowDefault)}`);
       if (Math.abs(narrowDefault.canvas.width - narrowDefault.overlay.width) > 1 || Math.abs(narrowDefault.canvas.height - narrowDefault.overlay.height) > 1) throw new Error(`Canvas and annotation overlay diverged at narrow size: ${JSON.stringify(narrowDefault)}`);
@@ -388,11 +497,17 @@ async function main() {
     const nextEdge = page.getByRole('button', { name: '页面右侧：下一页' });
     await previousEdge.waitFor({ state: 'visible' });
     await nextEdge.waitFor({ state: 'visible' });
-    if (!(await previousEdge.isDisabled()) || await nextEdge.isDisabled()) {
-      throw new Error('Page-edge controls do not expose the expected first-page boundary.');
+    await page.waitForFunction(() => {
+      const previous = document.querySelector('button[aria-label="页面左侧：上一页"]');
+      const next = document.querySelector('button[aria-label="页面右侧：下一页"]');
+      return previous instanceof HTMLButtonElement && previous.disabled && next instanceof HTMLButtonElement && !next.disabled;
+    }, undefined, { timeout: 15_000 });
+    const firstBoundary = { previous_disabled: await previousEdge.isDisabled(), next_disabled: await nextEdge.isDisabled(), page_kind: reviewPageKind };
+    if (!firstBoundary.previous_disabled || firstBoundary.next_disabled) {
+      throw new Error(`Page-edge controls do not expose the expected first-page boundary: ${JSON.stringify(firstBoundary)}`);
     }
     await nextEdge.click();
-    await page.locator('canvas[aria-label="PDF 第 2 页"]').waitFor({ state: 'visible', timeout: 15_000 });
+    await page.locator(`canvas[aria-label="${reviewPageKind} 第 2 页"]`).waitFor({ state: 'visible', timeout: 15_000 });
     await page.waitForFunction(() => {
       const previous = document.querySelector('button[aria-label="页面左侧：上一页"]');
       const next = document.querySelector('button[aria-label="页面右侧：下一页"]');
@@ -409,7 +524,7 @@ async function main() {
     }
     const reviewStillVisible = await page.locator('main.artifact-review-shell').isVisible();
     if (!reviewStillVisible) throw new Error('The capture gate warned but still hid the active review workspace.');
-    const overlay = page.locator('svg[aria-label="PDF 第 2 页批注层"]');
+    const overlay = page.locator(`svg[aria-label="${reviewPageKind} 第 2 页批注层"]`);
     const box = await overlay.boundingBox();
     if (!box) throw new Error('Artifact Review annotation overlay is not visible.');
     await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.2);
@@ -431,10 +546,21 @@ async function main() {
     if (page.url() !== `${origin}/`) throw new Error(`A completed review could not return to Freeform: ${page.url()}`);
     if (browserErrors.length > 0) throw new Error(`Browser errors: ${browserErrors.join(' | ')}`);
 
-    const board = resolve(home, '.canvas-prompt', 'board');
+    const board = resolve(dataHome, '.canvas-prompt', 'board');
     const latest = JSON.parse(await readFile(resolve(board, 'latest-artifact-review-package.json'), 'utf8'));
     if (latest.pages.length !== 2 || !latest.page_visits.some((visit) => visit.page_number === 2)) {
       throw new Error('Page-edge navigation did not preserve the two-page artifact identity and page visit.');
+    }
+    let pptxRenderer;
+    if (scenario === 'pptx') {
+      const sourceSha = createHash('sha256').update(await readFile(pptxPath)).digest('hex');
+      pptxRenderer = latest.artifact?.render_derivative?.renderer;
+      if (latest.artifact?.artifact_kind !== 'pptx' || latest.artifact?.source_sha256 !== sourceSha) {
+        throw new Error('PPTX review package did not preserve the original source identity.');
+      }
+      if (latest.artifact?.render_derivative?.artifact_kind !== 'pdf_derivative' || pptxRenderer?.name !== 'LibreOffice') {
+        throw new Error(`PPTX review package did not record the real PDF render derivative: ${JSON.stringify(latest.artifact?.render_derivative)}`);
+      }
     }
     const reviewedPage = latest.pages[1];
     if (latest.annotations.length !== 1 || latest.annotations[0].page_id !== reviewedPage.page_id) {
@@ -444,7 +570,7 @@ async function main() {
     if (existsSync(resolve(board, 'latest-artifact-review-confirmation-ledger.json'))) {
       throw new Error('A new review unexpectedly created a low-level confirmation sidecar.');
     }
-    const latestMcp = await readLatestThroughMcp(home);
+    const latestMcp = await readLatestThroughMcp(dataHome);
     if (latestMcp.package.package_id !== latest.package_id || latestMcp.package.review_state.execution_authorized !== false) {
       throw new Error('MCP latest review does not match the structured package.');
     }
@@ -482,7 +608,7 @@ async function main() {
     const pngBytes = await readFile(pngPath);
     const pngSha = createHash('sha256').update(pngBytes).digest('hex');
     if (pngSha !== manifest.pages[0].sha256 || pngBytes.length !== manifest.pages[0].byte_length) throw new Error('Archived PNG does not match its manifest.');
-    const mcp = await readPageThroughMcp(home, latest.package_id, reviewedPage.page_id);
+    const mcp = await readPageThroughMcp(dataHome, latest.package_id, reviewedPage.page_id);
     if (mcp.sha256 !== pngSha || mcp.bytes !== pngBytes.length || mcp.types.join(',') !== 'text,image') throw new Error('MCP page result does not match the archived PNG.');
 
     process.stdout.write(`${JSON.stringify({
@@ -499,6 +625,7 @@ async function main() {
       visual_bytes: pngBytes.length,
       visual_sha256: pngSha,
       mcp_content_types: mcp.types,
+      ...(scenario === 'pptx' ? { artifact_kind: latest.artifact.artifact_kind, renderer: pptxRenderer } : {}),
       execution_authorized: latest.review_state.execution_authorized,
     }, null, 2)}\n`);
   } catch (error) {
