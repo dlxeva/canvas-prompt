@@ -13,8 +13,11 @@
     "test:python": "python3 -m unittest prompt_package_builder/test_compile_runtime_package.py prompt_package_builder/test_process_ir.py prompt_package_builder/test_evidence_contract.py",
     "test:browser:artifact-review": "node scripts/artifact-review-browser-harness.mjs --scenario entry && node scripts/artifact-review-browser-harness.mjs --scenario handoff && node scripts/artifact-review-browser-harness.mjs --scenario visual-failure && node scripts/artifact-review-browser-harness.mjs --scenario responsive && node scripts/artifact-review-browser-harness.mjs --scenario image",
     "test:browser:round-export": "node scripts/round-export-browser-harness.mjs --scenario all",
+    "test:browser:mermaid": "node scripts/mermaid-browser-harness.mjs",
+    "test:browser:upgrade": "node scripts/upgrade-browser-harness.mjs",
     "verify:version": "node scripts/verify-release-version.mjs",
     "verify:assets": "bash scripts/verify-brand-assets.sh",
-    "verify": "npm run verify:version && npm run verify:assets && npm run test && npm run build && npm run test:python"
+    "verify:deps": "npm --prefix app ls --all",
+    "verify": "npm run verify:version && npm run verify:assets && npm run verify:deps && npm run test && npm run build && npm run test:python"
   }
 }

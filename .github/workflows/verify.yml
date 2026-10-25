@@ -14,6 +14,9 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The upgrade gate reads the pinned old public commit locally.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -42,3 +45,7 @@ jobs:
         run: npm run test:browser:round-export
       - name: Verify existing image and PDF review boundaries
         run: npm run test:browser:artifact-review
+      - name: Verify diagram import compatibility and known fallbacks
+        run: npm run test:browser:mermaid
+      - name: Verify old archive to candidate upgrade and restart
+        run: npm run test:browser:upgrade
