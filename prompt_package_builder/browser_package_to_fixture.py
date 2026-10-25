@@ -713,7 +713,7 @@ def enrich_candidates(generated, captions, objects):
     return enriched
 
 
-def adapt(package):
+def adapt(package, *, archive_root: Path | str | None = None):
     captions = normalized_captions(package)
     events = normalized_events(package)
     objects = raw_objects(package)
@@ -731,7 +731,7 @@ def adapt(package):
     )
     observations = [candidate for candidate in candidates if candidate["assertion_level"] == "observation"]
     semantic = [candidate for candidate in candidates if candidate["assertion_level"] != "observation"]
-    process_ir = compile_process_ir(package, captions, events, objects)
+    process_ir = compile_process_ir(package, captions, events, objects, archive_root=archive_root)
     process_ir["observations"] = observations
     states = object_states(captions, objects, negation_caps, confirmation_caps, selection_caps, markers, versions, rejection_links)
     fusion = [

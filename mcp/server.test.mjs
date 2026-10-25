@@ -8,6 +8,15 @@ import { sessionScopeKey, threadScopeKey } from '../app/conversation-scope.mjs';
 
 process.env.CANVAS_PROMPT_MCP_TEST = '1';
 const { encodeResponse, negotiateProtocolVersion, latestPackageResponse, readTrustedCanvasArtifact, TOOLS, PROJECT_SCOPE_ERROR } = await import('./server.mjs');
+const MAX_LATEST_PACKAGE_TEXT_BYTES = 1_500_000;
+
+function parseBoundedLatestPackage(text) {
+  assert.ok(Buffer.byteLength(text, 'utf8') <= MAX_LATEST_PACKAGE_TEXT_BYTES);
+  const parsed = JSON.parse(text);
+  assert.equal(parsed.delivery.output_truncated, true);
+  assert.equal(parsed.delivery.max_text_bytes, MAX_LATEST_PACKAGE_TEXT_BYTES);
+  return parsed;
+}
 
 test('MCP emits newline-delimited JSON for modern stdio hosts and preserves Content-Length compatibility', () => {
   const message = { jsonrpc: '2.0', id: 1, result: {} };
@@ -68,6 +77,95 @@ test('latest package response exposes an archived editable original only from it
   assert.deepEqual(response.source.editable_source_images, [{
     artifact_object_id: 'obj_img_logo', asset_id: 'file_logo', path: originalPath, mime_type: 'image/png', width: 1200, height: 800,
   }]);
+});
+
+test('latest package fallback hard-caps oversized transcript text and omits it truthfully', () => {
+  const parsed = parseBoundedLatestPackage(latestPackageResponse({
+    meta: { package_id: 'pp_oversized_text' },
+    transcript: { full_text: 'x'.repeat(MAX_LATEST_PACKAGE_TEXT_BYTES + 20_000) },
+  }, '/tmp/project/.canvas-prompt/latest-prompt-package.json'));
+
+  assert.equal('transcript' in parsed.package, false);
+  assert.equal(parsed.delivery.omitted_fields.includes('transcript'), true);
+  assert.equal(parsed.source.package_id, 'pp_oversized_text');
+});
+
+test('latest package fallback applies the hard cap to UTF-8 bytes for Chinese text', () => {
+  const chinese = '中文'.repeat(380_000);
+  assert.ok(Buffer.byteLength(chinese, 'utf8') > chinese.length);
+  const parsed = parseBoundedLatestPackage(latestPackageResponse({
+    meta: { package_id: 'pp_oversized_zh' },
+    transcript: { full_text: chinese },
+  }, '/tmp/project/.canvas-prompt/latest-prompt-package.json'));
+
+  assert.equal('transcript' in parsed.package, false);
+  assert.equal(parsed.delivery.omitted_fields.includes('transcript'), true);
+});
+
+test('latest package fallback omits oversized objects instead of retaining an unbounded array', () => {
+  const parsed = parseBoundedLatestPackage(latestPackageResponse({
+    meta: { package_id: 'pp_oversized_objects' },
+    objects: [{ object_id: 'obj_large', text: 'o'.repeat(MAX_LATEST_PACKAGE_TEXT_BYTES + 20_000) }],
+    timeline: [{ event_id: 'event_large', detail: 'l'.repeat(MAX_LATEST_PACKAGE_TEXT_BYTES + 20_000) }],
+  }, '/tmp/project/.canvas-prompt/latest-prompt-package.json'));
+
+  assert.equal('objects' in parsed.package, false);
+  assert.equal('timeline' in parsed.package, false);
+  assert.equal(parsed.delivery.omitted_fields.includes('objects'), true);
+  assert.equal(parsed.delivery.omitted_fields.includes('timeline'), true);
+});
+
+test('latest package fallback omits oversized transcript segments as one field', () => {
+  const parsed = parseBoundedLatestPackage(latestPackageResponse({
+    meta: { package_id: 'pp_oversized_segments' },
+    transcript: { segments: [{ segment_id: 'seg_large', text: 't'.repeat(MAX_LATEST_PACKAGE_TEXT_BYTES + 20_000) }] },
+  }, '/tmp/project/.canvas-prompt/latest-prompt-package.json'));
+
+  assert.equal('transcript' in parsed.package, false);
+  assert.equal(parsed.delivery.omitted_fields.includes('transcript'), true);
+});
+
+test('latest package fallback omits keyframes it claims to omit while preserving bounded snapshot metadata', () => {
+  const parsed = parseBoundedLatestPackage(latestPackageResponse({
+    meta: { package_id: 'pp_oversized_keyframes' },
+    canvas_snapshot: {
+      final: { format: 'png', width: 100, height: 80, availability: 'unavailable' },
+      keyframes: [{ timestamp_ms: 1, annotation: 'k'.repeat(MAX_LATEST_PACKAGE_TEXT_BYTES + 20_000) }],
+    },
+  }, '/tmp/project/.canvas-prompt/latest-prompt-package.json'));
+
+  assert.equal(parsed.package.canvas_snapshot.keyframe_count, 1);
+  assert.equal(parsed.package.canvas_snapshot.final.availability, 'unavailable');
+  assert.equal('keyframes' in parsed.package.canvas_snapshot, false);
+  assert.equal(parsed.delivery.omitted_fields.includes('canvas_snapshot.keyframes'), true);
+});
+
+test('latest package fallback bounds extreme identity and source indexes for progressive round reads', () => {
+  const packageId = 'pp_extreme_index';
+  const sourcePath = `/tmp/${'s'.repeat(MAX_LATEST_PACKAGE_TEXT_BYTES + 20_000)}/latest-prompt-package.json`;
+  const parsed = parseBoundedLatestPackage(latestPackageResponse({
+    meta: { package_id: packageId, note: 'm'.repeat(MAX_LATEST_PACKAGE_TEXT_BYTES + 20_000) },
+    source_images: Array.from({ length: 2_000 }, (_, index) => ({
+      artifact_object_id: `obj_${index}`,
+      archive_relative_path: `source-images/${'x'.repeat(300)}-${index}.png`,
+      availability: 'missing',
+    })),
+  }, sourcePath));
+
+  assert.equal(parsed.package.meta.package_id, packageId);
+  assert.equal('note' in parsed.package.meta, false);
+  assert.equal(parsed.source.package_id, packageId);
+  assert.deepEqual(parsed.source.round_artifacts, ['prompt_package', 'compact_package', 'process_ir', 'manifest', 'handoff']);
+  assert.equal(parsed.source.raw_package_path, undefined);
+  assert.ok(Buffer.byteLength(JSON.stringify(parsed.package.meta), 'utf8') < 1_024);
+  assert.ok(Buffer.byteLength(JSON.stringify(parsed.source), 'utf8') < 10_000);
+  assert.deepEqual(parsed.delivery.next_read, {
+    tool: 'get_round_artifact',
+    package_id: packageId,
+    artifacts: ['compact_package', 'process_ir', 'prompt_package'],
+  });
+  assert.equal(parsed.delivery.omitted_fields.includes('meta.other_fields'), true);
+  assert.equal(parsed.delivery.omitted_fields.includes('source.editable_source_images'), true);
 });
 
 test('public MCP schema exposes only fixed-scope round reads, never caller paths', () => {

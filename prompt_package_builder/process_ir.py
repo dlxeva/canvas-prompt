@@ -11,12 +11,15 @@ from collections import Counter
 import hashlib
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 try:  # Support both package imports and the existing script-style adapter.
     from prompt_package_builder.legacy_svg_outline import inspect_legacy_svg_outline
+    from prompt_package_builder.snapshot_availability import snapshot_availability
 except ModuleNotFoundError:  # pragma: no cover - exercised by adapter import mode
     from legacy_svg_outline import inspect_legacy_svg_outline
+    from snapshot_availability import snapshot_availability
 
 
 # v0.3 adds bounded, unresolved arrowhead-like observations to the existing
@@ -1913,9 +1916,14 @@ def compile_process_ir(
     captions: list[dict[str, Any]],
     events: list[dict[str, Any]],
     objects: list[dict[str, Any]],
+    *,
+    archive_root: Path | str | None = None,
 ) -> dict[str, Any]:
     """Compile raw browser export facts into a language-neutral IR."""
     meta = package.get("meta") or {}
+    canvas_snapshot = package.get("canvas_snapshot") if isinstance(package.get("canvas_snapshot"), dict) else {}
+    final_snapshot = canvas_snapshot.get("final")
+    canvas_snapshot_state = snapshot_availability(final_snapshot, archive_root=archive_root)
     pointer_track = package.get("pointer_track") or {}
     gestures = pointer_track.get("gestures", []) if isinstance(pointer_track, dict) else []
     event_counts = Counter(event.get("event_type", "unknown") for event in events)
@@ -2040,7 +2048,8 @@ def compile_process_ir(
             "transcript_alignment_status": transcript_alignment_status,
             "has_canvas_actions": bool(events),
             "has_named_objects": named_count > 0,
-            "has_canvas_snapshot": bool((package.get("canvas_snapshot") or {}).get("final")),
+            "has_canvas_snapshot": canvas_snapshot_state == "available",
+            "canvas_snapshot_availability": canvas_snapshot_state,
             "ocr_raw_observation_count": raw_ocr_observation_count,
             "ocr_observation_count": len(ocr_observations),
             "ocr_model_context_policy": OCR_MODEL_CONTEXT_POLICY,
