@@ -241,12 +241,47 @@ test('doctor reports a missing package without treating it as a failure', () => 
   assert.equal(typeof report.asr.endpoint, 'string')
 })
 
-test('setup can prepare only the core runtime without changing a global environment', () => {
+test('setup prepares and reuses only an isolated core runtime', (t) => {
   const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
   const home = mkdtempSync(join(tmpdir(), 'canvas-prompt-setup-home-'))
-  const result = runWithEnvironment({ HOME: home }, 'setup', '--core-only', '--project', project)
+  const isolatedCli = makeCleanCliSource()
+  const source = realpathSync(resolve(isolatedCli, '..', '..'))
+  t.after(() => {
+    for (const directory of [project, home, source]) rmSync(directory, { recursive: true, force: true })
+  })
+  mkdirSync(join(source, 'scripts'))
+  copyFileSync(resolve('scripts', 'bootstrap-runtime.sh'), join(source, 'scripts', 'bootstrap-runtime.sh'))
+  const fakeBin = join(source, 'test-bin')
+  const installReceipt = join(source, 'npm-invocation.json')
+  mkdirSync(fakeBin)
+  // Exercise the real CLI/bootstrap without a network install into the checkout
+  // being tested. The separate clean-install/browser gates verify real packages.
+  const fakeNpm = join(fakeBin, 'npm')
+  writeFileSync(fakeNpm, `#!${process.execPath}
+const fs = require('node:fs');
+const path = require('node:path');
+const args = process.argv.slice(2);
+if (args[0] !== '--prefix' || args[1] !== ${JSON.stringify(join(source, 'app'))} || args[2] !== 'ci') process.exit(2);
+fs.writeFileSync(${JSON.stringify(installReceipt)}, JSON.stringify(args));
+const vite = path.join(args[1], 'node_modules', '.bin', 'vite');
+fs.mkdirSync(path.dirname(vite), { recursive: true });
+fs.copyFileSync(process.execPath, vite);
+fs.chmodSync(vite, 0o755);
+`)
+  chmodSync(fakeNpm, 0o755)
+  const environment = { ...process.env, HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, CANVAS_PROMPT_NPM_INSTALL_ATTEMPTS: '1' }
+  const invoke = () => spawnSync(process.execPath, [isolatedCli, 'setup', '--core-only', '--project', project], { encoding: 'utf8', env: environment })
+  const result = invoke()
   assert.equal(result.status, 0, result.stderr)
-  assert.match(result.stderr, /Canvas Prompt app dependencies|Reusing Canvas Prompt app dependencies/)
+  assert.match(result.stderr, /Installing Canvas Prompt app dependencies/)
+  assert.equal(JSON.parse(readFileSync(installReceipt, 'utf8'))[2], 'ci')
+  assert.equal(existsSync(join(home, '.canvas-prompt', 'runtime', 'mcp', 'server.mjs')), true)
+  assert.equal(existsSync(join(home, '.canvas-prompt', 'runtime', 'asr-venv')), false)
+  rmSync(installReceipt)
+  const reused = invoke()
+  assert.equal(reused.status, 0, reused.stderr)
+  assert.match(reused.stderr, /Reusing Canvas Prompt app dependencies/)
+  assert.equal(existsSync(installReceipt), false)
 })
 
 test('launch guidance preference defaults on and can be changed without a project', () => {
