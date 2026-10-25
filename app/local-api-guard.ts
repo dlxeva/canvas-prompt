@@ -51,6 +51,26 @@ export function authorizeProtectedLocalApi(headers: IncomingHttpHeaders, securit
   return { ok: true }
 }
 
+/** Public launcher probe: exact loopback host; never a cross-site browser read. */
+export function authorizeRuntimeProbe(headers: IncomingHttpHeaders, security: LocalApiSecurity): AccessDecision {
+  if (singleHeader(headers, 'host') !== security.expectedHost
+    || (singleHeader(headers, 'origin') !== undefined && singleHeader(headers, 'origin') !== security.expectedOrigin)
+    || (singleHeader(headers, 'sec-fetch-site') !== undefined && singleHeader(headers, 'sec-fetch-site') !== 'same-origin')) {
+    return { ok: false, status: 403, error: 'Invalid local runtime probe.' }
+  }
+  return { ok: true }
+}
+
+/** Same-origin GET may omit Origin; token and Fetch Metadata remain required. */
+export function authorizeProtectedLocalRead(headers: IncomingHttpHeaders, security: LocalApiSecurity): AccessDecision {
+  const boundary = authorizeRuntimeProbe(headers, security)
+  if (!boundary.ok) return boundary
+  if (singleHeader(headers, 'sec-fetch-site') !== 'same-origin' || !sameToken(security.token, singleHeader(headers, LOCAL_API_TOKEN_HEADER))) {
+    return { ok: false, status: 403, error: 'Invalid local API read session.' }
+  }
+  return { ok: true }
+}
+
 export function normalizedMediaType(value: string | string[] | undefined) {
   const raw = Array.isArray(value) ? value[0] : value
   return String(raw ?? '').split(';', 1)[0].trim().toLowerCase()

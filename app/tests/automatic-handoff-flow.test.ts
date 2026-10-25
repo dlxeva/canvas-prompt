@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 describe('automatic round handoff flow', () => {
   it('treats ending a completed round as archive-and-send, not a separate save action', async () => {
     const source = await readFile(resolve(import.meta.dirname, '..', 'src', 'App.tsx'), 'utf8')
-    const finishTrace = source.slice(source.indexOf('const finishTrace'), source.indexOf('const pollHandoffReceipt'))
+    const finishTrace = source.slice(source.indexOf('const finishTrace'), source.indexOf('const exportPromptPackage'))
 
     expect(finishTrace).toContain('await exportPromptPackage({ packageToExport: pkg, recordingToArchive: audio, editableSourceImages })')
     expect(source).toContain('recordingToArchive = lastRecording')

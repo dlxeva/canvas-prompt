@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const appSourceUrl = new URL('../src/App.tsx', import.meta.url)
-const viteSourceUrl = new URL('../vite.config.ts', import.meta.url)
+const viteSourceUrl = new URL('../canvas-api.ts', import.meta.url)
 
 describe('image paste round-trip contract', () => {
   it('claims one paste event and falls back to the protected native macOS pasteboard bridge', async () => {

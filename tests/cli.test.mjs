@@ -43,9 +43,11 @@ const makeCleanCliSource = ({ appHealthy = false } = {}) => {
     mkdirSync(join(vite, '..'), { recursive: true })
     copyFileSync(process.execPath, vite)
     const hashRoot = realpathSync(source)
-    const hashes = spawnSync('shasum', ['-a', '256', join(hashRoot, 'app', 'package.json'), join(hashRoot, 'app', 'package-lock.json')], { encoding: 'utf8' })
-    assert.equal(hashes.status, 0, hashes.stderr)
-    writeFileSync(join(nodeModules, '.canvas-prompt-dependency-fingerprint'), createHash('sha256').update(hashes.stdout).digest('hex'))
+    const hashes = ['package.json', 'package-lock.json'].map((name) => {
+      const path = join(hashRoot, 'app', name)
+      return `${createHash('sha256').update(readFileSync(path)).digest('hex')}  ${path}\n`
+    }).join('')
+    writeFileSync(join(nodeModules, '.canvas-prompt-dependency-fingerprint'), createHash('sha256').update(hashes).digest('hex'))
   }
   return join(source, 'bin', 'canvas-prompt.mjs')
 }
@@ -101,13 +103,26 @@ test('preflight reports repair or upgrade for an unhealthy existing ASR runtime'
 test('preflight reports unknown when a safe dependency inspection is unavailable', () => {
   const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
   const runtime = join(mkdtempSync(join(tmpdir(), 'canvas-prompt-unknown-runtime-parent-')), 'runtime')
-  const result = spawnSync(process.execPath, [cli, 'preflight', '--project', project], {
-    encoding: 'utf8', env: { ...process.env, PATH: '', CANVAS_PROMPT_RUNTIME_DIR: runtime },
+  const cleanCli = makeCleanCliSource()
+  rmSync(resolve(cleanCli, '..', '..', 'app', 'package-lock.json'))
+  const result = spawnSync(process.execPath, [cleanCli, 'preflight', '--project', project], {
+    encoding: 'utf8', env: { ...process.env, CANVAS_PROMPT_RUNTIME_DIR: runtime },
   })
   assert.equal(result.status, 0, result.stderr)
   const report = JSON.parse(result.stdout)
   assert.equal(report.state, 'unknown')
   assert.match(report.setup_expectation, /do not announce a download size/i)
+  assert.equal(existsSync(runtime), false)
+})
+
+test('preflight inspects dependencies without external hash commands on PATH', () => {
+  const cleanCli = makeCleanCliSource()
+  const runtime = join(mkdtempSync(join(tmpdir(), 'canvas-prompt-no-hash-runtime-')), 'runtime')
+  const result = spawnSync(process.execPath, [cleanCli, 'preflight'], {
+    encoding: 'utf8', env: { ...process.env, PATH: '', CANVAS_PROMPT_RUNTIME_DIR: runtime },
+  })
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(JSON.parse(result.stdout).state, 'first_install')
   assert.equal(existsSync(runtime), false)
 })
 

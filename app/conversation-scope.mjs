@@ -40,7 +40,7 @@ export function sessionScopeKey(sessionId) {
 /**
  * @param {{ projectDir?: string | null, threadId?: string | null, sessionId?: string | null, homeDir?: string, singleBoard?: boolean }} options
  */
-export function resolveConversationScope({ projectDir = null, threadId = null, sessionId = null, homeDir = homedir(), singleBoard = false } = {}) {
+export function resolveConversationScope({ projectDir = null, threadId = null, sessionId = null, homeDir = process.env.CANVAS_PROMPT_DATA_HOME || homedir(), singleBoard = false } = {}) {
   const normalizedProject = typeof projectDir === 'string' && projectDir.trim()
     ? resolve(projectDir)
     : null

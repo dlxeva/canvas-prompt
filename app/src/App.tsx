@@ -1,5 +1,5 @@
 import { Excalidraw, convertToExcalidrawElements, exportToBlob } from '@excalidraw/excalidraw'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { countCanvasElements, diffScene, emptyElementCounts } from './excalidraw-adapter'
 import type { CanvasElement, ElementCounts, TraceEvent } from './excalidraw-adapter'
 import type { ExcalidrawImperativeAPI, NormalizedZoomValue } from '@excalidraw/excalidraw/types'
@@ -12,10 +12,10 @@ import { WindowedAsrSession } from './windowed-asr'
 import type { AsrWindowProgress } from './windowed-asr'
 import { compactTraceToCognitiveEvents, buildPointerTrack } from './excalidraw-cognitive-events'
 import { compilePromptPackage, validatePromptPackage } from './prompt-package-compiler'
-import type { BaselineContext, CanvasObject, EditableSourceImage, Keyframe, PromptPackage, ViewTransformation } from './prompt-package-compiler'
+import type { BaselineContext, CanvasObject, Keyframe, PromptPackage, ViewTransformation } from './prompt-package-compiler'
 import { appendViewTransformation } from './view-transform'
-import { TRANSPORT_SEGMENT_BYTES } from './transport-budget'
-import { splitRawTraceSegments } from './raw-trace-segments'
+import { exportCanvasRound, type EditableSourceUpload, type RoundExportInput } from './round-export'
+import { SessionLifecycle, type SessionState } from './session-lifecycle'
 import { countIncludedBaselineObjects, projectFinalSnapshotElements, projectLiveRoundElementIds } from './baseline-projection'
 import { deriveExportReceiptStatus, isReceiptComplete } from './receipt-state'
 import type { ExportReceiptStatus, HandoffReceipt } from './receipt-state'
@@ -98,9 +98,7 @@ function HeaderIcon({ kind }: { kind: 'upload' | 'record' | 'stop' | 'send' | 'n
   return <svg className="header-icon" viewBox="0 0 24 24" aria-hidden="true">{content}</svg>
 }
 
-type SessionStage = 'idle' | 'starting' | 'recording' | 'compiling' | 'ready' | 'error'
 type ExportStatus = ExportReceiptStatus | 'error'
-type DeliveryMode = 'codex' | 'local' | 'workbuddy'
 type StoredRound = {
   package_id: string
   exported_at: string
@@ -109,11 +107,6 @@ type StoredRound = {
   has_snapshot: boolean
   has_audio: boolean
   handoff?: HandoffReceipt
-}
-
-type EditableSourceUpload = {
-  metadata: EditableSourceImage
-  blob: Blob
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
@@ -230,8 +223,10 @@ function baselineAnchorFromElement(element: CanvasElement): CanvasObject {
 
 export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCaptureStateChange }: { locale: Locale, onLocaleChange: (next: Locale) => void, onOpenArtifactReview?: (file?: File, captureBusy?: boolean) => void, onCaptureStateChange?: (busy: boolean) => void }) {
   const text = ui[locale]
-  const [recording, setRecording] = useState(false)
-  const [startedAt, setStartedAt] = useState<number | null>(null)
+  const [lifecycle] = useState(() => new SessionLifecycle())
+  const { stage: sessionStage, startedAt } = useSyncExternalStore(lifecycle.subscribe, lifecycle.getSnapshot)
+  const recording = sessionStage === 'recording'
+  const pendingExport = useRef<RoundExportInput | null>(null)
   const [events, setEvents] = useState<TraceEvent[]>([])
   const [nowMs, setNowMs] = useState(Date.now())
   const [elementCounts, setElementCounts] = useState<ElementCounts>(emptyElementCounts)
@@ -241,7 +236,6 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
   const [zoomPercent, setZoomPercent] = useState(100)
   const [strokeColor, setStrokeColor] = useState(strokeColors[0])
   const [strokeWidth, setStrokeWidth] = useState(1)
-  const [sessionStage, setSessionStage] = useState<SessionStage>('idle')
   const [workflowMessage, setWorkflowMessage] = useState('画下来，圈出来，需要时说出来。')
   const displayWorkflow = visibleWorkflowMessage(workflowMessage, locale)
   const [asrProgress, setAsrProgress] = useState<AsrWindowProgress>({ completed: 0, pending: 0, failed: 0, active: 0 })
@@ -254,10 +248,7 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
   const [asrRuntimeResolved, setAsrRuntimeResolved] = useState(false)
   const [compiledPackage, setCompiledPackage] = useState<PromptPackage | null>(null)
   const [lastRecording, setLastRecording] = useState<RecordingResult | null>(null)
-  const [transcription, setTranscription] = useState<TranscriptionResult | null>(null)
   const [exportStatus, setExportStatus] = useState<ExportStatus>('idle')
-  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>('local')
-  const [handoffReceipt, setHandoffReceipt] = useState<HandoffReceipt | null>(null)
   const [storedRounds, setStoredRounds] = useState<StoredRound[]>([])
   const [storageOpen, setStorageOpen] = useState(false)
   const [storageLoading, setStorageLoading] = useState(false)
@@ -296,7 +287,6 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
   const stateFrameTimer = useRef<number | null>(null)
   const stateFrameMaxTimer = useRef<number | null>(null)
   const activeSessionId = useRef(0)
-  const activeHandoffPackageId = useRef<string | null>(null)
   const sessionLocale = useRef<Locale>(locale)
 
   useEffect(() => {
@@ -309,9 +299,8 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
 
   useEffect(() => {
     void fetch('/api/runtime-identity', { cache: 'no-store' })
-      .then(async (response) => response.ok ? await response.json() as { delivery_mode?: DeliveryMode; asr_url?: string | null; asr_enabled?: boolean } : null)
+      .then(async (response) => response.ok ? await response.json() as { asr_url?: string | null; asr_enabled?: boolean } : null)
       .then((identity) => {
-        if (identity?.delivery_mode === 'codex' || identity?.delivery_mode === 'local' || identity?.delivery_mode === 'workbuddy') setDeliveryMode(identity.delivery_mode)
         if (typeof identity?.asr_url === 'string') setAsrEndpoint(identity.asr_url)
         setAsrPreparing(identity?.asr_enabled !== false)
       })
@@ -387,6 +376,7 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
   useEffect(() => {
     if (!recording || !startedAt) return
     const timer = window.setInterval(() => {
+      if (lifecycle.getSnapshot().stage !== 'recording') return
       const previous = lastPointer.current
       if (!previous) return
       const now = Date.now()
@@ -400,101 +390,105 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
   }, [recording, startedAt])
 
   const beginTrace = async () => {
-    if (recording || sessionStage === 'compiling' || asrPreparing) return
-    const startElements = (apiRef.current ?? api)?.getSceneElementsIncludingDeleted() ?? []
-    setSessionStage('starting')
-    setWorkflowMessage('正在准备本次推演…')
-    setAsrProgress({ completed: 0, pending: 0, failed: 0, active: 0 })
-    const baseline = startElements
-    const liveBaseline = baseline.filter((element) => !element.isDeleted)
-    baselineObjectIds.current = new Set(liveBaseline.map((element) => element.id))
-    baselineAnchors.current = liveBaseline.map(baselineAnchorFromElement)
-    versions.current = new Map(baseline.map((element) => [element.id, {
-      version: element.version,
-      isDeleted: element.isDeleted,
-      bounds: { x: element.x, y: element.y, width: element.width, height: element.height },
-    }]))
-    artifactImageIds.current = new Set(liveBaseline.filter((element) => element.type === 'image').map((element) => element.id))
-    const sceneSummary = liveBaseline
-      .map((element) => ({ id: element.id, type: element.type, version: element.version, x: element.x, y: element.y, width: element.width, height: element.height }))
-      .sort((left, right) => left.id.localeCompare(right.id))
-    const digestSource = new TextEncoder().encode(JSON.stringify(sceneSummary))
-    const digest = await crypto.subtle.digest('SHA-256', digestSource)
-    const sceneSha256 = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('')
-    baselineContext.current = {
-      scene_sha256: sceneSha256,
-      object_count: liveBaseline.length,
-      image_count: artifactImageIds.current.size,
-      included_object_count: 0,
-      status: liveBaseline.length === 0 ? 'none' : 'omitted',
-    }
-    trace.current = []
-    activeSessionId.current += 1
-    if (stateFrameTimer.current !== null) window.clearTimeout(stateFrameTimer.current)
-    if (stateFrameMaxTimer.current !== null) window.clearTimeout(stateFrameMaxTimer.current)
-    stateFrameTimer.current = null
-    stateFrameMaxTimer.current = null
-    stateFrames.current = []
-    viewTransformations.current = []
-    const initialView = (apiRef.current ?? api)?.getAppState()
-    lastViewState.current = initialView ? {
-      timestamp_ms: 0,
-      zoom: initialView.zoom.value,
-      scroll_x: initialView.scrollX,
-      scroll_y: initialView.scrollY,
-    } : null
-    setEvents([])
-    pointerSamples.current = []
-    lastPointer.current = null
-    lastPointerSampleAt.current = 0
-    setCompiledPackage(null)
-    setLastRecording(null)
-    setTranscription(null)
-    activeHandoffPackageId.current = null
-    setExportStatus('idle')
-    setImageNotice(null)
-    const start = Date.now()
-    const recordingLocale = locale
-    sessionLocale.current = recordingLocale
-    setStartedAt(start)
-    setNowMs(start)
-    setRecording(true)
-    audioRunning.current = false
-    const canTranscribe = await refreshAsrAvailability()
+    if (asrPreparing || exportStatus === 'exporting') return
+    const generation = lifecycle.begin()
+    if (generation === null) return
     try {
-      await recorderRef.current?.start()
-      audioRunning.current = true
-      const stream = recorderRef.current?.createInputStreamClone()
-      if (canTranscribe && stream && typeof MediaRecorder !== 'undefined') {
-        windowedAsrRef.current = new WindowedAsrSession({
-          stream,
-          language: recordingLocale === 'zh' ? 'zh-CN' : 'en',
-          endpoint: `${asrEndpoint}/transcribe?backend=whisper`,
-          windowMs: 25_000,
-          overlapMs: 3_000,
-          onProgress: setAsrProgress,
-        })
-        windowedAsrRef.current.start()
-        transcriberRef.current = null
-        setWorkflowMessage('推演中 · 画、圈、移动，也可以直接说。语音会在后台分段整理。')
-      } else if (canTranscribe) {
-        // Fallback for browsers without a second MediaRecorder stream.
-        transcriberRef.current = new VoiceTranscriber({ strategy: 'local-whisper', language: recordingLocale, asrServerUrl: asrEndpoint })
-        await transcriberRef.current.start()
-        setWorkflowMessage('推演中 · 画、圈、移动，也可以直接说。')
-      } else {
-        transcriberRef.current = null
-        windowedAsrRef.current = null
-        setWorkflowMessage('推演中 · 画、圈、移动。当前没有可用语音转写。')
+      const startElements = (apiRef.current ?? api)?.getSceneElementsIncludingDeleted() ?? []
+      setWorkflowMessage('正在准备本次推演…')
+      setAsrProgress({ completed: 0, pending: 0, failed: 0, active: 0 })
+      const baseline = startElements
+      const liveBaseline = baseline.filter((element) => !element.isDeleted)
+      baselineObjectIds.current = new Set(liveBaseline.map((element) => element.id))
+      baselineAnchors.current = liveBaseline.map(baselineAnchorFromElement)
+      versions.current = new Map(baseline.map((element) => [element.id, {
+        version: element.version,
+        isDeleted: element.isDeleted,
+        bounds: { x: element.x, y: element.y, width: element.width, height: element.height },
+      }]))
+      artifactImageIds.current = new Set(liveBaseline.filter((element) => element.type === 'image').map((element) => element.id))
+      const sceneSummary = liveBaseline
+        .map((element) => ({ id: element.id, type: element.type, version: element.version, x: element.x, y: element.y, width: element.width, height: element.height }))
+        .sort((left, right) => left.id.localeCompare(right.id))
+      const digestSource = new TextEncoder().encode(JSON.stringify(sceneSummary))
+      const digest = await crypto.subtle.digest('SHA-256', digestSource)
+      const sceneSha256 = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('')
+      baselineContext.current = {
+        scene_sha256: sceneSha256,
+        object_count: liveBaseline.length,
+        image_count: artifactImageIds.current.size,
+        included_object_count: 0,
+        status: liveBaseline.length === 0 ? 'none' : 'omitted',
       }
-    } catch {
-      setWorkflowMessage('推演中 · 麦克风不可用，但画布过程仍会被记录。')
+      trace.current = []
+      activeSessionId.current += 1
+      if (stateFrameTimer.current !== null) window.clearTimeout(stateFrameTimer.current)
+      if (stateFrameMaxTimer.current !== null) window.clearTimeout(stateFrameMaxTimer.current)
+      stateFrameTimer.current = null
+      stateFrameMaxTimer.current = null
+      stateFrames.current = []
+      viewTransformations.current = []
+      const initialView = (apiRef.current ?? api)?.getAppState()
+      lastViewState.current = initialView ? {
+        timestamp_ms: 0,
+        zoom: initialView.zoom.value,
+        scroll_x: initialView.scrollX,
+        scroll_y: initialView.scrollY,
+      } : null
+      setEvents([])
+      pointerSamples.current = []
+      lastPointer.current = null
+      lastPointerSampleAt.current = 0
+      setCompiledPackage(null)
+      pendingExport.current = null
+      setLastRecording(null)
+      setExportStatus('idle')
+      setImageNotice(null)
+      const start = Date.now()
+      const recordingLocale = locale
+      sessionLocale.current = recordingLocale
+      setNowMs(start)
+      audioRunning.current = false
+      const canTranscribe = await refreshAsrAvailability()
+      try {
+        await recorderRef.current?.start()
+        audioRunning.current = true
+        const stream = recorderRef.current?.createInputStreamClone()
+        if (canTranscribe && stream && typeof MediaRecorder !== 'undefined') {
+          windowedAsrRef.current = new WindowedAsrSession({
+            stream,
+            language: recordingLocale === 'zh' ? 'zh-CN' : 'en',
+            endpoint: `${asrEndpoint}/transcribe?backend=whisper`,
+            windowMs: 25_000,
+            overlapMs: 3_000,
+            onProgress: setAsrProgress,
+          })
+          windowedAsrRef.current.start()
+          transcriberRef.current = null
+          setWorkflowMessage('推演中 · 画、圈、移动，也可以直接说。语音会在后台分段整理。')
+        } else if (canTranscribe) {
+          // Fallback for browsers without a second MediaRecorder stream.
+          transcriberRef.current = new VoiceTranscriber({ strategy: 'local-whisper', language: recordingLocale, asrServerUrl: asrEndpoint })
+          await transcriberRef.current.start()
+          setWorkflowMessage('推演中 · 画、圈、移动，也可以直接说。')
+        } else {
+          transcriberRef.current = null
+          windowedAsrRef.current = null
+          setWorkflowMessage('推演中 · 画、圈、移动。当前没有可用语音转写。')
+        }
+      } catch {
+        setWorkflowMessage('推演中 · 麦克风不可用，但画布过程仍会被记录。')
+      }
+      lifecycle.record(generation, start)
+    } catch (error) {
+      lifecycle.settle(generation, 'error')
+      setWorkflowMessage(`准备失败：${error instanceof Error ? error.message : '请重试'}`)
     }
-    setSessionStage('recording')
   }
 
   const finishTrace = async () => {
-    if (!recording || !startedAt) return
+    const generation = lifecycle.finish()
+    if (generation === null) return
     // A state frame represents a settled in-session state; do not let a queued
     // idle timer race the final snapshot after the user ends the round.
     activeSessionId.current += 1
@@ -502,11 +496,15 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
     if (stateFrameMaxTimer.current !== null) window.clearTimeout(stateFrameMaxTimer.current)
     stateFrameTimer.current = null
     stateFrameMaxTimer.current = null
-    setRecording(false)
     setEvents([...trace.current])
-    setSessionStage('compiling')
     setWorkflowMessage('正在结束录音…')
     try {
+      // Freeze the clicked end state before awaiting audio/ASR or image work.
+      // Later edits belong to a subsequent round, never this immutable export.
+      const currentApi = apiRef.current ?? api
+      const elements = structuredClone([...(currentApi?.getSceneElements() ?? [])])
+      const finalFiles = { ...(currentApi?.getFiles() ?? {}) }
+      const finalAppState = { ...currentApi?.getAppState() }
       let audio: RecordingResult | null = null
       const backgroundSession = windowedAsrRef.current
       const backgroundTranscript = backgroundSession?.stop() ?? null
@@ -553,12 +551,10 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
           transcript = null
         }
       }
-      setTranscription(transcript)
       setWorkflowMessage('正在整理画布和标记…')
-      const elements = api?.getSceneElements() ?? []
       const editableSourceImages = await collectEditableSourceImages(
         elements,
-        (api?.getFiles() ?? null) as Record<string, { dataURL?: string; mimeType?: string }> | null,
+        finalFiles as Record<string, { dataURL?: string; mimeType?: string }>,
       )
       const baseArtifacts: CanvasObject[] = elements
         .filter((element) => artifactImageIds.current.has(element.id) && element.type === 'image' && !element.isDeleted)
@@ -596,7 +592,7 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
           }
         : undefined
       const roundElements = elements.filter((element) => currentRoundIds.has(element.id))
-      const screenshotBlob = await exportToBlob({ elements: finalSnapshotElements, appState: api?.getAppState(), files: api?.getFiles() ?? null, mimeType: 'image/png', exportPadding: 24 })
+      const screenshotBlob = await exportToBlob({ elements: finalSnapshotElements, appState: finalAppState, files: finalFiles, mimeType: 'image/png', exportPadding: 24 })
       const [screenshot, snapshotSize] = await Promise.all([blobToDataUrl(screenshotBlob), imageDimensions(screenshotBlob)])
       const exportedSceneBounds = sceneBounds(finalSnapshotElements)
       setWorkflowMessage('正在准备本轮上下文…')
@@ -638,17 +634,15 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
       // Ending a session is the user's one completion action. Persisting the
       // package is an internal reliability step of sending it, never a second
       // user task they must discover after the canvas has stopped recording.
-      setWorkflowMessage(transcript?.text
-        ? '正在整理画布和标记…'
-        : '正在整理画布和标记…')
+      setWorkflowMessage('正在整理画布和标记…')
       // `setLastRecording(audio)` does not synchronously update React state.
       // Pass this round's finished recording explicitly so the durable archive
       // cannot accidentally omit it while its transcript is retained.
       await exportPromptPackage({ packageToExport: pkg, recordingToArchive: audio, editableSourceImages })
-      setSessionStage('ready')
+      lifecycle.settle(generation, 'ready')
     } catch (error) {
       setWorkflowMessage(`整理失败：${error instanceof Error ? error.message : '请重试'}`)
-      setSessionStage('error')
+      lifecycle.settle(generation, 'error')
     } finally {
       audioRunning.current = false
       transcriberRef.current = null
@@ -656,36 +650,11 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
     }
   }
 
-  const pollHandoffReceipt = async (packageId: string) => {
-    activeHandoffPackageId.current = packageId
-    const deadline = Date.now() + 80_000
-    while (Date.now() < deadline && activeHandoffPackageId.current === packageId) {
-      await new Promise((resolvePoll) => window.setTimeout(resolvePoll, 1_000))
-      try {
-        const response = await fetch('/api/rounds', { cache: 'no-store' })
-        if (!response.ok) continue
-        const result = await response.json() as { rounds?: StoredRound[] }
-        const round = result.rounds?.find((item) => item.package_id === packageId)
-        const receipt = round?.handoff ?? null
-        const status = deriveExportReceiptStatus(receipt)
-        if (receipt) setHandoffReceipt(receipt)
-        if (status === 'delivered' || status === 'failed') {
-          setExportStatus(status)
-          setWorkflowMessage(`本轮内容已整理完成。在当前对话输入「${CANONICAL_CONTINUATION_COMMAND}」。`)
-          return
-        }
-      } catch {
-        // The durable handoff receipt remains the source of truth. A transient
-        // polling failure must not downgrade an already accepted round.
-      }
-    }
-  }
-
   const exportPromptPackage = async ({
     retryHandoff = false,
     packageToExport = compiledPackage,
     recordingToArchive = lastRecording,
-    editableSourceImages = [],
+    editableSourceImages,
   }: {
     retryHandoff?: boolean
     packageToExport?: PromptPackage | null
@@ -693,71 +662,19 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
     editableSourceImages?: EditableSourceUpload[]
   } = {}) => {
     if (!packageToExport) return
-    setExportStatus('exporting')
-    setHandoffReceipt(null)
-    setWorkflowMessage('正在归档本轮上下文…')
-    // Replay is a high-frequency local archive, while the Prompt Package is
-    // compact AI context. Upload replay in bounded checkpoint segments before
-    // the final package so a long continuous session never has to fit through
-    // the 32MB JSON request as one atomic body.
-    const rawTraceSegments = splitRawTraceSegments(trace.current)
-    const payload = {
-      ...packageToExport,
-      source: { canvas: 'excalidraw', audio: recordingToArchive ? { mime_type: recordingToArchive.blob.type, duration_ms: recordingToArchive.duration } : null },
+    // Retain the exact round's media and trace for retries after partial upload.
+    // React state for the recorder/package may update after this callback.
+    if (pendingExport.current?.packageToExport.meta.package_id !== packageToExport.meta.package_id) {
+      pendingExport.current = {
+        packageToExport, recordingToArchive, editableSourceImages: editableSourceImages ?? [],
+        rawTrace: structuredClone(trace.current),
+      }
     }
-
+    setExportStatus('exporting')
+    setWorkflowMessage('正在归档本轮上下文…')
     try {
-      for (const sourceImage of editableSourceImages) {
-        const response = await protectedLocalApiFetch(`/api/round-source-image/${packageToExport.meta.package_id}/${encodeURIComponent(sourceImage.metadata.artifact_object_id)}`, {
-          method: 'POST',
-          headers: { 'content-type': sourceImage.metadata.mime_type },
-          body: sourceImage.blob,
-        })
-        if (!response.ok) throw new Error('原图未能保存到本轮档案')
-      }
-      if (recordingToArchive) {
-        const audioResponse = await protectedLocalApiFetch(`/api/round-audio/${packageToExport.meta.package_id}`, {
-          method: 'POST',
-          headers: { 'content-type': recordingToArchive.blob.type || 'audio/webm' },
-          body: recordingToArchive.blob,
-        })
-        if (!audioResponse.ok) throw new Error('本轮录音未能保存到本地档案')
-      }
-      for (const [index, segment] of rawTraceSegments.entries()) {
-        const traceResponse = await protectedLocalApiFetch(`/api/round-trace-segment/${packageToExport.meta.package_id}/${String(index + 1).padStart(6, '0')}`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(segment),
-        })
-        if (!traceResponse.ok) throw new Error('本轮过程快照未能保存到本地档案')
-      }
-      const packageBody = new Blob([JSON.stringify(payload)], { type: 'application/json' })
-      const usesPackageSegments = packageBody.size > TRANSPORT_SEGMENT_BYTES
-      if (usesPackageSegments) {
-        let sequence = 1
-        for (let offset = 0; offset < packageBody.size; offset += TRANSPORT_SEGMENT_BYTES) {
-          const segmentResponse = await protectedLocalApiFetch(`/api/prompt-package-segment/${packageToExport.meta.package_id}/${String(sequence).padStart(6, '0')}`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/octet-stream' },
-            body: packageBody.slice(offset, offset + TRANSPORT_SEGMENT_BYTES),
-          })
-          if (!segmentResponse.ok) throw new Error('本轮上下文检查点未能保存到本地档案')
-          sequence += 1
-        }
-      }
-      const response = await protectedLocalApiFetch('/api/prompt-package', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', ...(retryHandoff ? { 'x-canvas-prompt-retry-handoff': '1' } : {}) },
-        // Raw scene lifecycle is archived separately by the local service.
-        // It is intentionally not retained inside the model-facing package.
-        body: usesPackageSegments
-          ? JSON.stringify({ segmented_package: true, package_id: packageToExport.meta.package_id })
-          : JSON.stringify(payload),
-      })
-      const result = await response.json().catch(() => null) as { ok?: boolean; error?: string; roundPath?: string; engine?: { error?: string }; handoff?: HandoffReceipt } | null
-      if (!response.ok || !result?.ok) throw new Error(result?.error || result?.engine?.error || `本轮上下文未能归档（${response.status}）`)
+      const result = await exportCanvasRound({ ...pendingExport.current, retryHandoff })
       const receiptStatus = deriveExportReceiptStatus(result.handoff)
-      setHandoffReceipt(result.handoff ?? null)
       setExportStatus(receiptStatus)
       setWorkflowMessage(`本轮内容已整理完成。在当前对话输入「${CANONICAL_CONTINUATION_COMMAND}」。`)
       if (storageOpen) void loadStoredRounds()
@@ -771,7 +688,7 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
   const loadStoredRounds = async () => {
     setStorageLoading(true)
     try {
-      const response = await fetch('/api/rounds')
+      const response = await protectedLocalApiFetch('/api/rounds', { cache: 'no-store' })
       if (!response.ok) throw new Error('无法读取本地档案')
       const result = await response.json() as { rounds?: StoredRound[] }
       setStoredRounds(result.rounds ?? [])
@@ -810,9 +727,13 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
     canvasApi.updateScene({ appState: { currentItemStrokeColor: strokeColor, currentItemStrokeWidth: strokeWidth } })
   }
 
-  const importImageFile = async (file: File | undefined) => {
+  const importImageFile = async (file: File | undefined, importContext: SessionState = lifecycle.getSnapshot()) => {
     const canvasApi = apiRef.current ?? api
     if (!file) return
+    if (!lifecycle.canImport(importContext)) {
+      setImageNotice('正在整理本轮，请完成后再导入。')
+      return
+    }
     if (isArtifactReviewFile(file)) {
       if (onOpenArtifactReview) onOpenArtifactReview(file, captureBusy)
       else setImageNotice('当前入口无法打开 PDF/PPTX 交互审阅，请重新打开 Canvas Prompt 后再试。')
@@ -857,6 +778,11 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
         }),
       ])
       if (!dimensions.width || !dimensions.height) throw new Error('图片尺寸无效')
+      if (!lifecycle.canImport(importContext)) {
+        setImageNotice('推演阶段已变化，请重新导入图片。')
+        return
+      }
+      if (importContext.stage !== 'recording' && !lifecycle.reset()) return
 
       const fileId = `canvas-image-${crypto.randomUUID()}`
       const maxSide = 720
@@ -876,7 +802,7 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
       const imageElement = convertToExcalidrawElements([{
         type: 'image', fileId: fileId as never, x, y, width, height,
       }])
-      if (recording) {
+      if (importContext.stage === 'recording') {
         for (const element of imageElement) artifactImageIds.current.add(element.id)
       }
       canvasApi.updateScene({ elements: [...canvasApi.getSceneElementsIncludingDeleted(), ...imageElement] })
@@ -884,10 +810,9 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
       setActiveTool('selection')
       // A newly imported review substrate must not inherit the previous
       // round's ready-to-send state.
-      if (!recording) {
+      if (importContext.stage !== 'recording') {
         setCompiledPackage(null)
         setExportStatus('idle')
-        setSessionStage('idle')
       }
       setImageNotice(`已导入「${file.name}」，现在可以圈画和说明。`)
     } catch (error) {
@@ -906,6 +831,8 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
   }
 
   const importDroppedImageSource = async (source: string) => {
+    const importContext = lifecycle.getSnapshot()
+    if (!lifecycle.canImport(importContext)) return
     try {
       if (!/^data:image\//i.test(source) && !/^(https?:|blob:|app:|attachment:)/i.test(source)) {
         throw new Error('拖拽内容不是可读取的图片')
@@ -916,19 +843,21 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
       const mimeType = blob.type || (/^data:image\/([^;,]+)/i.exec(source)?.[1] ? `image/${/^data:image\/([^;,]+)/i.exec(source)?.[1]}` : '')
       if (!mimeType.startsWith('image/')) throw new Error('拖拽内容不是图片')
       const extension = mimeType.split('/')[1]?.replace('svg+xml', 'svg') || 'png'
-      await importImageFile(new File([blob], `聊天图片.${extension}`, { type: mimeType }))
+      await importImageFile(new File([blob], `聊天图片.${extension}`, { type: mimeType }), importContext)
     } catch (error) {
       setImageNotice(`无法直接读取聊天图片：${error instanceof Error ? error.message : '请使用“导入图片”'}`)
     }
   }
 
   const importNativeMacImage = async (board: 'general' | 'drag') => {
+    const importContext = lifecycle.getSnapshot()
+    if (!lifecycle.canImport(importContext)) return false
     try {
       const response = await protectedLocalApiFetch(`/api/native-pasteboard-image?board=${board}`, { method: 'POST', cache: 'no-store' })
       if (!response.ok) return false
       const blob = await response.blob()
       if (!blob.type.startsWith('image/')) return false
-      await importImageFile(new File([blob], 'Codex 图片.png', { type: blob.type }))
+      await importImageFile(new File([blob], 'Codex 图片.png', { type: blob.type }), importContext)
       return true
     } catch {
       return false
@@ -1093,7 +1022,7 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
       if (appState.currentItemStrokeColor) setStrokeColor(appState.currentItemStrokeColor)
       if (appState.currentItemStrokeWidth) setStrokeWidth(appState.currentItemStrokeWidth)
     }
-    if (!recording || !startedAt) return
+    if (lifecycle.getSnapshot().stage !== 'recording' || !startedAt) return
 
     if (appState) {
       const nextView = {
@@ -1119,13 +1048,11 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
 
   const latestEvent = events.at(-1)
   const hasReceipt = exportStatus !== 'error' && isReceiptComplete(exportStatus)
-  const canRetryHandoff = false
   const exportLabel = text.export
-  const retryExportLabel = text.retryExport
   const receiptText = text.archived
 
   const capturePointer = (event: React.PointerEvent<HTMLElement>) => {
-    if (!recording || !startedAt || !api) return
+    if (lifecycle.getSnapshot().stage !== 'recording' || !startedAt || !api) return
     // Excalidraw handles pointer events internally and can stop bubbling.
     // Capture at the canvas boundary so a natural hover remains evidence even
     // when no canvas element changes; ignore our own toolbar controls.
@@ -1183,12 +1110,11 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
             </div>
           ) : sessionStage === 'ready' && !hasReceipt ? (
             <button className="button primary session-action" onClick={() => void exportPromptPackage()} disabled={exportStatus === 'exporting'}>
-              <HeaderIcon kind="send" /><span>{exportStatus === 'exporting' ? text.sending : exportStatus === 'error' ? retryExportLabel : exportLabel}</span>
+              <HeaderIcon kind="send" /><span>{exportStatus === 'exporting' ? text.sending : exportStatus === 'error' ? text.retryExport : exportLabel}</span>
             </button>
           ) : sessionStage === 'ready' && hasReceipt ? (
             <>
               <span className={`receipt-status receipt-${exportStatus}`} role="status">{receiptText}</span>
-              {canRetryHandoff ? <button className="button icon-button" onClick={() => void exportPromptPackage({ retryHandoff: true })} aria-label={retryExportLabel} title={retryExportLabel}><HeaderIcon kind="send" /></button> : null}
               <button className="button primary session-action" onClick={() => void beginTrace()} disabled={asrPreparing}><HeaderIcon kind="next" /><span>{text.next}</span></button>
             </>
           ) : asrPreparing ? (
@@ -1196,7 +1122,7 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
           ) : (
             <button className="button primary session-action" onClick={() => void beginTrace()} disabled={sessionStage === 'starting' || asrPreparing}><HeaderIcon kind="record" /><span>{sessionStage === 'starting' || asrPreparing ? text.preparing : text.start}</span></button>
           )}
-          <button className="button icon-button image-import" type="button" disabled={imageImporting} onClick={() => imageInputRef.current?.click()} aria-label={imageImporting ? text.importing : text.importImage} title={imageImporting ? text.importing : text.importImage}>
+          <button className="button icon-button image-import" type="button" disabled={imageImporting || sessionStage === 'starting' || sessionStage === 'compiling'} onClick={() => imageInputRef.current?.click()} aria-label={imageImporting ? text.importing : text.importImage} title={imageImporting ? text.importing : text.importImage}>
             <HeaderIcon kind="upload" />
           </button>
           <div className="more-menu">
@@ -1305,6 +1231,7 @@ export default function App({ locale, onLocaleChange, onOpenArtifactReview, onCa
           </>}
         </nav>
         <Excalidraw
+          viewModeEnabled={sessionStage === 'starting' || sessionStage === 'compiling'}
           excalidrawAPI={bindCanvasApi}
           langCode={locale === 'zh' ? 'zh-CN' : 'en'}
           onChange={handleChange}

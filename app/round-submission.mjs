@@ -1,6 +1,6 @@
 import { mkdir, readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { archiveCompiledRound, updateRoundManifest } from './round-archive.mjs'
+import { archiveCompiledRound, contentSha256, RoundSubmissionError, updateRoundManifest } from './round-archive.mjs'
 import { withRoundLock, writeFileAtomically } from './round-store.mjs'
 
 const inFlightSubmissions = new Map()
@@ -47,8 +47,13 @@ async function submitImmutableRoundOnce({
   const { roundPath } = archiveOptions
 
   if (archived.reused) {
+    // A successful immutable round may have lost only its derived archive
+    // metadata during a crash. The callback is required to be idempotent and
+    // to fill only missing files; artifacts is intentionally null here.
+    await persistArchive(archived)
     const existingHandoff = await readExistingHandoff(roundPath)
-    const canExplicitlyRetry = retryHandoff && archived.engine?.ok === true && existingHandoff?.accepted !== true
+    const failedBeforeAcceptance = existingHandoff?.accepted === false && ['failed', 'timed_out'].includes(existingHandoff?.status)
+    const canExplicitlyRetry = retryHandoff && archived.engine?.ok === true && failedBeforeAcceptance
     if (!canExplicitlyRetry) {
       return { ...archived, handoff: existingHandoff, handoffStarted: false }
     }
@@ -70,13 +75,18 @@ async function submitImmutableRoundOnce({
 /** Coalesce duplicate POSTs that arrive before the first immutable write commits. */
 export async function submitImmutableRound(options) {
   const key = resolve(options.archiveOptions.roundPath)
+  const contentSha = contentSha256(options.archiveOptions.serializedPackage)
   const active = inFlightSubmissions.get(key)
-  if (active) return await active
+  if (active) {
+    if (active.contentSha !== contentSha) throw new RoundSubmissionError('ROUND_CONTENT_CONFLICT', '同一轮的内容已变化。请开始新一轮后重新发送。')
+    return await active.work
+  }
   const work = withRoundLock(key, () => submitImmutableRoundOnce(options))
-  inFlightSubmissions.set(key, work)
+  const entry = { work, contentSha }
+  inFlightSubmissions.set(key, entry)
   try {
     return await work
   } finally {
-    if (inFlightSubmissions.get(key) === work) inFlightSubmissions.delete(key)
+    if (inFlightSubmissions.get(key) === entry) inFlightSubmissions.delete(key)
   }
 }
