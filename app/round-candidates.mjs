@@ -87,4 +87,3 @@ export async function newestSuccessfulRound(roundsDir, excludedPackageId = null)
   }
   return null
 }
-
