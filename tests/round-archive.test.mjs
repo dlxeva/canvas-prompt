@@ -117,6 +117,18 @@ test('reused success repairs missing or stale latest but cannot roll latest back
   assert.deepEqual(await readFile(latestPackagePath), roundB)
 })
 
+test('latest repair skips a tombstoned round left behind by an interrupted deletion', async (t) => {
+  const root = await mkdtemp(resolve(tmpdir(), 'canvas-latest-tombstone-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await archive(root, 'round_a', true)
+  await archive(root, 'round_b', true)
+  await mkdir(resolve(root, 'deleted-rounds'))
+  await writeFile(resolve(root, 'deleted-rounds/round_b.json'), '')
+  await rm(resolve(root, 'latest-prompt-package.json'))
+  await archive(root, 'round_a', true)
+  assert.deepEqual(await readFile(resolve(root, 'latest-prompt-package.json')), await readFile(resolve(root, 'rounds/round_a/prompt-package.json')))
+})
+
 test('raw-only recovery retains original write time and cannot displace a later successful round', async (t) => {
   const root = await mkdtemp(resolve(tmpdir(), 'canvas-old-raw-recovery-'))
   t.after(() => rm(root, { recursive: true, force: true }))

@@ -1,26 +1,14 @@
-import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
+import { mkdir, readFile, rm, stat } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { withLatestLock, writeFileAtomically } from './round-store.mjs'
+import { contentSha256, newestSuccessfulRound } from './round-candidates.mjs'
+export { contentSha256 } from './round-candidates.mjs'
 
 export class RoundSubmissionError extends Error {
   constructor(code, message) {
     super(message)
     this.code = code
   }
-}
-
-function canonicalValue(value) {
-  if (Array.isArray(value)) return value.map(canonicalValue)
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalValue(value[key])]))
-  }
-  return value
-}
-
-export function contentSha256(serializedPackage) {
-  const parsed = JSON.parse(serializedPackage)
-  return createHash('sha256').update(JSON.stringify(canonicalValue(parsed))).digest('hex')
 }
 
 async function readJson(path) {
@@ -63,54 +51,6 @@ async function readPackage(path) {
   } catch {
     throw new RoundSubmissionError('ROUND_INCOMPLETE', '本轮原始 Prompt Package 损坏，不能覆盖归档。')
   }
-}
-
-async function newestSuccessfulRound(roundsDir) {
-  const entries = await readdir(roundsDir, { withFileTypes: true }).catch((error) => {
-    if (error?.code === 'ENOENT') return []
-    throw error
-  })
-  const candidates = []
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    try {
-      const roundPath = resolve(roundsDir, entry.name)
-      const manifest = await readJson(resolve(roundPath, 'round.json'))
-      if (manifest?.engine?.ok !== true) continue
-      candidates.push({
-        packageId: entry.name,
-        exportedAt: String(manifest.exported_at ?? ''),
-        roundPath,
-        manifest,
-      })
-    } catch (error) {
-      // A damaged candidate must never become latest, but it must not prevent
-      // a different valid successful round from being selected.
-      if (error?.code === 'ROUND_INCOMPLETE') continue
-      throw error
-    }
-  }
-  candidates.sort((left, right) => {
-    const byTime = right.exportedAt.localeCompare(left.exportedAt)
-    return byTime || right.packageId.localeCompare(left.packageId)
-  })
-  // Only read the newest viable raw package. Reading every historical raw
-  // package on every save makes archive cost grow with the user's lifetime data.
-  for (const candidate of candidates) {
-    try {
-      const record = await readPackage(resolve(candidate.roundPath, 'prompt-package.json'))
-      if (!record) continue
-      if (typeof candidate.manifest.content_sha256 === 'string' && candidate.manifest.content_sha256 !== record.contentSha) continue
-      const id = record.value?.meta?.package_id
-      if (typeof id === 'string' && id !== candidate.packageId) continue
-      if (candidate.manifest.package_id && candidate.manifest.package_id !== candidate.packageId) continue
-      return { ...candidate, packageContents: record.raw }
-    } catch (error) {
-      if (error?.code === 'ROUND_INCOMPLETE') continue
-      throw error
-    }
-  }
-  return null
 }
 
 async function repairLatest({ roundPath, latestPackagePath }) {

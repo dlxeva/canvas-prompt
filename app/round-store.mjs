@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { cancelRoundHandoff, clearRoundHandoffCancellation } from './round-lifecycle.mjs'
+import { newestSuccessfulRound } from './round-candidates.mjs'
 
 function temporaryPath(path) {
   return `${path}.${process.pid}.${randomUUID()}.tmp`
@@ -69,29 +70,6 @@ async function tryRead(path) {
   }
 }
 
-async function replacementRound(roundsDir, removedPackageId) {
-  const entries = await readdir(roundsDir, { withFileTypes: true }).catch(() => [])
-  const candidates = []
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === removedPackageId) continue
-    const roundPath = resolve(roundsDir, entry.name)
-    const manifest = await tryRead(resolve(roundPath, 'round.json'))
-    const packageContents = await tryRead(resolve(roundPath, 'prompt-package.json'))
-    if (!manifest || !packageContents) continue
-    try {
-      const parsed = JSON.parse(manifest)
-      // A failed or incomplete compile must never become the active latest
-      // round merely because a newer successful round was deleted.
-      if (parsed?.engine?.ok !== true) continue
-      candidates.push({ exportedAt: String(parsed.exported_at ?? ''), packageContents })
-    } catch {
-      // An incomplete archive is never promoted to the latest pointer.
-    }
-  }
-  candidates.sort((left, right) => right.exportedAt.localeCompare(left.exportedAt))
-  return candidates[0]?.packageContents ?? null
-}
-
 /** Keep mutable latest consistent with immutable per-round storage on deletion. */
 async function deleteRoundAndUpdateLatestLocked({ roundsDir, latestPackagePath, packageId }) {
   const roundPath = resolve(roundsDir, packageId)
@@ -109,8 +87,8 @@ async function deleteRoundAndUpdateLatestLocked({ roundsDir, latestPackagePath, 
       try { latestPackageId = JSON.parse(latestContents)?.meta?.package_id ?? null } catch { /* invalid latest is not promoted */ }
     }
     if (latestPackageId === packageId) {
-      const replacement = await replacementRound(roundsDir, packageId)
-      if (replacement) await writeFileAtomically(latestPackagePath, replacement)
+      const replacement = await newestSuccessfulRound(roundsDir, packageId)
+      if (replacement) await writeFileAtomically(latestPackagePath, replacement.packageContents)
       else await unlink(latestPackagePath).catch((error) => { if (error?.code !== 'ENOENT') throw error })
       latestChanged = true
     }
