@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import test from 'node:test'
 import { deleteRoundAndUpdateLatest, writeFileAtomically } from '../app/round-store.mjs'
+import { contentSha256 } from '../app/round-archive.mjs'
 
 async function setupRound(root, id, exportedAt, transcript, engineOk = true) {
   const path = resolve(root, 'rounds', id)
@@ -60,3 +61,35 @@ test('concurrent atomic writes use collision-proof temporary paths', async (t) =
   assert.ok(['first', 'second', 'third'].includes(await readFile(target, 'utf8')))
   assert.deepEqual((await readdir(root)).filter((name) => name.endsWith('.tmp')), [])
 })
+
+for (const damage of ['invalid_json', 'hash_mismatch', 'package_identity', 'manifest_identity', 'tombstone']) {
+  test(`deleting latest skips a fallback with ${damage}`, async (t) => {
+    const root = await mkdtemp(resolve(tmpdir(), 'canvas-round-store-integrity-'))
+    t.after(() => rm(root, { recursive: true, force: true }))
+    const latest = resolve(root, 'latest-prompt-package.json')
+    await setupRound(root, 'round_a', '2026-01-01T00:00:00.000Z', 'valid legacy round')
+    await setupRound(root, 'round_b', '2026-01-02T00:00:00.000Z', 'damaged newer round')
+    await setupRound(root, 'round_c', '2026-01-03T00:00:00.000Z', 'latest')
+    const rawPath = resolve(root, 'rounds/round_b/prompt-package.json')
+    const manifestPath = resolve(root, 'rounds/round_b/round.json')
+    if (damage === 'invalid_json') await writeFile(rawPath, '{broken')
+    if (damage === 'hash_mismatch') {
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+      manifest.content_sha256 = contentSha256(await readFile(rawPath, 'utf8'))
+      await writeFile(manifestPath, JSON.stringify(manifest))
+      await writeFile(rawPath, JSON.stringify({ meta: { package_id: 'round_b' }, tampered: true }))
+    }
+    if (damage === 'package_identity') await writeFile(rawPath, JSON.stringify({ meta: { package_id: 'another_round' } }))
+    if (damage === 'manifest_identity') {
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+      await writeFile(manifestPath, JSON.stringify({ ...manifest, package_id: 'another_round' }))
+    }
+    if (damage === 'tombstone') {
+      await mkdir(resolve(root, 'deleted-rounds'))
+      await writeFile(resolve(root, 'deleted-rounds/round_b.json'), '')
+    }
+    await writeFile(latest, await readFile(resolve(root, 'rounds/round_c/prompt-package.json')))
+    await deleteRoundAndUpdateLatest({ roundsDir: resolve(root, 'rounds'), latestPackagePath: latest, packageId: 'round_c' })
+    assert.deepEqual(await readFile(latest), await readFile(resolve(root, 'rounds/round_a/prompt-package.json')))
+  })
+}

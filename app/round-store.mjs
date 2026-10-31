@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { mkdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises'
+import { basename, resolve } from 'node:path'
 import { cancelRoundHandoff, clearRoundHandoffCancellation } from './round-lifecycle.mjs'
+import { newestSuccessfulRound } from './round-candidates.mjs'
 
 function temporaryPath(path) {
   return `${path}.${process.pid}.${randomUUID()}.tmp`
@@ -10,16 +11,38 @@ function temporaryPath(path) {
 const roundLocks = new Map()
 const latestLocks = new Map()
 
-/** Serialize writes for one package ID across upload, compile, retry, and delete requests. */
-export async function withRoundLock(packageId, task) {
-  const previous = roundLocks.get(packageId) ?? Promise.resolve()
+/** All callers pass the absolute round directory, never a bare package ID. */
+export async function withRoundLock(roundPath, task) {
+  const key = resolve(roundPath)
+  const previous = roundLocks.get(key) ?? Promise.resolve()
   const current = previous.catch(() => undefined).then(task)
-  roundLocks.set(packageId, current)
+  roundLocks.set(key, current)
   try {
     return await current
   } finally {
-    if (roundLocks.get(packageId) === current) roundLocks.delete(packageId)
+    if (roundLocks.get(key) === current) roundLocks.delete(key)
   }
+}
+
+/** Check mutability inside the same lock used by commit and delete. */
+export async function mutateRound(roundPath, task) {
+  return withRoundLock(roundPath, async () => {
+    const packageId = basename(resolve(roundPath))
+    const tombstone = resolve(roundPath, '..', '..', 'deleted-rounds', `${packageId}.json`)
+    if (await tryRead(tombstone) !== null) throw Object.assign(new Error('本轮已删除。请开始新一轮后重新发送。'), { code: 'ROUND_GONE' })
+    const raw = await tryRead(resolve(roundPath, 'round.json'))
+    let manifest = null
+    if (raw !== null) {
+      try {
+        manifest = JSON.parse(raw)
+        if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw new Error('Invalid manifest')
+      } catch {
+        throw Object.assign(new Error('本轮档案状态损坏，不能追加素材。'), { code: 'ROUND_INCOMPLETE' })
+      }
+    }
+    if (manifest?.engine?.ok === true) throw Object.assign(new Error('本轮已提交，不能再追加素材。'), { code: 'ROUND_COMMITTED' })
+    return task()
+  })
 }
 
 /** Serialize latest-pointer replacement across independent round submissions. */
@@ -41,34 +64,14 @@ export async function writeFileAtomically(path, contents) {
 }
 
 async function tryRead(path) {
-  try { return await readFile(path, 'utf8') } catch { return null }
-}
-
-async function replacementRound(roundsDir, removedPackageId) {
-  const entries = await readdir(roundsDir, { withFileTypes: true }).catch(() => [])
-  const candidates = []
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === removedPackageId) continue
-    const roundPath = resolve(roundsDir, entry.name)
-    const manifest = await tryRead(resolve(roundPath, 'round.json'))
-    const packageContents = await tryRead(resolve(roundPath, 'prompt-package.json'))
-    if (!manifest || !packageContents) continue
-    try {
-      const parsed = JSON.parse(manifest)
-      // A failed or incomplete compile must never become the active latest
-      // round merely because a newer successful round was deleted.
-      if (parsed?.engine?.ok !== true) continue
-      candidates.push({ exportedAt: String(parsed.exported_at ?? ''), packageContents })
-    } catch {
-      // An incomplete archive is never promoted to the latest pointer.
-    }
+  try { return await readFile(path, 'utf8') } catch (error) {
+    if (error?.code === 'ENOENT') return null
+    throw error
   }
-  candidates.sort((left, right) => right.exportedAt.localeCompare(left.exportedAt))
-  return candidates[0]?.packageContents ?? null
 }
 
 /** Keep mutable latest consistent with immutable per-round storage on deletion. */
-export async function deleteRoundAndUpdateLatest({ roundsDir, latestPackagePath, packageId }) {
+async function deleteRoundAndUpdateLatestLocked({ roundsDir, latestPackagePath, packageId }) {
   const roundPath = resolve(roundsDir, packageId)
   const tombstonesDir = resolve(roundsDir, '..', 'deleted-rounds')
   const tombstonePath = resolve(tombstonesDir, `${packageId}.json`)
@@ -84,8 +87,8 @@ export async function deleteRoundAndUpdateLatest({ roundsDir, latestPackagePath,
       try { latestPackageId = JSON.parse(latestContents)?.meta?.package_id ?? null } catch { /* invalid latest is not promoted */ }
     }
     if (latestPackageId === packageId) {
-      const replacement = await replacementRound(roundsDir, packageId)
-      if (replacement) await writeFileAtomically(latestPackagePath, replacement)
+      const replacement = await newestSuccessfulRound(roundsDir, packageId)
+      if (replacement) await writeFileAtomically(latestPackagePath, replacement.packageContents)
       else await unlink(latestPackagePath).catch((error) => { if (error?.code !== 'ENOENT') throw error })
       latestChanged = true
     }
@@ -102,4 +105,9 @@ export async function deleteRoundAndUpdateLatest({ roundsDir, latestPackagePath,
     clearRoundHandoffCancellation(roundPath)
     throw error
   }
+}
+
+export async function deleteRoundAndUpdateLatest(options) {
+  const roundPath = resolve(options.roundsDir, options.packageId)
+  return withRoundLock(roundPath, () => withLatestLock(options.latestPackagePath, () => deleteRoundAndUpdateLatestLocked(options)))
 }

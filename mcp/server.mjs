@@ -53,6 +53,8 @@ const MAX_ARTIFACT_REVIEW_VISUAL_BYTES = 4 * 1024 * 1024;
 // This controls only trusted local artifact reading; latestPackageResponse
 // still strips inline media and caps model-facing text at 1.5MB.
 const MAX_RAW_PACKAGE_BYTES = 256 * 1024 * 1024;
+const MAX_FALLBACK_IDENTITY_VALUE_BYTES = 256;
+const MAX_FALLBACK_SOURCE_PATH_BYTES = 4 * 1024;
 const ROUND_ARTIFACTS = {
   prompt_package: ['prompt-package.json'],
   compact_package: ['engine', 'compact-package.json'],
@@ -186,6 +188,166 @@ function packageEnginePaths(filePath, packageId, rawPackage) {
   };
 }
 
+function isRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function boundedString(value, maxBytes = MAX_FALLBACK_IDENTITY_VALUE_BYTES) {
+  return typeof value === 'string' && Buffer.byteLength(value, 'utf8') <= maxBytes ? value : null;
+}
+
+function boundedPackageId(value) {
+  const candidate = boundedString(value);
+  return candidate && safePackageId(candidate) ? candidate : null;
+}
+
+function addOmittedField(omittedFields, field) {
+  if (!omittedFields.includes(field)) omittedFields.push(field);
+}
+
+function summarizeCanvasSnapshot(snapshot, omittedFields) {
+  if (!isRecord(snapshot)) return null;
+  const summary = {};
+  const final = isRecord(snapshot.final) ? snapshot.final : null;
+  if (final) {
+    const finalSummary = {};
+    if (['available', 'unknown', 'unavailable', 'degraded', 'conflicting'].includes(final.availability)) {
+      finalSummary.availability = final.availability;
+    } else if (Object.hasOwn(final, 'availability')) {
+      addOmittedField(omittedFields, 'canvas_snapshot.final.availability');
+    }
+    for (const key of ['format', 'mime_type']) {
+      const value = boundedString(final[key]);
+      if (value !== null) finalSummary[key] = value;
+      else if (Object.hasOwn(final, key)) addOmittedField(omittedFields, `canvas_snapshot.final.${key}`);
+    }
+    for (const key of ['width', 'height']) {
+      if (Number.isFinite(final[key])) finalSummary[key] = final[key];
+      else if (Object.hasOwn(final, key)) addOmittedField(omittedFields, `canvas_snapshot.final.${key}`);
+    }
+    if (final.inline_data === 'excluded') finalSummary.inline_data = 'excluded';
+    else if (Object.hasOwn(final, 'inline_data')) addOmittedField(omittedFields, 'canvas_snapshot.final.inline_data');
+    if (typeof final.url === 'string' && final.url.startsWith('data:image/')) finalSummary.inline_data = 'excluded';
+    if (Object.hasOwn(final, 'url')) addOmittedField(omittedFields, 'canvas_snapshot.final.url');
+    if (Object.keys(finalSummary).length > 0) summary.final = finalSummary;
+    if (Object.keys(final).some((key) => !['availability', 'format', 'mime_type', 'width', 'height', 'inline_data', 'url'].includes(key))) {
+      addOmittedField(omittedFields, 'canvas_snapshot.final.other_fields');
+    }
+  }
+
+  const sceneBounds = isRecord(snapshot.scene_bounds) ? snapshot.scene_bounds : null;
+  if (sceneBounds) {
+    const boundsSummary = {};
+    for (const key of ['x', 'y', 'width', 'height']) {
+      if (Number.isFinite(sceneBounds[key])) boundsSummary[key] = sceneBounds[key];
+      else if (Object.hasOwn(sceneBounds, key)) addOmittedField(omittedFields, `canvas_snapshot.scene_bounds.${key}`);
+    }
+    if (Object.keys(boundsSummary).length > 0) summary.scene_bounds = boundsSummary;
+    if (Object.keys(sceneBounds).some((key) => !['x', 'y', 'width', 'height'].includes(key))) {
+      addOmittedField(omittedFields, 'canvas_snapshot.scene_bounds.other_fields');
+    }
+  }
+
+  if (Object.hasOwn(snapshot, 'keyframes')) {
+    if (Array.isArray(snapshot.keyframes)) summary.keyframe_count = snapshot.keyframes.length;
+    addOmittedField(omittedFields, 'canvas_snapshot.keyframes');
+  }
+  if (Object.keys(snapshot).some((key) => !['final', 'scene_bounds', 'keyframes'].includes(key))) {
+    addOmittedField(omittedFields, 'canvas_snapshot.other_fields');
+  }
+
+  return Object.keys(summary).length > 0 ? summary : null;
+}
+
+function boundedFallbackPackage(rawPackage) {
+  const omittedFields = [];
+  const packageIndex = { meta: {} };
+  const rawMeta = rawPackage?.meta;
+  let packageId = null;
+
+  if (isRecord(rawMeta)) {
+    if (Object.hasOwn(rawMeta, 'package_id')) {
+      packageId = boundedPackageId(rawMeta.package_id);
+      if (packageId) packageIndex.meta.package_id = packageId;
+      else addOmittedField(omittedFields, 'meta.package_id');
+    }
+    if (Object.hasOwn(rawMeta, 'schema_version')) {
+      const schemaVersion = boundedString(rawMeta.schema_version);
+      if (schemaVersion !== null) packageIndex.meta.schema_version = schemaVersion;
+      else addOmittedField(omittedFields, 'meta.schema_version');
+    }
+    if (Object.keys(rawMeta).some((key) => !['package_id', 'schema_version'].includes(key))) {
+      addOmittedField(omittedFields, 'meta.other_fields');
+    }
+  } else if (Object.hasOwn(rawPackage ?? {}, 'meta')) {
+    addOmittedField(omittedFields, 'meta');
+  }
+
+  if (Object.hasOwn(rawPackage ?? {}, 'package_id')) {
+    const topLevelPackageId = boundedPackageId(rawPackage.package_id);
+    if (!packageId && topLevelPackageId) {
+      packageId = topLevelPackageId;
+      packageIndex.package_id = topLevelPackageId;
+    } else if (!topLevelPackageId) {
+      addOmittedField(omittedFields, 'package_id');
+    }
+  }
+  if (Object.hasOwn(rawPackage ?? {}, 'schema_version')) {
+    const schemaVersion = boundedString(rawPackage.schema_version);
+    if (schemaVersion !== null) packageIndex.schema_version = schemaVersion;
+    else addOmittedField(omittedFields, 'schema_version');
+  }
+
+  const snapshotSummary = summarizeCanvasSnapshot(rawPackage?.canvas_snapshot, omittedFields);
+  if (snapshotSummary) packageIndex.canvas_snapshot = snapshotSummary;
+  else if (Object.hasOwn(rawPackage ?? {}, 'canvas_snapshot')) addOmittedField(omittedFields, 'canvas_snapshot');
+
+  const identityKeys = new Set(['meta', 'package_id', 'schema_version']);
+  for (const key of Object.keys(rawPackage ?? {})) {
+    if (identityKeys.has(key)) continue;
+    if (key === 'canvas_snapshot') continue;
+    if (['transcript', 'timeline', 'objects', 'strokes', 'pointer_track', 'review_items', 'transformations', 'transform_bindings', 'intent_summary', 'source_images'].includes(key)) {
+      addOmittedField(omittedFields, key);
+      if (key === 'pointer_track' && isRecord(rawPackage.pointer_track) && Object.hasOwn(rawPackage.pointer_track, 'samples')) {
+        addOmittedField(omittedFields, 'pointer_track.samples');
+      }
+      continue;
+    }
+    addOmittedField(omittedFields, 'package.other_fields');
+  }
+
+  return { packageIndex, packageId, omittedFields };
+}
+
+function boundedFallbackSource(source, rawPackage, packageId, omittedFields) {
+  const index = {
+    storage_scope: 'single_board_local_archive',
+    package_id: packageId,
+    read_tool: 'get_round_artifact',
+    round_artifacts: Object.keys(ROUND_ARTIFACTS),
+  };
+  if (Array.isArray(rawPackage?.source_images)) index.source_images_count = rawPackage.source_images.length;
+
+  for (const key of ['raw_package_path', 'compact_package_path', 'process_ir_path', 'canvas_snapshot_path']) {
+    const value = source?.[key];
+    if (typeof value === 'string' && Buffer.byteLength(value, 'utf8') <= MAX_FALLBACK_SOURCE_PATH_BYTES) {
+      index[key] = value;
+    } else if (value !== undefined) {
+      addOmittedField(omittedFields, `source.${key}`);
+    }
+  }
+  if (Array.isArray(rawPackage?.source_images) && rawPackage.source_images.length > 0) {
+    addOmittedField(omittedFields, 'source.editable_source_images');
+  }
+  return index;
+}
+
+function serializeJson(value) {
+  const text = JSON.stringify(value);
+  if (typeof text !== 'string') throw new Error('Latest Prompt Package response could not be serialized as JSON.');
+  return text;
+}
+
 function latestPackageResponse(rawPackage, filePath) {
   const packageWithoutInlineImages = stripInlineImageData(rawPackage);
   const response = {
@@ -197,32 +359,69 @@ function latestPackageResponse(rawPackage, filePath) {
       preferred_reading_order: ['compact_package_path', 'process_ir_path', 'raw_package_path'],
     },
   };
-  const text = JSON.stringify(response);
+  const text = serializeJson(response);
   if (Buffer.byteLength(text, 'utf-8') <= MAX_LATEST_PACKAGE_TEXT_BYTES) return text;
 
-  // A pathological raw package can still be oversized because of dense stroke
-  // points. Return the sufficient index rather than silently truncating JSON.
-  return JSON.stringify({
-    package: {
-      meta: packageWithoutInlineImages.meta,
-      transcript: packageWithoutInlineImages.transcript,
-      canvas_snapshot: packageWithoutInlineImages.canvas_snapshot,
-      timeline: packageWithoutInlineImages.timeline,
-      objects: packageWithoutInlineImages.objects,
-      review_items: packageWithoutInlineImages.review_items,
-      transformations: packageWithoutInlineImages.transformations,
-      transform_bindings: packageWithoutInlineImages.transform_bindings,
-      intent_summary: packageWithoutInlineImages.intent_summary,
-    },
-    source: packageEnginePaths(filePath, rawPackage?.meta?.package_id, rawPackage),
+  // A pathological raw package can still be oversized after inline image data
+  // is removed. Keep only a bounded identity and fixed-round artifact index;
+  // callers can progressively read the compact, process, or raw artifact with
+  // get_round_artifact instead of receiving a partially serialized package.
+  const fallback = boundedFallbackPackage(rawPackage);
+  const omittedFields = [...fallback.omittedFields];
+  const source = boundedFallbackSource(response.source, rawPackage, fallback.packageId, omittedFields);
+  const fallbackResponse = {
+    package: fallback.packageIndex,
+    source,
     delivery: {
       inline_image_data: 'excluded',
       max_text_bytes: MAX_LATEST_PACKAGE_TEXT_BYTES,
       output_truncated: true,
-      omitted_fields: ['strokes', 'pointer_track.samples', 'canvas_snapshot.keyframes'],
-      preferred_reading_order: ['compact_package_path', 'process_ir_path', 'raw_package_path'],
+      mode: 'progressive_disclosure',
+      omitted_fields: omittedFields,
+      preferred_reading_order: [
+        ...['compact_package_path', 'process_ir_path', 'raw_package_path'].filter((key) => Object.hasOwn(source, key)),
+        ...(['compact_package_path', 'process_ir_path', 'raw_package_path'].some((key) => Object.hasOwn(source, key))
+          ? []
+          : ['round_artifacts.compact_package', 'round_artifacts.process_ir', 'round_artifacts.prompt_package']),
+      ],
+      next_read: {
+        tool: 'get_round_artifact',
+        package_id: fallback.packageId,
+        artifacts: ['compact_package', 'process_ir', 'prompt_package'],
+      },
+    },
+  };
+  const fallbackText = serializeJson(fallbackResponse);
+  if (Buffer.byteLength(fallbackText, 'utf-8') <= MAX_LATEST_PACKAGE_TEXT_BYTES) return fallbackText;
+
+  // The bounded fallback above should always fit, but retain a final valid
+  // JSON escape hatch so a future constant change cannot return an oversized
+  // or sliced string.
+  const minimumText = serializeJson({
+    package: { meta: fallback.packageId ? { package_id: fallback.packageId } : {} },
+    source: {
+      storage_scope: 'single_board_local_archive',
+      package_id: fallback.packageId,
+      read_tool: 'get_round_artifact',
+      round_artifacts: ['compact_package', 'process_ir', 'prompt_package'],
+    },
+    delivery: {
+      inline_image_data: 'excluded',
+      max_text_bytes: MAX_LATEST_PACKAGE_TEXT_BYTES,
+      output_truncated: true,
+      mode: 'progressive_disclosure',
+      omitted_fields: ['package.*', 'source.local_paths'],
+      next_read: {
+        tool: 'get_round_artifact',
+        package_id: fallback.packageId,
+        artifacts: ['compact_package', 'process_ir', 'prompt_package'],
+      },
     },
   });
+  if (Buffer.byteLength(minimumText, 'utf-8') > MAX_LATEST_PACKAGE_TEXT_BYTES) {
+    throw new Error('Latest Prompt Package response exceeded its UTF-8 byte limit.');
+  }
+  return minimumText;
 }
 
 async function handleGetLatestPromptPackage(args = {}) {

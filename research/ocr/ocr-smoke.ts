@@ -1,4 +1,4 @@
-import { recognizeCanvasText } from './local-ocr'
+import { hasLocalOcrRunner, LocalOcrUnavailableError, recognizeCanvasText, registerPaddleOcrRunner } from './paddleocr-runner'
 
 const output = document.querySelector<HTMLPreElement>('#result')
 const run = document.querySelector<HTMLButtonElement>('#run')
@@ -32,13 +32,15 @@ async function rasterizeSvg(): Promise<Blob> {
 
 run.addEventListener('click', async () => {
   run.disabled = true
-  output.textContent = '正在加载本机 OCR 模型并识别固定中文样图…'
+  output.textContent = '正在加载可选本机 OCR 模型并识别固定中文样图…'
   try {
-    const image = await rasterizeSvg()
-    const result = await recognizeCanvasText(image)
+    if (!hasLocalOcrRunner()) await registerPaddleOcrRunner()
+    const result = await recognizeCanvasText(await rasterizeSvg())
     output.textContent = JSON.stringify(result, null, 2)
   } catch (error) {
-    output.textContent = `OCR smoke failed: ${error instanceof Error ? error.message : String(error)}`
+    output.textContent = error instanceof LocalOcrUnavailableError
+      ? '可选 OCR runner 尚未注册。'
+      : `OCR smoke failed: ${error instanceof Error ? error.message : String(error)}`
   } finally {
     run.disabled = false
   }

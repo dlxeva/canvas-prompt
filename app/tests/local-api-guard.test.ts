@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import {
   authorizeProtectedLocalApi,
+  authorizeProtectedLocalRead,
+  authorizeRuntimeProbe,
   authorizeRuntimeSession,
   enforceProtectedLocalApi,
   isJsonRequest,
@@ -29,6 +31,14 @@ function browserHeaders(overrides: IncomingHttpHeaders = {}): IncomingHttpHeader
 }
 
 describe('local Canvas API browser boundary', () => {
+  it('allows exact-host launcher probes but guards private GET without relying on Origin', () => {
+    expect(authorizeRuntimeProbe({ host: security.expectedHost }, security).ok).toBe(true)
+    expect(authorizeRuntimeProbe({ host: 'attacker.example' }, security).ok).toBe(false)
+    expect(authorizeRuntimeProbe(browserHeaders({ 'sec-fetch-site': 'cross-site' }), security).ok).toBe(false)
+    expect(authorizeProtectedLocalRead(browserHeaders({ origin: undefined }), security).ok).toBe(true)
+    expect(authorizeProtectedLocalRead({ host: security.expectedHost }, security).ok).toBe(false)
+    expect(authorizeProtectedLocalRead(browserHeaders({ 'x-canvas-prompt-token': undefined }), security).ok).toBe(false)
+  })
   it('only issues the runtime session to the exact same-origin browser request', () => {
     expect(authorizeRuntimeSession(browserHeaders(), security)).toEqual({ ok: true })
     expect(authorizeRuntimeSession(browserHeaders({ origin: 'https://attacker.example' }), security).ok).toBe(false)
@@ -62,7 +72,7 @@ describe('local Canvas API browser boundary', () => {
 
 describe('local Canvas API route ordering', () => {
   it('applies authentication and media checks before every protected side effect', async () => {
-    const source = await readFile(fileURLToPath(new URL('../vite.config.ts', import.meta.url)), 'utf8')
+    const source = await readFile(fileURLToPath(new URL('../canvas-api.ts', import.meta.url)), 'utf8')
     const nativeRoute = source.slice(
       source.indexOf("server.middlewares.use('/api/native-pasteboard-image'"),
       source.indexOf("server.middlewares.use('/api/round-audio/'"),
@@ -77,7 +87,6 @@ describe('local Canvas API route ordering', () => {
     )
     const promptRoute = source.slice(
       source.indexOf("server.middlewares.use('/api/prompt-package'"),
-      source.indexOf('    },\n  }\n}'),
     )
 
     expect(nativeRoute.indexOf('enforceProtectedLocalApi')).toBeLessThan(nativeRoute.indexOf('readMacPasteboardPng'))

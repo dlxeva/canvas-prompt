@@ -1,5 +1,5 @@
 /**
- * Local browser OCR adapter.
+ * Local browser OCR observation contract.
  *
  * OCR output is deliberately emitted as observations: it is never allowed to
  * replace the spoken transcript or to assert the meaning of a drawing.
@@ -23,33 +23,13 @@ export interface LocalOcrObservation {
  */
 export const OCR_MODEL_CONTEXT_POLICY = 'review_only' as const
 
-type OcrRunner = {
-  predict(input: Blob): Promise<Array<{
-    items: Array<{ poly: Array<[number, number]>; text: string; score: number }>
-    metrics: { detMs: number; recMs: number; totalMs: number; detectedBoxes: number; recognizedCount: number }
-  }>>
+export type LocalOcrItem = {
+  poly: Array<[number, number] | { x: number; y: number }>
+  text: string
+  score: number
 }
 
-let runnerPromise: Promise<OcrRunner> | null = null
-
-async function getRunner(): Promise<OcrRunner> {
-  if (!runnerPromise) {
-    runnerPromise = (async () => {
-      const { PaddleOCR } = await import('@paddleocr/paddleocr-js')
-      // Keep the first demo implementation conservative: a single-threaded
-      // WASM runtime needs no COOP/COEP configuration and does not interfere
-      // with drawing while a user is actively making marks.
-      return PaddleOCR.create({
-        lang: 'ch',
-        ocrVersion: 'PP-OCRv5',
-        ortOptions: { backend: 'wasm', numThreads: 1, simd: true },
-      }) as unknown as Promise<OcrRunner>
-    })()
-  }
-  return runnerPromise
-}
-
-export function observationsFromOcrItems(items: Array<{ poly: Array<[number, number] | { x: number; y: number }>; text: string; score: number }>): LocalOcrObservation[] {
+export function observationsFromOcrItems(items: LocalOcrItem[]): LocalOcrObservation[] {
   return items
     .filter((item) => item.text.trim() && Number.isFinite(item.score))
     .map((item, index) => {
@@ -72,10 +52,4 @@ export function observationsFromOcrItems(items: Array<{ poly: Array<[number, num
         assertion_level: 'observation',
       }
     })
-}
-
-export async function recognizeCanvasText(image: Blob): Promise<{ observations: LocalOcrObservation[]; elapsed_ms: number }> {
-  const runner = await getRunner()
-  const [result] = await runner.predict(image)
-  return { observations: observationsFromOcrItems(result?.items ?? []), elapsed_ms: result?.metrics.totalMs ?? 0 }
 }

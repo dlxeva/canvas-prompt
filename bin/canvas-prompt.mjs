@@ -92,11 +92,11 @@ const DEFAULT_MANAGED_ASR_PORT = String(MANAGED_ASR_PORT_START)
 const asrUrl = (environment = process.env) => environment.CANVAS_PROMPT_ASR_URL ?? `http://127.0.0.1:${environment.CANVAS_PROMPT_ASR_PORT ?? DEFAULT_MANAGED_ASR_PORT}`
 const runtimeEnvironment = (overrides = {}) => ({ ...process.env, ...overrides, CANVAS_PROMPT_RUNTIME_DIR: runtimeDir() })
 const runBootstrap = (mode) => spawnSync('bash', [resolve(rootDir, 'scripts', 'bootstrap-runtime.sh'), mode], { stdio: 'inherit', env: runtimeEnvironment() })
-const appDependencyFingerprint = () => {
+const appDependencyFingerprint = async () => {
   const sources = [resolve(rootDir, 'app', 'package.json'), resolve(rootDir, 'app', 'package-lock.json')]
-  const hashes = spawnSync('shasum', ['-a', '256', ...sources], { encoding: 'utf8' })
-  if (hashes.error || hashes.status !== 0) return null
-  return createHash('sha256').update(hashes.stdout).digest('hex')
+  // Keep bootstrap-runtime.sh's receipt format without an optional Perl tool.
+  const hashes = await Promise.all(sources.map(async (path) => `${createHash('sha256').update(await readFile(path)).digest('hex')}  ${path}\n`))
+  return createHash('sha256').update(hashes.join('')).digest('hex')
 }
 const launchPreflight = async () => {
   const appReceiptPath = resolve(rootDir, 'app', 'node_modules', '.canvas-prompt-dependency-fingerprint')
@@ -104,7 +104,7 @@ const launchPreflight = async () => {
   const asrVenvPath = resolve(runtimeDir(), 'asr-venv')
   const asrPythonPath = resolve(asrVenvPath, 'bin', 'python')
   try {
-    const expectedAppFingerprint = appDependencyFingerprint()
+    const expectedAppFingerprint = await appDependencyFingerprint()
     const appReceipt = existsSync(appReceiptPath) ? (await readFile(appReceiptPath, 'utf8')).trim() : null
     const appPresent = existsSync(resolve(rootDir, 'app', 'node_modules')) || appReceipt !== null
     const appHealthy = Boolean(expectedAppFingerprint && existsSync(appVitePath) && appReceipt === expectedAppFingerprint)

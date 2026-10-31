@@ -124,6 +124,20 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
         maxOuterHeight,
         chromeHeight,
       }
+      const page = pages[pageNumber - 1]
+      const canvas = canvasRef.current
+      if (page && canvas) {
+        const scale = reviewPageScale(page.width, page.height, nextSize.width, nextSize.height, zoomPercent)
+        const pageWidth = `${Math.max(1, Math.floor(page.width * scale))}px`
+        const pageHeight = `${Math.max(1, Math.floor(page.height * scale))}px`
+        canvas.style.width = pageWidth
+        canvas.style.height = pageHeight
+        const overlay = stage.querySelector('svg')
+        if (overlay instanceof SVGElement) {
+          overlay.style.width = pageWidth
+          overlay.style.height = pageHeight
+        }
+      }
       setStageContentSize((current) => Math.abs(current.width - nextSize.width) < 1
         && Math.abs(current.height - nextSize.height) < 1
         && Math.abs(current.maxOuterHeight - nextSize.maxOuterHeight) < 1
@@ -141,7 +155,7 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
       observer.disconnect()
       window.removeEventListener('resize', updateSize)
     }
-  }, [documentHandle])
+  }, [documentHandle, pageNumber, pages, zoomPercent])
 
   useLayoutEffect(() => {
     const shell = stageShellRef.current
@@ -677,7 +691,7 @@ export default function PdfReviewSpike({ active = true, locale, onLocaleChange, 
           {handoffStatus && <div role="status" style={{ margin: '0 0 12px', padding: 10, borderRadius: 8, background: handoffStatus.includes('未能') ? '#fff1f1' : '#edf8f1', color: handoffStatus.includes('未能') ? '#a61b1b' : '#17643a', fontSize: 14 }}>
             {handoffStatus}
           </div>}
-          <div ref={stageShellRef} className={stageClassName} style={stageStyle}>
+          <div ref={stageShellRef} className={stageClassName} style={stageStyle} data-review-zoom={zoomPercent}>
             <button
               type="button"
               ref={previousEdgeRef}

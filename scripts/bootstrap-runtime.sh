@@ -38,7 +38,17 @@ PYTHON_VERSION="$($PYTHON_BIN -c 'import sys; print(".".join(map(str, sys.versio
 require_version "$PYTHON_VERSION" "3.11.0" "Python"
 
 dependency_fingerprint() {
-  shasum -a 256 "$ROOT_DIR/app/package.json" "$ROOT_DIR/app/package-lock.json" | shasum -a 256 | awk '{print $1}'
+  "$PYTHON_BIN" - "$ROOT_DIR" <<'PY'
+import hashlib
+from pathlib import Path
+import sys
+
+app = Path(sys.argv[1]) / "app"
+# Preserve the previous shasum receipt format without depending on Perl.
+lines = "".join(f"{hashlib.sha256((app / name).read_bytes()).hexdigest()}  {app / name}\n"
+                for name in ("package.json", "package-lock.json"))
+print(hashlib.sha256(lines.encode()).hexdigest())
+PY
 }
 
 EXPECTED_DEPENDENCY_FINGERPRINT="$(dependency_fingerprint)"

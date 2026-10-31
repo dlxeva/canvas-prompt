@@ -43,9 +43,11 @@ const makeCleanCliSource = ({ appHealthy = false } = {}) => {
     mkdirSync(join(vite, '..'), { recursive: true })
     copyFileSync(process.execPath, vite)
     const hashRoot = realpathSync(source)
-    const hashes = spawnSync('shasum', ['-a', '256', join(hashRoot, 'app', 'package.json'), join(hashRoot, 'app', 'package-lock.json')], { encoding: 'utf8' })
-    assert.equal(hashes.status, 0, hashes.stderr)
-    writeFileSync(join(nodeModules, '.canvas-prompt-dependency-fingerprint'), createHash('sha256').update(hashes.stdout).digest('hex'))
+    const hashes = ['package.json', 'package-lock.json'].map((name) => {
+      const path = join(hashRoot, 'app', name)
+      return `${createHash('sha256').update(readFileSync(path)).digest('hex')}  ${path}\n`
+    }).join('')
+    writeFileSync(join(nodeModules, '.canvas-prompt-dependency-fingerprint'), createHash('sha256').update(hashes).digest('hex'))
   }
   return join(source, 'bin', 'canvas-prompt.mjs')
 }
@@ -101,13 +103,26 @@ test('preflight reports repair or upgrade for an unhealthy existing ASR runtime'
 test('preflight reports unknown when a safe dependency inspection is unavailable', () => {
   const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
   const runtime = join(mkdtempSync(join(tmpdir(), 'canvas-prompt-unknown-runtime-parent-')), 'runtime')
-  const result = spawnSync(process.execPath, [cli, 'preflight', '--project', project], {
-    encoding: 'utf8', env: { ...process.env, PATH: '', CANVAS_PROMPT_RUNTIME_DIR: runtime },
+  const cleanCli = makeCleanCliSource()
+  rmSync(resolve(cleanCli, '..', '..', 'app', 'package-lock.json'))
+  const result = spawnSync(process.execPath, [cleanCli, 'preflight', '--project', project], {
+    encoding: 'utf8', env: { ...process.env, CANVAS_PROMPT_RUNTIME_DIR: runtime },
   })
   assert.equal(result.status, 0, result.stderr)
   const report = JSON.parse(result.stdout)
   assert.equal(report.state, 'unknown')
   assert.match(report.setup_expectation, /do not announce a download size/i)
+  assert.equal(existsSync(runtime), false)
+})
+
+test('preflight inspects dependencies without external hash commands on PATH', () => {
+  const cleanCli = makeCleanCliSource()
+  const runtime = join(mkdtempSync(join(tmpdir(), 'canvas-prompt-no-hash-runtime-')), 'runtime')
+  const result = spawnSync(process.execPath, [cleanCli, 'preflight'], {
+    encoding: 'utf8', env: { ...process.env, PATH: '', CANVAS_PROMPT_RUNTIME_DIR: runtime },
+  })
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(JSON.parse(result.stdout).state, 'first_install')
   assert.equal(existsSync(runtime), false)
 })
 
@@ -226,12 +241,47 @@ test('doctor reports a missing package without treating it as a failure', () => 
   assert.equal(typeof report.asr.endpoint, 'string')
 })
 
-test('setup can prepare only the core runtime without changing a global environment', () => {
+test('setup prepares and reuses only an isolated core runtime', (t) => {
   const project = mkdtempSync(join(tmpdir(), 'canvas-prompt-cli-'))
   const home = mkdtempSync(join(tmpdir(), 'canvas-prompt-setup-home-'))
-  const result = runWithEnvironment({ HOME: home }, 'setup', '--core-only', '--project', project)
+  const isolatedCli = makeCleanCliSource()
+  const source = realpathSync(resolve(isolatedCli, '..', '..'))
+  t.after(() => {
+    for (const directory of [project, home, source]) rmSync(directory, { recursive: true, force: true })
+  })
+  mkdirSync(join(source, 'scripts'))
+  copyFileSync(resolve('scripts', 'bootstrap-runtime.sh'), join(source, 'scripts', 'bootstrap-runtime.sh'))
+  const fakeBin = join(source, 'test-bin')
+  const installReceipt = join(source, 'npm-invocation.json')
+  mkdirSync(fakeBin)
+  // Exercise the real CLI/bootstrap without a network install into the checkout
+  // being tested. The separate clean-install/browser gates verify real packages.
+  const fakeNpm = join(fakeBin, 'npm')
+  writeFileSync(fakeNpm, `#!${process.execPath}
+const fs = require('node:fs');
+const path = require('node:path');
+const args = process.argv.slice(2);
+if (args[0] !== '--prefix' || args[1] !== ${JSON.stringify(join(source, 'app'))} || args[2] !== 'ci') process.exit(2);
+fs.writeFileSync(${JSON.stringify(installReceipt)}, JSON.stringify(args));
+const vite = path.join(args[1], 'node_modules', '.bin', 'vite');
+fs.mkdirSync(path.dirname(vite), { recursive: true });
+fs.copyFileSync(process.execPath, vite);
+fs.chmodSync(vite, 0o755);
+`)
+  chmodSync(fakeNpm, 0o755)
+  const environment = { ...process.env, HOME: home, PATH: `${fakeBin}:${process.env.PATH}`, CANVAS_PROMPT_NPM_INSTALL_ATTEMPTS: '1' }
+  const invoke = () => spawnSync(process.execPath, [isolatedCli, 'setup', '--core-only', '--project', project], { encoding: 'utf8', env: environment })
+  const result = invoke()
   assert.equal(result.status, 0, result.stderr)
-  assert.match(result.stderr, /Canvas Prompt app dependencies|Reusing Canvas Prompt app dependencies/)
+  assert.match(result.stderr, /Installing Canvas Prompt app dependencies/)
+  assert.equal(JSON.parse(readFileSync(installReceipt, 'utf8'))[2], 'ci')
+  assert.equal(existsSync(join(home, '.canvas-prompt', 'runtime', 'mcp', 'server.mjs')), true)
+  assert.equal(existsSync(join(home, '.canvas-prompt', 'runtime', 'asr-venv')), false)
+  rmSync(installReceipt)
+  const reused = invoke()
+  assert.equal(reused.status, 0, reused.stderr)
+  assert.match(reused.stderr, /Reusing Canvas Prompt app dependencies/)
+  assert.equal(existsSync(installReceipt), false)
 })
 
 test('launch guidance preference defaults on and can be changed without a project', () => {

@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-const viteConfigPath = fileURLToPath(new URL('../vite.config.ts', import.meta.url))
+const viteConfigPath = fileURLToPath(new URL('../canvas-api.ts', import.meta.url))
 
 describe('Prompt Package persistence handoff contract', () => {
   it('hands the immutable package owned by the archived round to the main thread', async () => {
@@ -38,11 +38,11 @@ describe('Prompt Package persistence handoff contract', () => {
   })
 
   it('archives high-frequency replay as bounded local checkpoint segments before sending the compact package', async () => {
-    const appSource = await readFile(fileURLToPath(new URL('../src/App.tsx', import.meta.url)), 'utf8')
+    const appSource = await readFile(fileURLToPath(new URL('../src/round-export.ts', import.meta.url)), 'utf8')
     const viteSource = await readFile(viteConfigPath, 'utf8')
 
-    expect(appSource).toContain('splitRawTraceSegments(trace.current)')
-    expect(appSource).toContain('/api/round-trace-segment/${packageToExport.meta.package_id}/')
+    expect(appSource).toContain('splitRawTraceSegments(rawTrace)')
+    expect(appSource).toContain('/api/round-trace-segment/${packageId}/')
     expect(appSource).toContain("source: { canvas: 'excalidraw', audio:")
     expect(viteSource).toContain("server.middlewares.use('/api/round-trace-segment/'")
     expect(viteSource).toContain("'raw-trace.ndjson.gz or raw-trace-segments/ when available'")
@@ -58,7 +58,8 @@ describe('Prompt Package persistence handoff contract', () => {
 
     expect(appSource).toContain('setAsrPreparing(false)')
     expect(appSource).toContain('本轮会保留画布过程；尚未就绪的语音不会转写。')
-    expect(appSource).toContain('audio: recordingToArchive ?')
+    const exporter = await readFile(fileURLToPath(new URL('../src/round-export.ts', import.meta.url)), 'utf8')
+    expect(exporter).toContain('audio: recordingToArchive ?')
   })
 
   it('keeps compile retries and late media writes inside the package identity boundary', async () => {
@@ -66,7 +67,7 @@ describe('Prompt Package persistence handoff contract', () => {
     const archiveSource = await readFile(fileURLToPath(new URL('../round-archive.mjs', import.meta.url)), 'utf8')
     const storeSource = await readFile(fileURLToPath(new URL('../round-store.mjs', import.meta.url)), 'utf8')
 
-    expect(source).toContain('assertRoundMutable(packageId)')
+    expect(source).toContain('mutateRound(resolve(roundsDir, packageId)')
     expect(source).toContain("code === 'ROUND_COMMITTED' ? 409")
     expect(source).toContain("code === 'ROUND_GONE' ? 410")
     expect(archiveSource).toContain('retryable: !engine.ok')
